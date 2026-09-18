@@ -1,7 +1,9 @@
 # Security policy
 
-SportPad is currently a public-source, pre-mainnet product prototype. Token creation,
-swaps, signing, custody, rewards, burns, and cross-chain execution are disabled.
+SportPad is currently a public-source, pre-mainnet product prototype. Wallet-approved,
+valueless Pump coin creation and creator-fee configuration are enabled only on Solana
+devnet. Mainnet token creation, mainnet signing, swaps, custody, rewards, burns, and
+cross-chain execution remain disabled.
 
 ## Reporting a vulnerability
 

@@ -19,7 +19,7 @@ export default function HowItWorksPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="How SportPad is designed" title="From creator fees to holder rewards, with every state exposed." copy="The planned system links Solana community coins to official Fan Token rewards. Fee indexing, reward vaults, epochs, and claims are not deployed yet.">
+        <PageIntro kicker="How SportPad is designed" title="From creator fees to holder rewards, with every state exposed." copy="The planned system links Solana community coins to official Fan Token rewards. Pump devnet coin creation and the one-time 80/20 creator-fee lock are available now. Fee indexing, swaps, reward vaults, epochs, and claims are not deployed yet.">
           <div className="route-mini"><span>TRADE</span><ArrowRight /><strong>80 / 20</strong><ArrowRight /><span>REWARD + BURN</span></div>
         </PageIntro>
         <SafetyNotice>Linked does not mean paired. A community coin usually trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token.</SafetyNotice>

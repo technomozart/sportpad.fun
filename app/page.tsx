@@ -65,7 +65,7 @@ export default function Home() {
         </section>
 
         <section className="protocol-stats page-wrap" aria-label="Current protocol deployment status">
-          <div><span>Mainnet execution</span><strong>Not deployed</strong><small>Draft builder only</small></div>
+          <div><span>Mainnet execution</span><strong>Not deployed</strong><small>Pump devnet testing available</small></div>
           <div><span>Official Solana Fan Tokens</span><strong>{fanAssets.length}</strong><small>Exact mints registry-listed</small></div>
           <div><span>Reward vaults and claims</span><strong>Not deployed</strong><small>No balances or positions</small></div>
           <div><span>SPORTPAD main token</span><strong>Not deployed</strong><small>No burns have occurred</small></div>
@@ -105,7 +105,7 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens publish Solana mints.`} copy="The official image, name, symbol, and exact mint come from the FanTokens and Chiliz registry. SportPad execution remains disabled until route and vault checks are built." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens publish Solana mints.`} copy="The official image, name, symbol, and exact mint come from the FanTokens and Chiliz registry. Mainnet acquisition and reward vault execution remain disabled until route and vault checks are built." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
           <div className="asset-directory">
             <div className="asset-directory-head"><span>Official Fan Token</span><span>Solana mint</span><span>Reward route</span><span>Vault</span></div>
             {fanAssets.slice(0, 5).map((asset) => (
@@ -127,7 +127,7 @@ export default function Home() {
         <section className="page-section page-wrap transparency-preview">
           <div className="transparency-copy">
             <p className="section-eyebrow">Proof of rewards</p><h2>Every real event will need a receipt.</h2>
-            <p>The transparency explorer separates fee collection, swaps, inventory, epochs, claims, and SPORTPAD burns. It stays empty while execution is disabled.</p>
+            <p>The transparency explorer separates fee collection, swaps, inventory, epochs, claims, and SPORTPAD burns. It stays empty until mainnet economic execution is enabled.</p>
             <div className="proof-list"><span><BarChart3 /> Finality and reconciliation state</span><span><Trophy /> Reward purchase and vault reservation</span><span><Flame /> SPORTPAD buyback and verified burn</span><span><ShieldCheck /> Pauses, exceptions, and safe retries</span></div>
             <Button asChild variant="outline" className="mt-7 rounded-full border-white/12 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">Open transparency explorer <ArrowRight /></Link></Button>
           </div>

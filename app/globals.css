@@ -217,7 +217,7 @@ a { text-decoration: none; }
 .page-stat-card, .matchday-live-card, .transparency-fresh { display: flex; min-width: 210px; flex-direction: column; align-items: flex-start; gap: 3px; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; padding: 18px; background: rgba(255,255,255,.025); }
 .page-stat-card > strong, .matchday-live-card > strong { margin-top: 8px; font-size: 2.2rem; letter-spacing: -.06em; }
 .page-stat-card > span, .page-stat-card > small, .matchday-live-card > small { color: rgba(255,255,255,.36); font-size: .68rem; }
-.safety-notice { display: flex; align-items: flex-start; gap: 11px; margin-top: 24px; border: 1px solid rgba(156,255,87,.14); border-radius: 13px; padding: 12px 15px; background: rgba(156,255,87,.035); color: rgba(255,255,255,.52); font-size: .74rem; line-height: 1.6; }
+.safety-notice { display: flex; align-items: flex-start; gap: 11px; margin-top: 24px; border: 1px solid rgba(156,255,87,.14); border-radius: 13px; padding: 13px 15px; background: rgba(156,255,87,.035); color: rgba(255,255,255,.58); font-size: .82rem; line-height: 1.6; }
 .safety-notice svg { flex: 0 0 auto; width: 16px; margin-top: 2px; color: #9cff57; }
 .demo-badge { display: inline-flex; width: max-content; align-items: center; gap: 6px; border: 1px solid rgba(255,205,92,.18); border-radius: 999px; padding: 5px 8px; background: rgba(255,205,92,.06); color: #ffd86a; font-size: .6rem; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; }
 .demo-badge > span { width: 5px; height: 5px; border-radius: 50%; background: #ffd86a; }

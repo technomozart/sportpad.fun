@@ -109,7 +109,7 @@ export default function PolicyPage() {
           <SectionHeading
             eyebrow="Launch lifecycle"
             title="Saving a draft is the beginning, not an approval."
-            copy="The current builder creates a private concept record only. Token creation, trading, fee routing, and mainnet settlement remain disabled."
+            copy="The builder saves a private concept record. Wallet-approved Pump coin creation and the 80/20 creator-fee lock are available only on valueless devnet. Trading, automated fee processing, rewards, and mainnet settlement remain disabled."
           />
           <div className="process-timeline">
             {lifecycle.map((stage, index) => (

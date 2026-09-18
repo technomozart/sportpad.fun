@@ -35,9 +35,9 @@ export async function GET() {
   return Response.json(
     {
       status,
-      mode: "private-prototype",
+      mode: "devnet-testing",
       providers,
-      // Deliberately hard-locked. Provider credentials enable read-only canaries only.
+      // Deliberately hard-locked. Helius also verifies finalized devnet evidence.
       mainnetExecution: false,
     },
     {

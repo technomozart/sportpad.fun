@@ -15,6 +15,14 @@ export const launchDrafts = sqliteTable(
     imageKey: text("image_key"),
     imageMime: text("image_mime"),
     imageSize: integer("image_size"),
+    creatorWallet: text("creator_wallet"),
+    devnetMetadataUri: text("devnet_metadata_uri"),
+    devnetMint: text("devnet_mint"),
+    devnetCreateSignature: text("devnet_create_signature"),
+    devnetFeeSignature: text("devnet_fee_signature"),
+    devnetRewardWallet: text("devnet_reward_wallet"),
+    devnetBurnWallet: text("devnet_burn_wallet"),
+    devnetVerifiedAt: text("devnet_verified_at"),
     rightsAttested: integer("rights_attested", { mode: "boolean" }).notNull().default(false),
     unofficialAttested: integer("unofficial_attested", { mode: "boolean" }).notNull().default(false),
     economicsAttested: integer("economics_attested", { mode: "boolean" }).notNull().default(false),
@@ -29,6 +37,73 @@ export const launchDrafts = sqliteTable(
   (table) => [
     index("idx_launch_drafts_owner_created").on(table.ownerUserId, table.createdAt),
     index("idx_launch_drafts_status").on(table.status),
+    uniqueIndex("idx_launch_drafts_devnet_mint").on(table.devnetMint),
+    uniqueIndex("idx_launch_drafts_devnet_create_signature").on(table.devnetCreateSignature),
+    uniqueIndex("idx_launch_drafts_devnet_fee_signature").on(table.devnetFeeSignature),
+  ],
+);
+
+export const walletChallenges = sqliteTable(
+  "wallet_challenges",
+  {
+    id: text("id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    walletAddress: text("wallet_address").notNull(),
+    message: text("message").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    usedAt: integer("used_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_wallet_challenges_owner_wallet").on(table.ownerUserId, table.walletAddress),
+    index("idx_wallet_challenges_expires").on(table.expiresAt),
+  ],
+);
+
+export const walletSessions = sqliteTable(
+  "wallet_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    walletAddress: text("wallet_address").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    lastUsedAt: integer("last_used_at").notNull(),
+  },
+  (table) => [
+    index("idx_wallet_sessions_owner_wallet").on(table.ownerUserId, table.walletAddress),
+    index("idx_wallet_sessions_expires").on(table.expiresAt),
+  ],
+);
+
+export const devnetSubmissions = sqliteTable(
+  "devnet_submissions",
+  {
+    id: text("id").primaryKey(),
+    draftId: text("draft_id").notNull().references(() => launchDrafts.id),
+    ownerUserId: text("owner_user_id").notNull(),
+    kind: text("kind").notNull(),
+    mint: text("mint").notNull(),
+    creatorWallet: text("creator_wallet").notNull().default(""),
+    metadataUri: text("metadata_uri").notNull().default(""),
+    rewardWallet: text("reward_wallet").notNull().default(""),
+    burnWallet: text("burn_wallet").notNull().default(""),
+    tokenName: text("token_name").notNull().default(""),
+    tokenSymbol: text("token_symbol").notNull().default(""),
+    signature: text("signature").notNull(),
+    blockhash: text("blockhash").notNull(),
+    lastValidBlockHeight: integer("last_valid_block_height").notNull(),
+    status: text("status").notNull().default("recorded"),
+    verifiedSlot: integer("verified_slot"),
+    invalidBlockhashObservedAt: integer("invalid_blockhash_observed_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_devnet_submissions_draft_kind").on(table.draftId, table.kind),
+    uniqueIndex("idx_devnet_submissions_signature").on(table.signature),
+    uniqueIndex("idx_devnet_submissions_mint_kind").on(table.mint, table.kind),
+    index("idx_devnet_submissions_owner_status").on(table.ownerUserId, table.status),
   ],
 );
 

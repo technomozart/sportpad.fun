@@ -54,7 +54,8 @@ test("draft API requires one bounded multipart image and returns only a private 
   assert.match(routeSource, /launchDraftPayloadSchema\.safeParse/);
   assert.match(routeSource, /imageStored: true/);
   assert.doesNotMatch(routeSource, /artworkStored/);
-  assert.match(routeSource, /const \{ imageKey, \.\.\.safeDraft \} = draft/);
+  assert.match(routeSource, /const \{ imageKey, ownerUserId: _ownerUserId, \.\.\.safeDraft \} = draft/);
+  assert.match(routeSource, /void _ownerUserId/);
   assert.match(imageRouteSource, /eq\(launchDrafts\.ownerUserId, ownerUserId\)/);
   assert.match(imageRouteSource, /X-Content-Type-Options/);
   assert.match(imageRouteSource, /Cache-Control.*private, no-store/);
@@ -70,4 +71,31 @@ test("launch builder keeps description optional and verifies decoded image stora
   assert.match(builderSource, /createImageBitmap\(file\)/);
   assert.match(builderSource, /body\.imageStored !== true/);
   assert.doesNotMatch(builderSource, /artworkStored/);
+});
+
+test("devnet launch records signed evidence before broadcast and finalizes with database guards", () => {
+  const clientSource = readProjectFile("lib", "client", "pump-devnet.ts");
+  const routeSource = readProjectFile("app", "api", "launch-drafts", "[id]", "devnet", "route.ts");
+  const verifierSource = readProjectFile("lib", "server", "solana", "devnet.ts");
+  const schemaSource = readProjectFile("db", "schema.ts");
+
+  assert.ok(
+    clientSource.indexOf("await onSubmitted") < clientSource.indexOf("sendRawTransaction"),
+    "signed evidence must be persisted before the transaction is broadcast",
+  );
+  assert.match(routeSource, /record_create_submission/);
+  assert.match(routeSource, /record_fee_submission/);
+  assert.match(routeSource, /publicationAccepted/);
+  assert.match(routeSource, /isNull\(launchDrafts\.devnetCreateSignature\)/);
+  assert.match(routeSource, /isNull\(launchDrafts\.devnetFeeSignature\)/);
+  assert.match(routeSource, /exactSubmissionWhere\(recorded, "recorded"\)/);
+  assert.match(routeSource, /creatorWallet: recorded\.creatorWallet/);
+  assert.match(routeSource, /metadataUri: recorded\.metadataUri/);
+  assert.match(routeSource, /invalidBlockhashObservedAt: Date\.now\(\)/);
+  assert.match(verifierSource, /isBlockhashValid\(/);
+  assert.match(verifierSource, /INVALID_BLOCKHASH_GRACE_MS/);
+  assert.match(schemaSource, /idx_launch_drafts_devnet_mint/);
+  assert.match(schemaSource, /idx_devnet_submissions_signature/);
+  assert.match(schemaSource, /creatorWallet: text\("creator_wallet"\)/);
+  assert.match(schemaSource, /invalidBlockhashObservedAt: integer\("invalid_blockhash_observed_at"\)/);
 });

@@ -1,0 +1,1 @@
+ALTER TABLE `devnet_submissions` ADD `invalid_blockhash_observed_at` integer;

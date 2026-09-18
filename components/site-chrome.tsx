@@ -27,6 +27,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { fanAssets } from "@/lib/site-data";
+import { SolanaWalletSessionProvider, useSolanaWalletSession } from "@/components/solana-wallet-session";
 
 const navigation = [
   { href: "/discover", label: "Discover" },
@@ -44,118 +45,32 @@ type WebMCPTool = {
   execute: (input: Record<string, unknown>) => unknown | Promise<unknown>;
 };
 
-type SolanaProvider = {
-  connect: () => Promise<{ publicKey: { toString: () => string } }>;
-  disconnect?: () => Promise<void>;
-  publicKey?: { toString: () => string } | null;
-  on?: (event: "accountChanged" | "disconnect", handler: (publicKey?: { toString: () => string } | null) => void) => void;
-  removeListener?: (event: "accountChanged" | "disconnect", handler: (publicKey?: { toString: () => string } | null) => void) => void;
-};
-
-const WALLET_SESSION_KEY = "sportpad:wallet-address";
-
-function readSolanaProvider() {
-  const browser = window as typeof window & {
-    solana?: SolanaProvider;
-    phantom?: { solana?: SolanaProvider };
-  };
-  return browser.phantom?.solana ?? browser.solana;
-}
-
 function WalletButton() {
-  const [address, setAddress] = useState("");
-  const [message, setMessage] = useState("");
-  const [messageTone, setMessageTone] = useState<"success" | "error" | "neutral">("neutral");
-  const [connecting, setConnecting] = useState(false);
-
-  useEffect(() => {
-    const provider = readSolanaProvider();
-    const storedAddress = window.sessionStorage.getItem(WALLET_SESSION_KEY) ?? "";
-    const providerAddress = provider?.publicKey?.toString() ?? "";
-    const activeAddress = providerAddress && (!storedAddress || storedAddress === providerAddress) ? providerAddress : "";
-    const timer = window.setTimeout(() => {
-      setAddress(activeAddress);
-      if (!activeAddress) window.sessionStorage.removeItem(WALLET_SESSION_KEY);
-    }, 0);
-
-    const handleAccountChanged = (publicKey?: { toString: () => string } | null) => {
-      const nextAddress = publicKey?.toString() ?? "";
-      setAddress(nextAddress);
-      setMessage(nextAddress ? "Wallet account changed." : "Wallet disconnected from this SportPad session.");
-      setMessageTone(nextAddress ? "success" : "neutral");
-      if (nextAddress) window.sessionStorage.setItem(WALLET_SESSION_KEY, nextAddress);
-      else window.sessionStorage.removeItem(WALLET_SESSION_KEY);
-    };
-    const handleDisconnect = () => handleAccountChanged(null);
-    provider?.on?.("accountChanged", handleAccountChanged);
-    provider?.on?.("disconnect", handleDisconnect);
-
-    return () => {
-      window.clearTimeout(timer);
-      provider?.removeListener?.("accountChanged", handleAccountChanged);
-      provider?.removeListener?.("disconnect", handleDisconnect);
-    };
-  }, []);
-
-  async function connectWallet() {
-    setConnecting(true);
-    setMessage("");
-    setMessageTone("neutral");
-    try {
-      const provider = readSolanaProvider();
-      if (!provider) throw new Error("No compatible injected Solana wallet was detected in this browser.");
-      const result = await provider.connect();
-      const connectedAddress = result.publicKey.toString();
-      setAddress(connectedAddress);
-      window.sessionStorage.setItem(WALLET_SESSION_KEY, connectedAddress);
-      setMessage("Connected for this browser session.");
-      setMessageTone("success");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Wallet connection failed.");
-      setMessageTone("error");
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  async function disconnectWallet() {
-    setConnecting(true);
-    try {
-      await readSolanaProvider()?.disconnect?.();
-    } catch {
-      // Some injected providers do not expose disconnect. Clearing the local
-      // session still prevents SportPad from treating the address as active.
-    } finally {
-      window.sessionStorage.removeItem(WALLET_SESSION_KEY);
-      setAddress("");
-      setMessage("Wallet disconnected from this SportPad session.");
-      setMessageTone("neutral");
-      setConnecting(false);
-    }
-  }
+  const { wallet, busy, message, messageTone, providerAvailable, connectAndVerify, disconnect } = useSolanaWalletSession();
 
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button aria-label={address ? `Connected wallet ${address}` : "Connect wallet"} variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+        <Button aria-label={wallet ? `Verified wallet ${wallet}` : "Connect wallet"} variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
           <Wallet className="size-4" />
-          <span>{address ? `${address.slice(0, 4)}…${address.slice(-4)}` : "Connect wallet"}</span>
+          <span>{wallet ? `${wallet.slice(0, 4)}...${wallet.slice(-4)}` : "Connect wallet"}</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="border-white/10 bg-[#0b100d] text-white sm:max-w-[460px]">
         <DialogHeader>
-          <DialogTitle>Connect one Solana wallet</DialogTitle>
+          <DialogTitle>Verify one Solana wallet</DialogTitle>
           <DialogDescription className="leading-relaxed text-white/45">
-            This preview connects one Solana wallet. In the planned product, that wallet could hold community tokens and receive supported Fan Token claims after claims are deployed. SportPad never asks for a seed phrase or private key.
+            Sign one plain-text challenge to prove wallet ownership. The signature creates a private SportPad session and does not authorize a transaction or spend SOL.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 rounded-2xl border border-white/8 bg-white/[0.025] p-4 text-sm text-white/50">
-          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> Any future transaction would require wallet approval.</p>
-          <p>This preview connects to a compatible Solana wallet already installed in the browser. The address is remembered only for this tab session.</p>
-          {address ? <p className="break-all font-mono text-xs text-white/65">{address}</p> : null}
+          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> Every devnet transaction still requires a separate wallet approval.</p>
+          <p>SportPad never asks for a seed phrase or private key. Wallet sessions expire automatically.</p>
+          {!providerAvailable ? <p className="text-[#ffcf66]">Install or enable a compatible injected Solana wallet in this browser.</p> : null}
+          {wallet ? <p className="break-all font-mono text-xs text-white/65">{wallet}</p> : null}
         </div>
         {message ? <p role="status" className={`text-sm ${messageTone === "success" ? "text-[#a9ff74]" : messageTone === "error" ? "text-[#ff8f94]" : "text-white/65"}`}>{message}</p> : null}
-        {address ? <Button onClick={disconnectWallet} disabled={connecting} variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">{connecting ? "Disconnecting…" : "Disconnect or change wallet"}</Button> : <Button onClick={connectWallet} disabled={connecting} className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">{connecting ? "Connecting…" : "Connect detected wallet"}</Button>}
+        {wallet ? <Button onClick={disconnect} disabled={busy} variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">{busy ? "Disconnecting..." : "Disconnect or change wallet"}</Button> : <Button onClick={connectAndVerify} disabled={busy || !providerAvailable} className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">{busy ? "Waiting for wallet..." : "Connect and verify"}</Button>}
       </DialogContent>
     </Dialog>
   );
@@ -211,7 +126,7 @@ function WebMCPRegistry() {
   return null;
 }
 
-export function SiteChrome({ children }: { children: ReactNode }) {
+function SiteChromeContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -285,4 +200,8 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       </nav>
     </div>
   );
+}
+
+export function SiteChrome({ children }: { children: ReactNode }) {
+  return <SolanaWalletSessionProvider><SiteChromeContent>{children}</SiteChromeContent></SolanaWalletSessionProvider>;
 }

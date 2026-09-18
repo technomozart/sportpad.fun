@@ -31,7 +31,8 @@ function errorMessage(error: unknown) {
 }
 
 function serializeDraft(draft: typeof launchDrafts.$inferSelect) {
-  const { imageKey, ...safeDraft } = draft;
+  const { imageKey, ownerUserId: _ownerUserId, ...safeDraft } = draft;
+  void _ownerUserId;
   return {
     ...safeDraft,
     imageUrl: imageKey ? `/api/launch-drafts/${encodeURIComponent(draft.id)}/image` : null,

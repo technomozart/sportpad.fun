@@ -7,14 +7,19 @@ import { SiteLink as Link } from "@/components/site-link";
 import { fanAssets, getLaunch, launches } from "@/lib/site-data";
 import { getPublicLaunch, getPublicLaunches } from "@/lib/server/public-launches";
 
-export function generateStaticParams() {
-  return launches.map((launch) => ({ slug: launch.slug }));
-}
-
 export default async function LaunchDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   let launch = getLaunch(slug);
-  if (!launch) {
+  if (launch) {
+    let liveLaunchExists = false;
+    try {
+      liveLaunchExists = (await getPublicLaunches(1)).length > 0;
+    } catch (error) {
+      console.error("example_visibility_check_failed", error);
+      notFound();
+    }
+    if (liveLaunchExists) notFound();
+  } else {
     try {
       launch = await getPublicLaunch(slug);
     } catch (error) {

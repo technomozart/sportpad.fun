@@ -10,12 +10,12 @@ export default function TransparencyPage() {
       <main className="page-wrap inner-page">
         <PageIntro
           kicker="Proof of Rewards"
-          title="Protocol evidence will appear here after deployment."
-          copy="No mainnet fee, reward, claim, or SPORTPAD burn events exist in this build. SportPad will publish only records backed by source transactions and reconciled balances."
+          title="Mainnet economic evidence will appear here after deployment."
+          copy="No mainnet fee, reward, claim, or SPORTPAD burn events exist in this build. Private drafts can record verified Pump devnet creation and fee-share transactions. SportPad will publish only records backed by source transactions and reconciled balances."
         >
           <div className="transparency-fresh">
             <Radio />
-            <span><strong>No events yet</strong><small>Mainnet execution is disabled</small></span>
+            <span><strong>No mainnet events yet</strong><small>Mainnet execution is disabled</small></span>
           </div>
         </PageIntro>
 
@@ -48,8 +48,8 @@ export default function TransparencyPage() {
         <section className="page-section">
           <SectionHeading
             eyebrow="Settlement explorer"
-            title="No protocol events yet."
-            copy="When execution is deployed, each row must link to its source transaction, reconciliation state, and final evidence."
+            title="No mainnet settlement events yet."
+            copy="When mainnet settlement is deployed, each row must link to its source transaction, reconciliation state, and final evidence."
           />
           <div className="source-panel">
             <div><Radio /><span><strong>No events yet</strong><small>The fee indexer and settlement workers are not deployed</small></span></div>
@@ -80,7 +80,7 @@ export default function TransparencyPage() {
 
         <div className="incident-note">
           <AlertTriangle />
-          <div><strong>No mainnet execution is active.</strong><p>Treasury addresses, transaction links, settlement batches, reward vaults, claims, and SPORTPAD burn proofs will appear only after those systems are deployed and independently verifiable.</p></div>
+          <div><strong>No mainnet execution is active.</strong><p>Production treasury addresses, mainnet transaction links, settlement batches, reward vaults, claims, and SPORTPAD burn proofs will appear only after those systems are deployed and independently verifiable.</p></div>
         </div>
       </main>
     </SiteChrome>

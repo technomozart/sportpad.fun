@@ -1,7 +1,8 @@
 # SPORTPAD architecture
 
-Status: product interface and private draft storage are implemented. Mainnet
-execution is deliberately disabled.
+Status: product interface, private draft storage, wallet authentication, and a
+wallet-approved Pump devnet launch path are implemented. Mainnet execution is
+deliberately disabled.
 
 ## Implemented application path
 
@@ -10,6 +11,18 @@ Launch builder
   -> POST /api/launch-drafts
   -> draft metadata in Cloudflare D1
   -> validated image bytes in private Cloudflare R2
+
+Wallet verification
+  -> one-time signed challenge bound to solana:devnet
+  -> Ed25519 verification on the server
+  -> opaque HttpOnly wallet session, hashed in D1
+
+Saved draft devnet test
+  -> Pump metadata URI
+  -> wallet-approved Pump V2 coin creation
+  -> finalized creator, mint, and bonding-curve verification
+  -> wallet-approved 8,000 / 2,000 bps creator-fee configuration
+  -> finalized recipient and revoked-admin verification
 
 Public discovery
   -> GET /api/public-launches
@@ -47,12 +60,43 @@ not liquidity, inventory, or execution readiness.
 - R2 stores uploaded draft images under per-draft object keys. D1 stores only
   the object key, MIME type, and byte size.
 - Drizzle migrations are versioned in `drizzle/`. Migration `0002` adds the
-  image metadata columns required by the upload flow.
+  image metadata columns required by the upload flow. Migration `0003` adds
+  signed-wallet challenges, opaque wallet sessions, and verified Pump devnet
+  evidence. Migration `0004` adds durable pre-broadcast transaction submissions
+  and unique mint and signature constraints. Migration `0005` adds the immutable
+  creator and configuration snapshot used to verify each exact signed attempt.
+  Migration `0006` adds the persisted blockhash-invalidity observation used to
+  prevent an edge-of-window transaction from being replaced prematurely.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
 The fee, settlement, epoch, and claim tables are forward-looking schemas. Their
-presence does not mean those workers, programs, or economic actions are live.
+presence does not mean those workers or economic actions are live.
+
+## Implemented devnet coordinator
+
+The creator supplies two distinct public Solana addresses, one for the 80%
+reward treasury and one for the 20% SPORTPAD treasury. SportPad does not create
+or retain either treasury's private key.
+
+Pump V2 creates a SOL-paired Token-2022 community coin on devnet. The browser
+keeps the new mint signer only long enough to co-sign coin creation; the creator
+wallet separately approves the transaction. There is no initial buy and Pump's
+own holder-reward mode stays off.
+
+The second wallet approval creates Pump's canonical fee-sharing configuration
+and locks the exact 8,000 / 2,000 bps recipients. SportPad marks the draft
+verified only after server-side finalized RPC checks confirm the Pump programs,
+creator, mint, bonding curve, two shareholders, and revoked fee-share admin.
+Each signed transaction is recorded in D1 before broadcast. Conditional final
+writes and unique database indexes prevent concurrent requests from attaching
+different mints or signatures to the same draft. Verification reads the immutable
+submission snapshot, so a racing browser tab cannot change the creator, metadata,
+or treasury recipients underneath an already signed transaction.
+
+This is execution testing, not a mainnet product. Devnet SOL and devnet tokens
+have no intended value. The fee split does not acquire Fan Tokens, distribute
+rewards, buy SPORTPAD, or burn supply.
 
 ## Proposed economic model
 
@@ -80,15 +124,14 @@ For a funded reward epoch `F` and wallet token-seconds `t_i`:
 All onchain quantities must remain atomic-unit integer strings. Decimals and
 authorities must be read from chain state.
 
-## Planned execution components
+## Planned mainnet execution components
 
 None of the following are deployed today:
 
-1. **Launch coordinator**
-   - Creates the Solana community-token mint.
-   - Configures an exact 8,000 bps reward share and 2,000 bps SPORTPAD buyback
-     share before public trading.
-   - Verifies addresses and basis points before finalizing any authority.
+1. **Production launch coordinator**
+   - Reuses the verified devnet flow only after dependency review, transaction
+     limits, monitoring, policy controls, and an external security review.
+   - Publishes the production mint and fee-sharing evidence before trading.
 
 2. **Fee indexer and settlement keeper**
    - Observes pre-graduation and post-graduation creator-fee paths.

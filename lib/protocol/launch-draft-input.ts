@@ -28,7 +28,7 @@ const attestationsSchema = z
 
 export const launchDraftPayloadSchema = z
   .object({
-    name: z.string().trim().min(2, "Coin name must be 2-48 characters.").max(48, "Coin name must be 2-48 characters."),
+    name: z.string().trim().min(2, "Coin name must be 2-32 characters.").max(32, "Coin name must be 2-32 characters."),
     symbol: z
       .string()
       .trim()

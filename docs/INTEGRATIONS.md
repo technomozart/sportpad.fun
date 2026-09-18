@@ -1,7 +1,9 @@
 # Integration checklist
 
 Mainnet execution is disabled. Current integrations support private draft
-storage, public records, official asset identity, and read-only provider health.
+storage, signed Solana wallet sessions, wallet-approved Pump devnet launches,
+finalized onchain verification, public records, official asset identity, and
+read-only provider health.
 
 ## Implemented infrastructure
 
@@ -22,6 +24,34 @@ storage, public records, official asset identity, and read-only provider health.
   the matching D1 record has `live` status.
 - A failed draft insert removes the newly uploaded object.
 
+### Solana wallet verification
+
+- The browser requests a five-minute, single-use challenge bound to the current
+  domain, URI, wallet address, and `solana:devnet`.
+- The server verifies the Ed25519 signature and stores only a hash of a random
+  24-hour session token in D1.
+- The browser receives an HttpOnly, SameSite wallet-session cookie. Connecting
+  a wallet alone never authenticates a launch request.
+- Every devnet transaction still requires a separate wallet approval.
+
+### Pump devnet
+
+- The saved draft image and metadata are uploaded through Pump's metadata
+  endpoint only after the user explicitly accepts public IPFS publication and
+  starts the devnet flow.
+- The creator wallet signs Pump V2 coin creation with no initial buy, mayhem,
+  cashback, or Pump holder-reward mode.
+- The creator wallet separately signs an exact 8,000 / 2,000 bps fee-sharing
+  configuration for the reward and SPORTPAD treasury addresses.
+- SportPad verifies finalized transactions, program ownership, creator state,
+  the Token-2022 mint, exact shareholders, and revoked fee-share admin before
+  marking a draft devnet-verified.
+- Signed evidence is persisted in D1 before broadcast. Unique mint and signature
+  indexes plus compare-and-set final writes prevent duplicate or racing launches.
+- Pump creator fees accrue in program vaults and still require later sweeping
+  and distribution. The 80/20 configuration does not itself buy Fan Tokens or
+  burn SPORTPAD.
+
 ### Official Fan Token data
 
 - The selectable registry contains 82 exact Solana mints from the official
@@ -31,9 +61,9 @@ storage, public records, official asset identity, and read-only provider health.
 - Registry membership never enables swaps by itself. Liquidity, inventory, and
   canary checks are still required per asset.
 
-### Read-only provider checks
+### Provider checks and verification
 
-- Helius API key for the health canary and future finalized indexing work.
+- Helius API key for the health canary and finalized devnet verification.
 - Jupiter API key for the health canary and future executable quote checks.
 - Credentials stay server-side. Health responses are sanitized and do not
   expose keys, upstream payloads, or request URLs containing credentials.
@@ -41,16 +71,15 @@ storage, public records, official asset identity, and read-only provider health.
 The application can render without these provider keys, but their health checks
 will report that configuration is unavailable.
 
-## Future transaction stages
+## Future mainnet transaction stages
 
-### Disposable Solana testing
-
-- Policy-controlled references for disposable fee collector, reward vault, and
+- Policy-controlled references for the reward treasury, reward vault, and
   SPORTPAD buyback executor signers.
-- A disposable platform-token mint for buyback and burn verification.
-- A written allowlist limited to official Fan Token Solana mints.
-- Per-transaction and daily limits, pause controls, and independent RPC
-  reconciliation.
+- A deployed and independently verified SPORTPAD mint for buyback and burn.
+- A written allowlist limited to official Fan Token Solana mints with verified
+  liquidity and inventory routes.
+- Per-transaction and daily limits, pause controls, monitoring, and independent
+  RPC reconciliation.
 
 ### Cross-chain inventory, only if required
 

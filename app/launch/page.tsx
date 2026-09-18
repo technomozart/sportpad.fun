@@ -7,7 +7,7 @@ export default function LaunchPage() {
     <SiteChrome>
       <main className="page-wrap inner-page">
         <PageIntro kicker="Create a launch draft" title="Build the complete reward route before you sign anything." copy="Define the community, choose an official Fan Token reward, acknowledge the economics and image rights, then save a private draft for technical review." />
-        <SafetyNotice>This private builder does not create a mint, spend SOL, or configure Pump fee sharing. Mainnet launch remains locked.</SafetyNotice>
+        <SafetyNotice>The four draft steps do not sign or spend SOL. After saving, you can separately approve a valueless Pump devnet launch and one-time 80/20 creator-fee configuration. Mainnet remains locked.</SafetyNotice>
         <section className="content-section"><LaunchBuilder /></section>
       </main>
     </SiteChrome>
