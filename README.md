@@ -4,9 +4,9 @@ SportPad is a private product prototype for a Solana sports-token launchpad. Com
 
 The current build includes:
 
-- a responsive dark stadium/trading interface;
-- searchable concept launches and a wallet rewards preview;
-- a two-step launch-draft flow backed by D1;
+- a responsive dark stadium/trading interface across twelve product routes;
+- searchable concept launches, matchday context, a Fan Token registry, and a wallet rewards preview;
+- a four-step private launch-draft flow backed by D1;
 - a verified Solana Fan Token mint registry with execution status;
 - integer-safe 80/20 and time-weighted reward allocation logic;
 - replay-safe settlement, reward epoch, and claim data models;
@@ -28,9 +28,11 @@ The local URL is printed by the development server. The bundled local sign-in fl
 
 ```powershell
 npm run test:protocol
+npm run test:providers
+npm run lint
+npx tsc --noEmit
 npm run db:generate
 npm run build
 ```
 
 For the system design, risk controls, and staged launch plan, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For the exact integration inputs needed in later phases, see [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
-
