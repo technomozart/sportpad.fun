@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SiteLink as Link } from "@/components/site-link";
 import type { CSSProperties, ReactNode } from "react";
 import { ArrowUpRight, BadgeCheck, Clock3, ShieldCheck } from "lucide-react";
 
@@ -48,13 +48,14 @@ export function SectionHeading({ eyebrow, title, copy, action }: { eyebrow: stri
 }
 
 export function LaunchCard({ launch, compact = false }: { launch: Launch; compact?: boolean }) {
+  const rewardReady = launch.availability !== "researching";
+  const routeClass = launch.availability === "routed" ? "route-ready" : launch.availability === "inventory" ? "route-inventory" : "route-research";
+  const routeLabel = launch.availability === "routed" ? "Direct route" : launch.availability === "inventory" ? "Inventory-backed" : "Under review";
   return (
     <Link href={`/launches/${launch.slug}`} className={`launch-card-v2 group ${compact ? "launch-card-compact" : ""}`}>
       <div className="launch-card-topline">
         <span>Community-created</span>
-        <span className={launch.availability === "routed" ? "route-ready" : "route-inventory"}>
-          {launch.availability === "routed" ? "Direct route" : "Inventory-backed"}
-        </span>
+        <span className={routeClass}>{routeLabel}</span>
       </div>
       <div className="launch-card-identity">
         <TokenMark token={launch.ticker} color={launch.tone} size="lg" />
@@ -64,9 +65,9 @@ export function LaunchCard({ launch, compact = false }: { launch: Launch; compac
         </div>
         <ArrowUpRight className="launch-arrow" />
       </div>
-      <div className="launch-reward-band">
-        <div><BadgeCheck /><span>Eligible for</span><strong>{launch.rewardSymbol} rewards</strong></div>
-        <small>{launch.rewardsFunded.toLocaleString()} {launch.rewardSymbol} funded</small>
+      <div className={`launch-reward-band ${rewardReady ? "" : "reward-under-review"}`}>
+        <div>{rewardReady ? <BadgeCheck /> : <Clock3 />}<span>{rewardReady ? "Eligible for" : "Researching"}</span><strong>{launch.rewardSymbol} rewards</strong></div>
+        <small>{rewardReady ? `${launch.rewardsFunded.toLocaleString()} ${launch.rewardSymbol} funded` : "Mint and route not enabled"}</small>
       </div>
       {!compact ? <div className="launch-mini-chart"><MiniChart values={launch.activity} color={launch.tone} /></div> : null}
       <div className="launch-stats">
@@ -76,7 +77,7 @@ export function LaunchCard({ launch, compact = false }: { launch: Launch; compac
         <div><span>Holders</span><strong>{compactNumber(launch.holders)}</strong></div>
       </div>
       <div className="curve-row"><div><span>Bonding curve</span><span>{launch.curve}%</span></div><Progress value={launch.curve} className="h-1.5 bg-white/8 [&_[data-slot=progress-indicator]]:bg-[#9cff57]" /></div>
-      <div className="launch-card-footer"><Clock3 /> Demo epoch window · illustrative 18h remaining</div>
+      <div className="launch-card-footer"><Clock3 /> {rewardReady ? "Demo epoch window · illustrative 18h remaining" : "Research fixture · no funded epoch"}</div>
     </Link>
   );
 }

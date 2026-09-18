@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SiteLink as Link } from "@/components/site-link";
 import { ArrowRight, CalendarDays, Clock3, Goal, Radio, ShieldAlert, Sparkles, Trophy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";

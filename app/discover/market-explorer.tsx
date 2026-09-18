@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { SiteLink as Link } from "@/components/site-link";
 import { useMemo, useState } from "react";
 import { Grid2X2, List, Search, SlidersHorizontal, X } from "lucide-react";
 
@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { launches, compactNumber, formatUsd } from "@/lib/site-data";
 
-const sports = ["All sports", "Football", "Combat", "Motorsport"];
-const rewardStates = ["All routes", "Direct route", "Inventory-backed"];
+const sports = ["All sports", "Football", "Combat", "Motorsport", "Basketball"];
+const rewardStates = ["All routes", "Direct route", "Inventory-backed", "Under review"];
 
 export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery);
@@ -24,7 +24,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
     return launches
       .filter((launch) => !normalized || `${launch.name} ${launch.ticker} ${launch.rewardSymbol} ${launch.narrative}`.toLowerCase().includes(normalized))
       .filter((launch) => sport === "All sports" || launch.sport === sport)
-      .filter((launch) => route === "All routes" || (route === "Direct route" ? launch.availability === "routed" : launch.availability === "inventory"))
+      .filter((launch) => route === "All routes" || (route === "Direct route" ? launch.availability === "routed" : route === "Inventory-backed" ? launch.availability === "inventory" : launch.availability === "researching"))
       .sort((a, b) => {
         if (sort === "Market cap") return b.marketCap - a.marketCap;
         if (sort === "24h volume") return b.volume24h - a.volume24h;
@@ -56,7 +56,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
         <div className="market-table-wrap">
           <table className="market-table">
             <thead><tr><th>Community token</th><th>Rewarded in</th><th>Route</th><th>Market cap</th><th>24h volume</th><th>24h</th><th>Holders</th><th>Curve</th></tr></thead>
-            <tbody>{filtered.map((launch) => <tr key={launch.slug}><td><Link href={`/launches/${launch.slug}`}><TokenMark token={launch.ticker} color={launch.tone} /><span><strong>{launch.name}</strong><small>${launch.ticker} · {launch.age}</small></span></Link></td><td><span className="reward-cell">{launch.rewardSymbol}<small>{launch.rewardsFunded} funded</small></span></td><td><span className={launch.availability === "routed" ? "route-ready" : "route-inventory"}>{launch.availability === "routed" ? "Direct" : "Inventory"}</span></td><td>{formatUsd(launch.marketCap)}</td><td>{formatUsd(launch.volume24h)}</td><td className={launch.change24h >= 0 ? "positive" : "negative"}>{launch.change24h >= 0 ? "+" : ""}{launch.change24h}%</td><td>{compactNumber(launch.holders)}</td><td>{launch.curve}%</td></tr>)}</tbody>
+            <tbody>{filtered.map((launch) => <tr key={launch.slug}><td><Link href={`/launches/${launch.slug}`}><TokenMark token={launch.ticker} color={launch.tone} /><span><strong>{launch.name}</strong><small>${launch.ticker} · {launch.age}</small></span></Link></td><td><span className="reward-cell">{launch.rewardSymbol}<small>{launch.availability === "researching" ? "not enabled" : `${launch.rewardsFunded} funded`}</small></span></td><td><span className={launch.availability === "routed" ? "route-ready" : launch.availability === "inventory" ? "route-inventory" : "route-research"}>{launch.availability === "routed" ? "Direct" : launch.availability === "inventory" ? "Inventory" : "Review"}</span></td><td>{formatUsd(launch.marketCap)}</td><td>{formatUsd(launch.volume24h)}</td><td className={launch.change24h >= 0 ? "positive" : "negative"}>{launch.change24h >= 0 ? "+" : ""}{launch.change24h}%</td><td>{compactNumber(launch.holders)}</td><td>{launch.curve}%</td></tr>)}</tbody>
           </table>
         </div>
       )}

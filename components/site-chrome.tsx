@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpen,
   ChartNoAxesCombined,
   CircleGauge,
+  GitFork,
   Goal,
   Menu,
   ShieldCheck,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SiteLink as Link } from "@/components/site-link";
 import {
   Dialog,
   DialogContent,
@@ -43,27 +44,92 @@ type WebMCPTool = {
   execute: (input: Record<string, unknown>) => unknown | Promise<unknown>;
 };
 
+type SolanaProvider = {
+  connect: () => Promise<{ publicKey: { toString: () => string } }>;
+  disconnect?: () => Promise<void>;
+  publicKey?: { toString: () => string } | null;
+  on?: (event: "accountChanged" | "disconnect", handler: (publicKey?: { toString: () => string } | null) => void) => void;
+  removeListener?: (event: "accountChanged" | "disconnect", handler: (publicKey?: { toString: () => string } | null) => void) => void;
+};
+
+const WALLET_SESSION_KEY = "sportpad:wallet-address";
+
+function readSolanaProvider() {
+  const browser = window as typeof window & {
+    solana?: SolanaProvider;
+    phantom?: { solana?: SolanaProvider };
+  };
+  return browser.phantom?.solana ?? browser.solana;
+}
+
 function WalletButton() {
   const [address, setAddress] = useState("");
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error" | "neutral">("neutral");
   const [connecting, setConnecting] = useState(false);
+
+  useEffect(() => {
+    const provider = readSolanaProvider();
+    const storedAddress = window.sessionStorage.getItem(WALLET_SESSION_KEY) ?? "";
+    const providerAddress = provider?.publicKey?.toString() ?? "";
+    const activeAddress = providerAddress && (!storedAddress || storedAddress === providerAddress) ? providerAddress : "";
+    const timer = window.setTimeout(() => {
+      setAddress(activeAddress);
+      if (!activeAddress) window.sessionStorage.removeItem(WALLET_SESSION_KEY);
+    }, 0);
+
+    const handleAccountChanged = (publicKey?: { toString: () => string } | null) => {
+      const nextAddress = publicKey?.toString() ?? "";
+      setAddress(nextAddress);
+      setMessage(nextAddress ? "Wallet account changed." : "Wallet disconnected from this SportPad session.");
+      setMessageTone(nextAddress ? "success" : "neutral");
+      if (nextAddress) window.sessionStorage.setItem(WALLET_SESSION_KEY, nextAddress);
+      else window.sessionStorage.removeItem(WALLET_SESSION_KEY);
+    };
+    const handleDisconnect = () => handleAccountChanged(null);
+    provider?.on?.("accountChanged", handleAccountChanged);
+    provider?.on?.("disconnect", handleDisconnect);
+
+    return () => {
+      window.clearTimeout(timer);
+      provider?.removeListener?.("accountChanged", handleAccountChanged);
+      provider?.removeListener?.("disconnect", handleDisconnect);
+    };
+  }, []);
 
   async function connectWallet() {
     setConnecting(true);
     setMessage("");
+    setMessageTone("neutral");
     try {
-      const browser = window as typeof window & {
-        solana?: { connect: () => Promise<{ publicKey: { toString: () => string } }> };
-        phantom?: { solana?: { connect: () => Promise<{ publicKey: { toString: () => string } }> } };
-      };
-      const provider = browser.phantom?.solana ?? browser.solana;
+      const provider = readSolanaProvider();
       if (!provider) throw new Error("No compatible injected Solana wallet was detected in this browser.");
       const result = await provider.connect();
-      setAddress(result.publicKey.toString());
+      const connectedAddress = result.publicKey.toString();
+      setAddress(connectedAddress);
+      window.sessionStorage.setItem(WALLET_SESSION_KEY, connectedAddress);
       setMessage("Connected for this browser session.");
+      setMessageTone("success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Wallet connection failed.");
+      setMessageTone("error");
     } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function disconnectWallet() {
+    setConnecting(true);
+    try {
+      await readSolanaProvider()?.disconnect?.();
+    } catch {
+      // Some injected providers do not expose disconnect. Clearing the local
+      // session still prevents SportPad from treating the address as active.
+    } finally {
+      window.sessionStorage.removeItem(WALLET_SESSION_KEY);
+      setAddress("");
+      setMessage("Wallet disconnected from this SportPad session.");
+      setMessageTone("neutral");
       setConnecting(false);
     }
   }
@@ -71,7 +137,7 @@ function WalletButton() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+        <Button aria-label={address ? `Connected wallet ${address}` : "Connect wallet"} variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
           <Wallet className="size-4" />
           <span>{address ? `${address.slice(0, 4)}…${address.slice(-4)}` : "Connect wallet"}</span>
         </Button>
@@ -85,20 +151,17 @@ function WalletButton() {
         </DialogHeader>
         <div className="space-y-3 rounded-2xl border border-white/8 bg-white/[0.025] p-4 text-sm text-white/50">
           <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> You approve every transaction.</p>
-          <p>This early preview connects only to a compatible wallet provider already injected into the page.</p>
+          <p>This preview connects to a compatible Solana wallet already installed in the browser. The address is remembered only for this tab session.</p>
+          {address ? <p className="break-all font-mono text-xs text-white/65">{address}</p> : null}
         </div>
-        {message ? <p role="status" className={`text-sm ${address ? "text-[#a9ff74]" : "text-[#ff8f94]"}`}>{message}</p> : null}
-        <Button onClick={connectWallet} disabled={connecting || Boolean(address)} className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">
-          {connecting ? "Connecting…" : address ? "Wallet connected" : "Connect detected wallet"}
-        </Button>
+        {message ? <p role="status" className={`text-sm ${messageTone === "success" ? "text-[#a9ff74]" : messageTone === "error" ? "text-[#ff8f94]" : "text-white/65"}`}>{message}</p> : null}
+        {address ? <Button onClick={disconnectWallet} disabled={connecting} variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">{connecting ? "Disconnecting…" : "Disconnect or change wallet"}</Button> : <Button onClick={connectWallet} disabled={connecting} className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">{connecting ? "Connecting…" : "Connect detected wallet"}</Button>}
       </DialogContent>
     </Dialog>
   );
 }
 
 function WebMCPRegistry() {
-  const router = useRouter();
-
   useEffect(() => {
     const modelContext = (document as Document & {
       modelContext?: { registerTool: (tool: WebMCPTool, options?: { signal?: AbortSignal }) => Promise<void> };
@@ -119,7 +182,9 @@ function WebMCPRegistry() {
         },
         execute: ({ page }) => {
           const destination = typeof page === "string" && pages.includes(page) ? `/${page}` : "/";
-          router.push(destination);
+          // Native navigation is intentional: the deployed Vinext Link runtime
+          // currently throws during client-side route transitions.
+          window.location.assign(destination);
           return { content: [{ type: "text", text: `Opened ${destination}.` }] };
         },
       }, { signal: controller.signal }),
@@ -134,13 +199,14 @@ function WebMCPRegistry() {
         },
         execute: ({ query }) => {
           const value = typeof query === "string" ? query.slice(0, 80) : "";
-          router.push(`/discover?q=${encodeURIComponent(value)}`);
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.assign(`/discover?q=${encodeURIComponent(value)}`);
           return { content: [{ type: "text", text: `Searching SportPad for ${value}.` }] };
         },
       }, { signal: controller.signal }),
     ]).catch((error) => console.warn("webmcp_registration_failed", error));
     return () => controller.abort();
-  }, [router]);
+  }, []);
 
   return null;
 }
@@ -176,6 +242,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         </nav>
         <div className="header-actions">
           <div className="network-pill"><span /> Solana</div>
+          <a className="github-header-link" href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer" aria-label="SportPad source code on GitHub"><GitFork /><span>GitHub</span></a>
           <WalletButton />
           <Button asChild className="hidden rounded-full bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d] xl:inline-flex">
             <Link href="/launch"><Sparkles className="size-4" /> Launch</Link>
@@ -188,6 +255,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       {menuOpen ? (
         <div className="mobile-menu">
           {navigation.map((item) => <Link key={item.href} href={item.href} className={pathname.startsWith(item.href) ? "active" : ""} onClick={() => setMenuOpen(false)}>{item.label}</Link>)}
+          <a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> GitHub / source code</a>
           <Link href="/launch" onClick={() => setMenuOpen(false)} className="mobile-launch">Launch a token</Link>
         </div>
       ) : null}
@@ -201,7 +269,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </div>
           <div><h3>Product</h3><Link href="/discover">Discover</Link><Link href="/launch">Launch</Link><Link href="/rewards">Rewards</Link><Link href="/matchday">Matchday</Link></div>
           <div><h3>Protocol</h3><Link href="/how-it-works">How it works</Link><Link href="/transparency">Capital flow</Link><Link href="/fan-tokens">Reward registry</Link><Link href="/sport">SPORT status</Link><Link href="/transparency#status">System status</Link></div>
-          <div><h3>Learn</h3><Link href="/learn"><BookOpen /> Guides</Link><Link href="/learn#faq">FAQ</Link><Link href="/learn#glossary">Glossary</Link><Link href="/learn#risk">Risk disclosure</Link><Link href="/policy">Creator policy</Link></div>
+          <div><h3>Learn</h3><Link href="/learn"><BookOpen /> Guides</Link><Link href="/learn#faq">FAQ</Link><Link href="/learn#glossary">Glossary</Link><Link href="/learn#risk">Risk disclosure</Link><Link href="/policy">Creator policy</Link><a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> Source code</a></div>
         </div>
         <div className="footer-bottom">
           <p>Community-created tokens are not club-issued. SportPad is not affiliated with or endorsed by any club, league, Chiliz, Socios.com, or FanTokens.</p>

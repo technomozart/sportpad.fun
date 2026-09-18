@@ -11,7 +11,7 @@ export const REWARD_ASSETS: ReadonlyArray<RewardAsset> = [
     symbol: "PSG",
     name: "Paris Saint-Germain Fan Token",
     solanaMint: "5eyib4qghYGHNh7VvxSFGYLFJSanjq9hug9fR52kksnm",
-    executionStatus: "quoted",
+    executionStatus: "inventory_required",
     source: "https://docs.chiliz.com/quick-start/token-contract-addresses",
   },
   {

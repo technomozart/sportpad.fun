@@ -1,7 +1,16 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "sportpad-fun",
   "version": "0.1.0",
   "private": true,
+  "description": "A transparent Solana sports-community launchpad prototype with verified fan-token rewards.",
+  "homepage": "https://sportpad.fun",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/technomozart/sportpad.fun.git"
+  },
+  "bugs": {
+    "url": "https://github.com/technomozart/sportpad.fun/issues"
+  },
   "engines": {
     "node": ">=22.13.0"
   },

@@ -1,3 +1,5 @@
+import { REWARD_ASSETS, type RewardAsset } from "@/lib/protocol/reward-assets";
+
 export type Launch = {
   slug: string;
   name: string;
@@ -14,7 +16,7 @@ export type Launch = {
   curve: number;
   rewardsFunded: number;
   rewardUsd: number;
-  availability: "routed" | "inventory";
+  availability: "routed" | "inventory" | "researching";
   age: string;
   description: string;
   activity: number[];
@@ -140,9 +142,9 @@ export const launches: Launch[] = [
     change24h: -3.8,
     holders: 298,
     curve: 19,
-    rewardsFunded: 72.3,
-    rewardUsd: 184,
-    availability: "inventory",
+    rewardsFunded: 0,
+    rewardUsd: 0,
+    availability: "researching",
     age: "3d",
     description: "A fight-week culture coin showing how SportPad can extend beyond football into combat sports.",
     activity: [48, 43, 51, 46, 41, 38, 44, 35, 40, 31, 37, 34],
@@ -159,12 +161,27 @@ export type FanAsset = {
   color: string;
 };
 
+const fanAssetPresentation: Record<string, Pick<FanAsset, "name" | "category" | "color">> = {
+  PSG: { name: "Paris Saint-Germain", category: "Football", color: "#72a7ff" },
+  AFC: { name: "Arsenal", category: "Football", color: "#ffb84d" },
+  BAR: { name: "FC Barcelona", category: "Football", color: "#9cff57" },
+  CITY: { name: "Manchester City", category: "Football", color: "#66e4ff" },
+  ACM: { name: "AC Milan", category: "Football", color: "#ff6666" },
+};
+
+function executionPresentation(status: RewardAsset["executionStatus"]): Pick<FanAsset, "status" | "route"> {
+  return status === "quoted"
+    ? { status: "Route available", route: "Solana quote route" }
+    : { status: "Inventory required", route: "Pre-funded vault" };
+}
+
 export const fanAssets: FanAsset[] = [
-  { symbol: "PSG", name: "Paris Saint-Germain", category: "Football", mint: "5eyib4qghYGHNh7VvxSFGYLFJSanjq9hug9fR52kksnm", status: "Route available", route: "Solana-native", color: "#72a7ff" },
-  { symbol: "AFC", name: "Arsenal", category: "Football", mint: "Dst93spXQEXxFzwYbFrQRnFYBYpw7AzB2QyALEeP4NGQ", status: "Inventory required", route: "Pre-funded vault", color: "#ffb84d" },
-  { symbol: "BAR", name: "FC Barcelona", category: "Football", mint: "82DNsTK61ZrgCHP6pfP32Eubcsp9h38d64E6X9ETEBBe", status: "Inventory required", route: "Pre-funded vault", color: "#9cff57" },
-  { symbol: "CITY", name: "Manchester City", category: "Football", mint: "8WbNQtY7QmXMVKJFTSqFudierVZZtbuoyeepZEqJ1B2w", status: "Inventory required", route: "Pre-funded vault", color: "#66e4ff" },
-  { symbol: "ACM", name: "AC Milan", category: "Football", mint: "H5qGPniSX2uCNtAnxr7RpdfFAZcGkr6dknjgpa1AKHe1", status: "Inventory required", route: "Pre-funded vault", color: "#ff6666" },
+  ...REWARD_ASSETS.map((asset) => ({
+    symbol: asset.symbol,
+    mint: asset.solanaMint,
+    ...(fanAssetPresentation[asset.symbol] ?? { name: asset.name, category: "Sports", color: "#9cff57" }),
+    ...executionPresentation(asset.executionStatus),
+  })),
   { symbol: "UFC", name: "UFC", category: "Combat", mint: "Registry verification pending", status: "Researching", route: "Not enabled", color: "#d9c7ff" },
 ];
 

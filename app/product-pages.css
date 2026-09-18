@@ -51,7 +51,8 @@
 /* Keep dense market cards readable at normal zoom. */
 .launch-card-topline { font-size: .66rem; }
 .route-ready,
-.route-inventory { font-size: .63rem; }
+.route-inventory,
+.route-research { font-size: .63rem; }
 .launch-card-identity p { color: rgba(255,255,255,.5); font-size: .72rem; }
 .launch-reward-band span { color: rgba(255,255,255,.52); font-size: .62rem; }
 .launch-reward-band strong { font-size: .82rem; }
@@ -307,7 +308,7 @@
 .media-placeholder small { display: block; }
 .media-placeholder strong { font-size: .61rem; }
 .media-placeholder small { margin-top: 3px; color: rgba(255,255,255,.27); font-size: .5rem; }
-.media-placeholder button { border-radius: 999px; padding: 6px 9px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.23); font-size: .49rem; }
+.media-status { border-radius: 999px; padding: 6px 9px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.34); font-size: .49rem; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
 .reward-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 22px; }
 .reward-selector > button { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; min-width: 0; border: 1px solid rgba(255,255,255,.075); border-radius: 14px; padding: 12px; background: rgba(255,255,255,.018); text-align: left; }
 .reward-selector > button:not(:disabled):hover,
@@ -413,9 +414,14 @@
 .token-title p { margin-top: 7px; color: rgba(255,255,255,.34); font-size: .62rem; }
 .token-description { max-width: 670px; margin-top: 22px; color: rgba(255,255,255,.45); font-size: .78rem; line-height: 1.7; }
 .token-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+.token-action-wrap { margin-top: 26px; }
+.token-action-wrap .token-actions { margin-top: 0; }
+.action-feedback { margin-top: 9px; color: rgba(255,255,255,.45); font-size: .6rem; }
+.action-feedback.action-error { color: #ff9ea2; }
 .token-reward-card { border-color: rgba(156,255,87,.14); background: rgba(156,255,87,.025); }
 .verified-label { display: flex; align-items: center; gap: 7px; color: #a9ff74; font-size: .55rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .verified-label svg { width: 15px; }
+.verified-label.under-review-label { color: #ffd86a; }
 .token-reward-card > div:nth-child(2) { display: flex; align-items: center; gap: 11px; margin-top: 28px; }
 .token-reward-card strong,
 .token-reward-card small { display: block; }
@@ -439,7 +445,8 @@
 .chart-head strong { margin-top: 3px; font-size: 1.35rem; letter-spacing: -.04em; }
 .chart-head small { margin-top: 3px; font-size: .53rem; }
 .chart-times { display: flex; gap: 3px; }
-.chart-times button { border-radius: 7px; padding: 6px 8px; color: rgba(255,255,255,.3); font-size: .49rem; }
+.chart-times button { cursor: pointer; border: 1px solid transparent; border-radius: 7px; padding: 6px 8px; color: rgba(255,255,255,.4); font-size: .49rem; transition: border-color .2s ease,background .2s ease,color .2s ease; }
+.chart-times button:hover { border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.035); color: white; }
 .chart-times button.active { background: rgba(156,255,87,.1); color: #a9ff74; }
 .large-chart-grid { min-height: 275px; padding: 18px; background-image: linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px); background-size: 20% 25%; }
 .large-chart-grid svg { width: 100%; height: 240px; }
@@ -520,7 +527,7 @@
 .token-activity small { margin-top: 2px; color: rgba(255,255,255,.25); font-size: .5rem; }
 .token-activity > div > span:nth-child(3) { color: rgba(255,255,255,.55); font-size: .58rem; }
 .token-activity code { color: #a9ff74; font-size: .5rem; }
-.token-activity button svg { width: 13px; color: rgba(255,255,255,.3); }
+.demo-row-label { border-radius: 999px; padding: 4px 6px; background: rgba(255,255,255,.045); color: rgba(255,255,255,.34); font-size: .43rem; font-weight: 750; letter-spacing: .06em; }
 .contract-grid { display: grid; grid-template-columns: 1fr 1fr .75fr; gap: 11px; }
 .contract-grid > div { border: 1px solid rgba(255,255,255,.075); border-radius: 17px; padding: 19px; background: rgba(255,255,255,.018); }
 .contract-grid h3 { margin-top: 7px; font-size: .84rem; }
@@ -608,6 +615,7 @@
   .page-wrap { width: min(100% - 28px,1240px); }
   .site-header-inner { height: 66px; }
   .network-pill,
+  .github-header-link span,
   .header-wallet span,
   .header-launch { display: none; }
   .mobile-bottom-nav { display: grid; }

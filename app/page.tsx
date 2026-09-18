@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SiteLink as Link } from "@/components/site-link";
 import {
   ArrowRight,
   BadgeCheck,
@@ -144,7 +144,7 @@ export default function Home() {
         <section className="page-section page-wrap">
           <SectionHeading eyebrow="Learn" title="Understand it before you sign it." copy="Original, plain-language guides explain the assets, accounting, wallets, inventory states, and risks behind the product." action={<Link href="/learn" className="text-link">Open learning hub <ArrowRight /></Link>} />
           <div className="learn-card-grid">
-            {[{icon:Goal,title:"Community coin vs Fan Token",copy:"Why the two assets are separate and what verified really means."},{icon:WalletCards,title:"One-wallet reward flow",copy:"How Solana-native claims avoid an unnecessary MetaMask step."},{icon:Layers3,title:"Epochs and token-seconds",copy:"How time-weighted balances become pro-rata funded allocations."},{icon:ShieldCheck,title:"Liquidity and protocol risk",copy:"What happens when a route disappears or inventory runs low."}].map((item) => <Link href="/learn" key={item.title} className="learn-card"><item.icon /><h3>{item.title}</h3><p>{item.copy}</p><span>Read guide <ArrowRight /></span></Link>)}
+            {[{icon:Goal,title:"Community coin vs Fan Token",copy:"Why the two assets are separate and what verified really means.",href:"/learn#two-assets"},{icon:WalletCards,title:"One-wallet reward flow",copy:"How Solana-native claims avoid an unnecessary MetaMask step.",href:"/learn#networks"},{icon:Layers3,title:"Epochs and token-seconds",copy:"How time-weighted balances become pro-rata funded allocations.",href:"/learn#rewards"},{icon:ShieldCheck,title:"Liquidity and protocol risk",copy:"What happens when a route disappears or inventory runs low.",href:"/learn#risk"}].map((item) => <Link href={item.href} key={item.title} className="learn-card"><item.icon /><h3>{item.title}</h3><p>{item.copy}</p><span>Read guide <ArrowRight /></span></Link>)}
           </div>
         </section>
 

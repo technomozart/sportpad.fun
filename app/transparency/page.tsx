@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, BadgeCheck, CheckCircle2, CircleDollarSign, ExternalLink, Flame, Radio, ShieldCheck, Trophy } from "lucide-react";
+import { AlertTriangle, ArrowDown, BadgeCheck, CheckCircle2, CircleDollarSign, Flame, Radio, ShieldCheck, Trophy } from "lucide-react";
 
 import { DemoBadge, PageIntro, SectionHeading, TokenMark } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
@@ -31,7 +31,7 @@ export default function TransparencyPage() {
 
         <section className="page-section">
           <SectionHeading eyebrow="Settlement explorer" title="Recent protocol events." copy="Demo signatures are shortened and intentionally non-clickable. Production rows will resolve to Solscan." />
-          <div className="explorer-table-wrap"><table className="explorer-table"><thead><tr><th>Event</th><th>Source</th><th>Amount</th><th>State</th><th>Signature</th><th>Time</th></tr></thead><tbody>{feeEvents.map((event)=><tr key={event.id}><td><span className={`event-dot event-${event.state.toLowerCase()}`} /><span><strong>{event.kind}</strong><small>{event.id}</small></span></td><td>{event.launch}</td><td>{event.amount}</td><td><code>{event.state.toUpperCase()}</code></td><td><span className="signature">{event.signature}<ExternalLink /></span></td><td>{event.time}</td></tr>)}</tbody></table></div>
+          <div className="explorer-table-wrap"><table className="explorer-table"><thead><tr><th>Event</th><th>Source</th><th>Amount</th><th>State</th><th>Evidence</th><th>Time</th></tr></thead><tbody>{feeEvents.map((event)=><tr key={event.id}><td><span className={`event-dot event-${event.state.toLowerCase()}`} /><span><strong>{event.kind}</strong><small>{event.id}</small></span></td><td>{event.launch}</td><td>{event.amount}</td><td><code>{event.state.toUpperCase()}</code></td><td><span className="signature">Demo fixture · {event.signature}</span></td><td>{event.time}</td></tr>)}</tbody></table></div>
         </section>
 
         <section className="page-section batch-detail">

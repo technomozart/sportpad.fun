@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SiteLink as Link } from "@/components/site-link";
 import { ArrowRight, BadgeCheck, BookOpen, Boxes, ExternalLink, Goal, Landmark, Layers3, ShieldAlert, WalletCards } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
