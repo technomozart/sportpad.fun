@@ -765,3 +765,316 @@
 @media (prefers-reduced-motion: reduce) {
   .guide-grid > a { transition: none; }
 }
+
+/* Readability pass: keep dense product UI legible without scaling display type. */
+.section-eyebrow { font-size: .72rem !important; }
+.mobile-bottom-nav a { font-size: .68rem; color: rgba(255,255,255,.56); }
+.footer-bottom { color: rgba(255,255,255,.38); font-size: .72rem; }
+
+.asset-directory-head,
+.market-table th,
+.registry-table th,
+.explorer-table th,
+.positions-head {
+  color: rgba(255,255,255,.4);
+  font-size: .64rem;
+}
+
+.asset-row small,
+.market-table td:first-child small,
+.reward-cell small,
+.registry-asset small,
+.position-row small {
+  color: rgba(255,255,255,.42);
+  font-size: .65rem;
+}
+
+.asset-status,
+.position-state,
+.claim-status {
+  font-size: .64rem !important;
+}
+
+.guide-grid p,
+.learn-card p,
+.method-grid p,
+.how-step p,
+.glossary-grid p {
+  color: rgba(255,255,255,.48);
+  font-size: .76rem;
+}
+
+/* Launch builder */
+.launch-steps > div:first-child > p:last-child,
+.form-title p {
+  color: rgba(255,255,255,.5);
+  font-size: .72rem;
+}
+
+.launch-steps li { color: rgba(255,255,255,.48); }
+.launch-steps li > span { font-size: .68rem; }
+.launch-steps li strong { font-size: .72rem; }
+.launch-steps li small { font-size: .64rem; }
+.builder-safety strong { font-size: .7rem; }
+.builder-safety small { color: rgba(255,255,255,.46); font-size: .64rem; }
+.form-panel-head span,
+.preview-label span { color: rgba(255,255,255,.44); font-size: .64rem; }
+.form-panel-head strong { font-size: .75rem; }
+.form-title h3 { font-size: 1.08rem; }
+.form-grid label { color: rgba(255,255,255,.6); font-size: .7rem; }
+.form-grid input,
+.form-grid textarea,
+.form-grid select { font-size: .78rem; }
+.form-grid label > small { color: rgba(255,255,255,.42); font-size: .61rem; }
+.media-placeholder strong,
+.reward-selector strong { font-size: .72rem; }
+.media-placeholder small,
+.reward-selector small { color: rgba(255,255,255,.46); font-size: .65rem; }
+.media-status,
+.reward-selector code { color: rgba(255,255,255,.4); font-size: .6rem; }
+.form-info p { color: rgba(255,255,255,.52); font-size: .7rem; }
+.economics-cards strong { font-size: .74rem; }
+.economics-cards p { color: rgba(255,255,255,.46); font-size: .66rem; }
+.rules-table span,
+.rules-table strong { font-size: .65rem; }
+.rules-table span { color: rgba(255,255,255,.44); }
+.rules-table strong { color: rgba(255,255,255,.67); }
+.terms-list label { color: rgba(255,255,255,.54); font-size: .67rem; }
+.preview-label small { color: rgba(255,255,255,.4); font-size: .61rem; }
+.preview-token small,
+.preview-reward small { color: rgba(255,255,255,.44); font-size: .64rem; }
+.launch-preview > p { color: rgba(255,255,255,.5); font-size: .7rem; }
+.preview-reward strong { font-size: .7rem; }
+.preview-split span { color: rgba(255,255,255,.52); font-size: .64rem; }
+.preview-disclaimer { color: rgba(255,255,255,.4); font-size: .62rem; }
+.form-error { font-size: .7rem; }
+
+@media (max-width: 430px) {
+  .launch-steps li strong { font-size: .68rem; }
+}
+
+.image-uploader {
+  display: flex;
+  min-height: 124px;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border: 1px dashed rgba(156,255,87,.28);
+  border-radius: 14px;
+  padding: 16px;
+  background: rgba(156,255,87,.025);
+  transition: border-color .2s ease, background .2s ease, transform .2s ease;
+}
+
+.image-uploader.drag-active {
+  border-color: #9cff57;
+  background: rgba(156,255,87,.08);
+  transform: scale(1.005);
+}
+
+.image-uploader > svg { width: 28px; color: #9cff57; }
+.image-uploader > img,
+.review-artwork,
+.preview-artwork,
+.saved-artwork-preview {
+  border: 1px solid rgba(255,255,255,.12);
+  object-fit: cover;
+}
+.image-uploader > img { width: 88px; height: 88px; border-radius: 18px; }
+.image-upload-copy { display: grid; gap: 5px; justify-items: start; }
+.image-upload-copy strong { color: rgba(255,255,255,.9); font-size: .76rem; }
+.image-upload-copy small { color: rgba(255,255,255,.48); font-size: .66rem; }
+.image-upload-copy > span { display: flex; gap: 8px; }
+.image-upload-copy button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: rgba(255,255,255,.05);
+  color: white;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.image-upload-copy button:hover { border-color: rgba(156,255,87,.38); background: rgba(156,255,87,.08); }
+.image-upload-copy button svg { width: 13px; height: 13px; }
+.review-artwork,
+.preview-artwork { width: 52px; height: 52px; flex: 0 0 auto; border-radius: 16px; }
+.saved-artwork-preview { width: 84px; height: 84px; margin: 0 auto 18px; border-radius: 22px; }
+
+.reward-search { position: relative; display: block; margin-top: 20px; }
+.reward-search > svg { position: absolute; z-index: 1; top: 50%; left: 13px; width: 16px; transform: translateY(-50%); color: rgba(255,255,255,.38); }
+.reward-search input { height: 42px; padding-left: 38px; border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.025); color: white; }
+.reward-selector { max-height: 470px; overflow-y: auto; padding-right: 4px; }
+
+.unsupported-token-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.unsupported-token-grid article { display: grid; gap: 4px; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 14px; background: rgba(255,255,255,.02); }
+.unsupported-token-grid strong { font-size: .78rem; }
+.unsupported-token-grid span { color: #9cff57; font-size: .7rem; font-weight: 800; }
+.unsupported-token-grid small { color: rgba(255,255,255,.44); font-size: .66rem; }
+
+@media (max-width: 560px) {
+  .image-uploader { align-items: flex-start; flex-direction: column; }
+  .image-uploader.has-image { flex-direction: row; align-items: center; }
+  .reward-selector { max-height: 520px; }
+  .unsupported-token-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* Final legibility floor for labels, metadata, tables, and the draft builder. */
+.match-console-head > span,
+.scoreboard small,
+.scoreboard div > span:last-child,
+.scoreboard-center > span,
+.split-source span,
+.split-destinations span,
+.match-console-note,
+.protocol-stats span,
+.protocol-stats small,
+.launch-card-topline,
+.launch-card-identity p,
+.launch-reward-band span,
+.launch-reward-band small,
+.launch-card-footer,
+.asset-directory-head,
+.asset-row small,
+.asset-row code,
+.asset-status,
+.results-summary,
+.market-table th,
+.market-table td:first-child small,
+.reward-cell small,
+.registry-stats span,
+.registry-table th,
+.registry-asset small,
+.registry-table code,
+.source-panel small,
+.source-panel a {
+  font-size: .7rem;
+}
+
+.match-console-head > span,
+.scoreboard div > span:last-child,
+.split-source span,
+.split-destinations span,
+.match-console-note,
+.protocol-stats span,
+.protocol-stats small,
+.launch-card-topline,
+.launch-card-identity p,
+.launch-reward-band span,
+.launch-reward-band small,
+.launch-card-footer,
+.asset-directory-head,
+.asset-row small,
+.results-summary,
+.market-table th,
+.market-table td:first-child small,
+.reward-cell small,
+.registry-stats span,
+.registry-table th,
+.registry-asset small,
+.source-panel small,
+.source-panel a {
+  color: rgba(255,255,255,.52);
+}
+
+.route-ready,
+.route-inventory,
+.route-research { font-size: .68rem; }
+.market-table td,
+.registry-table td { font-size: .76rem; }
+
+.launch-steps li strong,
+.builder-safety strong,
+.form-grid label,
+.media-placeholder strong,
+.reward-selector strong,
+.economics-cards strong,
+.form-info p,
+.launch-preview > p,
+.preview-reward strong,
+.form-error { font-size: .74rem; }
+
+.launch-steps > div:first-child > p:last-child,
+.form-title p,
+.launch-steps li small,
+.builder-safety small,
+.form-panel-head span,
+.preview-label span,
+.form-grid label > small,
+.media-placeholder small,
+.reward-selector small,
+.reward-selector code,
+.economics-cards p,
+.rules-table span,
+.rules-table strong,
+.terms-list label,
+.preview-label small,
+.preview-token small,
+.preview-reward small,
+.preview-split span,
+.preview-disclaimer,
+.image-upload-copy small,
+.image-upload-copy button,
+.unsupported-token-grid small { font-size: .69rem; }
+
+.launch-steps > div:first-child > p:last-child,
+.form-title p,
+.launch-steps li small,
+.builder-safety small,
+.form-panel-head span,
+.preview-label span,
+.form-grid label > small,
+.media-placeholder small,
+.reward-selector small,
+.reward-selector code,
+.economics-cards p,
+.rules-table span,
+.terms-list label,
+.preview-label small,
+.preview-token small,
+.preview-reward small,
+.preview-split span,
+.preview-disclaimer,
+.image-upload-copy small,
+.unsupported-token-grid small { color: rgba(255,255,255,.52); }
+
+.token-labels > span:first-child,
+.verified-label,
+.token-title p,
+.token-reward-card small,
+.token-reward-card dt,
+.token-reward-card dd,
+.token-flow small,
+.token-flow p,
+.split-flow b,
+.contract-grid dt,
+.contract-grid dd,
+.transparency-fresh small,
+.flow-split span,
+.flow-gate small,
+.flow-branches span,
+.flow-branches small,
+.flow-branches b { font-size: .69rem; }
+
+.token-reward-card > p,
+.token-flow strong,
+.contract-risk p { font-size: .74rem; }
+
+.token-labels > span:first-child,
+.token-title p,
+.token-reward-card small,
+.token-reward-card > p,
+.token-reward-card dt,
+.token-reward-card dd,
+.token-flow p,
+.contract-grid dt,
+.contract-grid dd,
+.contract-risk p,
+.transparency-fresh small,
+.flow-split span,
+.flow-gate small,
+.flow-branches span,
+.flow-branches small { color: rgba(255,255,255,.52); }

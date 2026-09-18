@@ -63,10 +63,10 @@ export function SystemStatus() {
           <code>{provider.healthy ? "OPERATIONAL" : provider.configured ? "DEGRADED" : "NOT CONFIGURED"}</code>
         </div>
       ))}
-      <div><span className="neutral" /><strong>Fee indexer</strong><small>Production worker not deployed</small><code>DEMO ONLY</code></div>
-      <div><span className="warning" /><strong>Reward inventory</strong><small>Demo fixtures; no live vaults</small><code>LIMITED</code></div>
-      <div><span className="neutral" /><strong>Claims</strong><small>Mainnet execution hard-locked</small><code>DISABLED</code></div>
-      <div><span className="neutral" /><strong>Cross-chain</strong><small>Deferred until inventory demand</small><code>PHASE TWO</code></div>
+      <div><span className="neutral" /><strong>Fee indexer</strong><small>Worker not deployed</small><code>NOT DEPLOYED</code></div>
+      <div><span className="neutral" /><strong>Reward inventory</strong><small>No reward vaults are deployed</small><code>NOT DEPLOYED</code></div>
+      <div><span className="neutral" /><strong>Claims</strong><small>Claim program not deployed</small><code>NOT DEPLOYED</code></div>
+      <div><span className="neutral" /><strong>Cross-chain</strong><small>No replenishment route is enabled</small><code>NOT ENABLED</code></div>
     </div>
   );
 }

@@ -146,11 +146,11 @@ function WalletButton() {
         <DialogHeader>
           <DialogTitle>Connect one Solana wallet</DialogTitle>
           <DialogDescription className="leading-relaxed text-white/45">
-            Your wallet holds community tokens and receives supported fan-token claims. SportPad never asks for a seed phrase or private key.
+            This preview connects one Solana wallet. In the planned product, that wallet could hold community tokens and receive supported Fan Token claims after claims are deployed. SportPad never asks for a seed phrase or private key.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 rounded-2xl border border-white/8 bg-white/[0.025] p-4 text-sm text-white/50">
-          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> You approve every transaction.</p>
+          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> Any future transaction would require wallet approval.</p>
           <p>This preview connects to a compatible Solana wallet already installed in the browser. The address is remembered only for this tab session.</p>
           {address ? <p className="break-all font-mono text-xs text-white/65">{address}</p> : null}
         </div>
@@ -224,10 +224,10 @@ export function SiteChrome({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="pointer-glow" aria-hidden="true" />
       <div className="pitch-grid" aria-hidden="true" />
-      <div className="ticker-rail" aria-label="Verified reward asset examples">
+      <div className="ticker-rail" aria-label="Official Fan Tokens with registry-listed Solana mints">
         <div className="ticker-track">
-          {[...fanAssets, ...fanAssets].map((asset, index) => (
-            <span key={`${asset.symbol}-${index}`}><span className="ticker-dot" /> {asset.symbol} · {asset.status.toUpperCase()}</span>
+          {[...fanAssets.slice(0, 24), ...fanAssets.slice(0, 24)].map((asset, index) => (
+            <span key={`${asset.symbol}-${index}`}><span className="ticker-dot" /> {asset.symbol} · OFFICIAL SOLANA MINT</span>
           ))}
         </div>
       </div>
@@ -245,7 +245,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           <a className="github-header-link" href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer" aria-label="SportPad source code on GitHub"><GitFork /><span>GitHub</span></a>
           <WalletButton />
           <Button asChild className="hidden rounded-full bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d] xl:inline-flex">
-            <Link href="/launch"><Sparkles className="size-4" /> Launch</Link>
+            <Link href="/launch"><Sparkles className="size-4" /> Build draft</Link>
           </Button>
           <button className="mobile-menu-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Toggle menu" aria-expanded={menuOpen}>
             {menuOpen ? <X /> : <Menu />}
@@ -256,7 +256,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         <div className="mobile-menu">
           {navigation.map((item) => <Link key={item.href} href={item.href} className={pathname.startsWith(item.href) ? "active" : ""} onClick={() => setMenuOpen(false)}>{item.label}</Link>)}
           <a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> GitHub / source code</a>
-          <Link href="/launch" onClick={() => setMenuOpen(false)} className="mobile-launch">Launch a token</Link>
+          <Link href="/launch" onClick={() => setMenuOpen(false)} className="mobile-launch">Start a draft</Link>
         </div>
       ) : null}
       <div id="main-content" tabIndex={-1}>{children}</div>
@@ -264,22 +264,22 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         <div className="footer-grid">
           <div className="footer-intro">
             <Link href="/" className="brand"><span className="brand-mark"><Goal /></span><span>SPORT<span>PAD</span></span></Link>
-            <p>Launch community tokens on Solana and route creator-fee value into verified sports fan-token rewards.</p>
-            <div className="footer-badges"><span><CircleGauge /> Solana-native</span><span><ShieldCheck /> Verifiable routes</span></div>
+            <p>Build private community-token drafts and inspect the planned route from creator fees into official Fan Token rewards and SPORTPAD buyback + burn.</p>
+            <div className="footer-badges"><span><CircleGauge /> Solana-native</span><span><ShieldCheck /> Planned routes shown</span></div>
           </div>
-          <div><h3>Product</h3><Link href="/discover">Discover</Link><Link href="/launch">Launch</Link><Link href="/rewards">Rewards</Link><Link href="/matchday">Matchday</Link></div>
-          <div><h3>Protocol</h3><Link href="/how-it-works">How it works</Link><Link href="/transparency">Capital flow</Link><Link href="/fan-tokens">Reward registry</Link><Link href="/sport">SPORT status</Link><Link href="/transparency#status">System status</Link></div>
+          <div><h3>Product</h3><Link href="/discover">Discover</Link><Link href="/launch">Draft builder</Link><Link href="/rewards">Rewards</Link><Link href="/matchday">Matchday</Link></div>
+          <div><h3>Protocol</h3><Link href="/how-it-works">How it works</Link><Link href="/transparency">Capital flow</Link><Link href="/fan-tokens">Reward registry</Link><Link href="/sport">SPORTPAD status</Link><Link href="/transparency#status">System status</Link></div>
           <div><h3>Learn</h3><Link href="/learn"><BookOpen /> Guides</Link><Link href="/learn#faq">FAQ</Link><Link href="/learn#glossary">Glossary</Link><Link href="/learn#risk">Risk disclosure</Link><Link href="/policy">Creator policy</Link><a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> Source code</a></div>
         </div>
         <div className="footer-bottom">
-          <p>Community-created tokens are not club-issued. SportPad is not affiliated with or endorsed by any club, league, Chiliz, Socios.com, or FanTokens.</p>
-          <p>Digital assets are volatile and may lose all value. Demo market data is illustrative.</p>
+          <p>Official Fan Token names, images, and Solana mints come from published FanTokens and Chiliz sources. SportPad community tokens remain separate creator-made assets.</p>
+          <p>Digital assets are volatile and may lose all value. Mainnet execution remains disabled in this release.</p>
         </div>
       </footer>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         <Link href="/discover" className={pathname.startsWith("/discover") ? "active" : ""}><ChartNoAxesCombined /><span>Discover</span></Link>
         <Link href="/matchday" className={pathname.startsWith("/matchday") ? "active" : ""}><Trophy /><span>Matchday</span></Link>
-        <Link href="/launch" className={`mobile-bottom-launch ${pathname.startsWith("/launch") ? "active" : ""}`}><Sparkles /><span>Launch</span></Link>
+        <Link href="/launch" className={`mobile-bottom-launch ${pathname.startsWith("/launch") ? "active" : ""}`}><Sparkles /><span>Draft</span></Link>
         <Link href="/rewards" className={pathname.startsWith("/rewards") ? "active" : ""}><Goal /><span>Rewards</span></Link>
         <Link href="/learn" className={pathname.startsWith("/learn") ? "active" : ""}><BookOpen /><span>Learn</span></Link>
       </nav>

@@ -1,9 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { launches } from "@/lib/site-data";
-
 const baseUrl = "https://sportpad.fun";
-const lastModified = new Date("2026-09-18T00:00:00.000Z");
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const pages: Array<{
@@ -27,15 +24,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     ...pages.map((page) => ({
       url: `${baseUrl}${page.path}`,
-      lastModified,
       changeFrequency: page.changeFrequency,
       priority: page.priority,
-    })),
-    ...launches.map((launch) => ({
-      url: `${baseUrl}/launches/${launch.slug}`,
-      lastModified,
-      changeFrequency: "daily" as const,
-      priority: 0.7,
     })),
   ];
 }

@@ -5,22 +5,22 @@ import "./product-pages.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://sportpad.fun"),
   title: {
-    default: "SportPad — Sports coins with fan-token rewards",
+    default: "SportPad | Sports coins with Fan Token rewards",
     template: "%s · SportPad",
   },
-  description: "Launch sports-native coins on Solana and turn creator fees into transparent fan-token rewards.",
+  description: "Explore SportPad's private Solana launch builder and the planned route from creator fees to official Fan Token rewards and SPORTPAD buyback + burn.",
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     url: "/",
     siteName: "SportPad",
-    title: "SportPad — Sports coins with fan-token rewards",
-    description: "Explore a transparent Solana launchpad concept for sports community coins and verified fan-token rewards.",
+    title: "SportPad | Sports coins with Fan Token rewards",
+    description: "Explore private Solana launch drafts with official Fan Token reward planning and transparent SPORTPAD economics.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SportPad — Sports coins with fan-token rewards",
-    description: "A transparent Solana launchpad concept for sports community coins and verified fan-token rewards.",
+    title: "SportPad | Sports coins with Fan Token rewards",
+    description: "Private Solana launch drafts with official Fan Token reward planning and transparent SPORTPAD economics.",
   },
   other: {
     "theme-color": "#070a08",

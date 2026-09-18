@@ -16,24 +16,24 @@ import {
 } from "lucide-react";
 
 import { SiteChrome } from "@/components/site-chrome";
-import { DemoBadge, PageIntro, SafetyNotice, SectionHeading } from "@/components/sport-ui";
+import { PageIntro, SafetyNotice, SectionHeading } from "@/components/sport-ui";
 import { Button } from "@/components/ui/button";
 
 const burnStages = [
   {
     icon: CircleDollarSign,
     title: "Fee leg finalized",
-    copy: "Exactly 20% of a reconciled qualifying creator-fee batch becomes a SPORT acquisition intent.",
+    copy: "The planned 20% share of a reconciled qualifying creator-fee batch becomes a SPORTPAD acquisition intent.",
   },
   {
     icon: Coins,
-    title: "SPORT acquired",
+    title: "SPORTPAD acquired",
     copy: "Execution proceeds only inside published quote, price-impact, slippage, and treasury limits.",
   },
   {
     icon: Flame,
     title: "BurnChecked submitted",
-    copy: "Acquired SPORT is destroyed with the SPL Token BurnChecked instruction—not sent to a vanity wallet.",
+    copy: "Acquired SPORTPAD is destroyed with the SPL Token BurnChecked instruction, not sent to a vanity wallet.",
   },
   {
     icon: BadgeCheck,
@@ -48,26 +48,25 @@ export default function SportTokenPage() {
       <main className="page-wrap inner-page">
         <PageIntro
           kicker="Planned platform token"
-          title="SPORT is the protocol token concept—not a deployed asset."
-          copy="SportPad’s proposed economics route 20% of qualifying creator fees toward market purchases and permanent burns of a future SPORT token. The mint, supply, launch terms, and utility are not final."
+          title="SPORTPAD is a protocol token concept, not a deployed asset."
+          copy="The planned fee route sends 80% toward official Fan Token rewards and 20% toward SPORTPAD buybacks and burns. The SPORTPAD mint, supply, launch terms, and utility are not final."
         >
           <div className="page-stat-card">
-            <DemoBadge />
-            <strong>TBD</strong>
-            <span>SPORT mint address</span>
-            <small>Mainnet deployment locked</small>
+            <strong>Not deployed</strong>
+            <span>SPORTPAD mint address</span>
+            <small>No official address exists</small>
           </div>
         </PageIntro>
 
         <SafetyNotice>
-          No SPORT token has been deployed, offered, sold, or made tradeable through this build. Ignore any address claiming to be official until it is published here and independently verifiable on Solana.
+          No SPORTPAD token has been deployed, offered, sold, or made tradeable through this build. Ignore any address claiming to be official until it is published here and independently verifiable on Solana.
         </SafetyNotice>
 
-        <section className="content-section protocol-stats" aria-label="SPORT deployment status">
+        <section className="content-section protocol-stats" aria-label="SPORTPAD deployment status">
           <div><span>Mint</span><strong>Not deployed</strong><small>No official address</small></div>
           <div><span>Total supply</span><strong>Not defined</strong><small>Tokenomics pending review</small></div>
-          <div><span>Buyback allocation</span><strong>20% target</strong><small>Qualifying creator fees</small></div>
-          <div><span>Execution</span><strong>Mainnet locked</strong><small>Audit and canary required</small></div>
+          <div><span>Official Fan Token rewards</span><strong>80% planned</strong><small>No reward vaults deployed</small></div>
+          <div><span>SPORTPAD buyback + burn</span><strong>20% planned</strong><small>Execution not deployed</small></div>
         </section>
 
         <section className="page-section">
@@ -90,35 +89,35 @@ export default function SportTokenPage() {
 
         <section className="page-section calculator-layout">
           <div>
-            <p className="section-eyebrow">Illustrative accounting</p>
-            <h2>The percentage is fixed in the concept. The output is not.</h2>
-            <p>A 12.50 SOL finalized fee batch would create a 2.50 SOL SPORT buyback intent. The number of SPORT acquired depends on an executable quote at that moment; no token-output estimate is guaranteed.</p>
+            <p className="section-eyebrow">Current deployment state</p>
+            <h2>The percentages are planned. No token output exists yet.</h2>
+            <p>No creator-fee collector, SPORTPAD mint, buyback executor, or burn pipeline is deployed. SportPad will not show acquisition or burn totals until each value is backed by a finalized transaction and verified supply change.</p>
             <ul className="check-list">
-              <li><CheckCircle2 /> Integer-safe 80 / 20 split</li>
-              <li><CheckCircle2 /> Maximum price-impact policy</li>
-              <li><CheckCircle2 /> Replay-safe settlement IDs</li>
-              <li><CheckCircle2 /> Post-burn supply verification</li>
+              <li><CheckCircle2 /> 80% official Fan Token rewards</li>
+              <li><CheckCircle2 /> 20% SPORTPAD buyback + burn</li>
+              <li><CheckCircle2 /> No fabricated output estimates</li>
+              <li><CheckCircle2 /> Supply proof required after deployment</li>
             </ul>
           </div>
-          <div className="fee-calculator" aria-label="Demo SPORT buyback accounting example">
+          <div className="fee-calculator" aria-label="SPORTPAD deployment state">
             <div className="fee-calculator-head">
               <Flame />
-              <div><span>DEMO BATCH</span><strong>SET-SPORT-DEMO-0001</strong></div>
+              <div><span>LIVE EXECUTION</span><strong>Not deployed</strong></div>
             </div>
             <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Gross creator fees</span><strong className="mt-2 block text-xl">12.50 SOL</strong></div>
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">20% buyback intent</span><strong className="mt-2 block text-xl text-[#9cff57]">2.50 SOL</strong></div>
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">SPORT acquired</span><strong className="mt-2 block text-xl">Demo only</strong></div>
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Verified supply delta</span><strong className="mt-2 block text-xl">Demo only</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Fee collector</span><strong className="mt-2 block text-xl">Not deployed</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">SPORTPAD mint</span><strong className="mt-2 block text-xl">Not deployed</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Buyback execution</span><strong className="mt-2 block text-xl">Disabled</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Verified burns</span><strong className="mt-2 block text-xl">No events yet</strong></div>
             </div>
-            <p>Values illustrate the accounting surface. They are not a quote, forecast, token allocation, or promise of future performance.</p>
+            <p>These are deployment states, not balances, quotes, forecasts, or token allocations.</p>
           </div>
         </section>
 
         <section className="page-section">
           <SectionHeading
             eyebrow="Utility boundaries"
-            title="What SPORT may coordinate—and what it will never promise."
+            title="What SPORTPAD may coordinate and what it will never promise."
             copy="Final utility must be technically useful, legally reviewed, and published before deployment. Holding a platform token should never be presented as guaranteed income."
           />
           <div className="route-paths">
@@ -131,7 +130,7 @@ export default function SportTokenPage() {
             <div>
               <p className="section-eyebrow">Explicitly not promised</p>
               <h2>No yield or ownership claims</h2>
-              <p>SPORT does not represent equity, club ownership, dividends, interest, revenue rights, guaranteed appreciation, guaranteed liquidity, or access to a team’s official benefits.</p>
+              <p>SPORTPAD does not represent equity, club ownership, dividends, interest, revenue rights, guaranteed appreciation, guaranteed liquidity, or access to a team’s official benefits.</p>
               <span className="route-label negative">No guaranteed return</span>
             </div>
             <div className="route-safety">
@@ -166,15 +165,15 @@ export default function SportTokenPage() {
             </span>
           </div>
           <Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
-            <Link href="/transparency">Open demo proofs <ArrowRight /></Link>
+            <Link href="/transparency">View system status <ArrowRight /></Link>
           </Button>
         </section>
 
         <section className="final-cta compact-cta">
           <div>
             <p className="section-eyebrow">Understand the whole route</p>
-            <h2>SPORT is one leg of a two-outcome fee system.</h2>
-            <p>The other 80% is designed to fund verified Fan Token rewards for eligible community-token holders.</p>
+            <h2>The planned fee route has two outcomes.</h2>
+            <p>The proposal directs 80% to official Fan Token rewards and 20% to SPORTPAD buybacks and burns.</p>
           </div>
           <div>
             <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 text-[#071008] hover:bg-[#adff7d]">

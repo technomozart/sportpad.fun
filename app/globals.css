@@ -121,6 +121,7 @@ a { text-decoration: none; }
 .launch-card:hover::after { transform: translateX(100%); }
 .token-mark { display: grid; flex: 0 0 auto; width: 44px; height: 44px; place-items: center; border: 1px solid color-mix(in srgb, var(--token-color), transparent 58%); border-radius: 14px; background: color-mix(in srgb, var(--token-color), transparent 88%); box-shadow: inset 0 1px rgba(255,255,255,.12); }
 .token-mark span { color: var(--token-color); font-size: .72rem; font-weight: 800; letter-spacing: -.02em; }
+.token-mark img { width: 78%; height: 78%; border-radius: 50%; object-fit: contain; }
 .data-label { color: rgba(255,255,255,.34); font-size: .7rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .reward-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 12px currentColor; }
 .empty-rewards { border: 1px dashed rgba(255,255,255,.11); border-radius: 20px; padding: 60px 22px; text-align: center; background: rgba(255,255,255,.018); }
@@ -293,6 +294,7 @@ a { text-decoration: none; }
 .curve-row > div { display: flex; justify-content: space-between; margin-bottom: 7px; color: rgba(255,255,255,.32); font-size: .58rem; }
 .launch-card-footer { display: flex; align-items: center; gap: 6px; margin-top: 13px; color: rgba(255,255,255,.24); font-size: .56rem; }
 .launch-card-footer svg { width: 12px; }
+.launch-example-copy { margin-top: 16px; color: rgba(255,255,255,.52); font-size: .76rem; line-height: 1.55; }
 .token-mark-sm { width: 32px; height: 32px; border-radius: 10px; }
 .token-mark-md { width: 42px; height: 42px; }
 .token-mark-lg { width: 52px; height: 52px; border-radius: 16px; }

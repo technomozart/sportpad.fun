@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "SportPad — sports community coins and fan-token reward accounting";
+export const alt = "SportPad | sports community coins and Fan Token reward accounting";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -55,7 +55,7 @@ export default function OpenGraphImage() {
               letterSpacing: 1,
             }}
           >
-            SOLANA · DEMO EXPERIENCE
+            SOLANA · PRIVATE DRAFT BUILDER
           </div>
         </div>
 
@@ -67,7 +67,7 @@ export default function OpenGraphImage() {
             Sports community coins with transparent reward accounting.
           </div>
           <div style={{ display: "flex", marginTop: 26, color: "rgba(246,255,242,0.66)", fontSize: 25, lineHeight: 1.35 }}>
-            Explore how creator-fee value could fund verified fan-token rewards and platform-token buybacks.
+            Explore how creator-fee value could fund official Fan Token rewards and SPORTPAD buyback + burn.
           </div>
         </div>
 
@@ -82,7 +82,7 @@ export default function OpenGraphImage() {
             fontSize: 18,
           }}
         >
-          <span>Community-created · No club endorsement implied</span>
+          <span>Creator-made community tokens · Official Fan Token rewards</span>
           <span style={{ color: "#f6fff2", fontWeight: 700 }}>sportpad.fun</span>
         </div>
       </div>

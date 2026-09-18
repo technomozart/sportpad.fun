@@ -8,10 +8,10 @@ export default function RewardsPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Wallet rewards" title="Accruing, funded, and claimable are not the same thing." copy="Your dashboard separates moving estimates from finalized allocations so you always know what is projected, what is settling, and what is actually ready to claim.">
+        <PageIntro kicker="Wallet rewards" title="Accruing, funded, and claimable are not the same thing." copy="The planned dashboard will separate estimates from finalized allocations. No reward indexer, vault, epoch, or claim program is deployed today.">
           <div className="reward-hero-formula"><Calculator /><span>Your reward</span><strong>funded pool × your token-seconds</strong><small>÷ all eligible token-seconds</small></div>
         </PageIntro>
-        <SafetyNotice>The dashboard below uses a coherent demo wallet. Production balances will appear only after wallet ownership is verified and finalized chain data is reconciled.</SafetyNotice>
+        <SafetyNotice>No wallet balances or reward amounts are simulated. Real positions will appear only after wallet ownership is verified and finalized protocol data exists.</SafetyNotice>
         <section className="content-section"><RewardDashboard /></section>
         <section className="page-section">
           <SectionHeading eyebrow="Methodology" title="Time in the stands matters." copy="The target model uses time-weighted balances instead of one convenient end-of-epoch snapshot." />

@@ -1,58 +1,69 @@
-# SportPad
+# SPORTPAD
 
 [![CI](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml/badge.svg)](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml)
 [![Live site](https://img.shields.io/badge/live-sportpad.fun-9cff57)](https://sportpad.fun)
 ![Mainnet locked](https://img.shields.io/badge/mainnet-locked-ff8f94)
 
-SportPad is a sports-native Solana launchpad prototype. It lets creators build
-private community-token drafts, associate them with verified Fan Token reward
-assets, and inspect a proposed 80% reward / 20% SPORT buyback-and-burn flow.
+SPORTPAD is a sports-native Solana launchpad interface. Creators can save a
+private community-token draft, choose an official Fan Token as its planned
+holder reward, and review the proposed 80% Fan Token rewards / 20% SPORTPAD
+buyback + burn model.
 
 Live site: [sportpad.fun](https://sportpad.fun)
 
 ## What works today
 
-- Twelve responsive product routes covering discovery, launch creation, rewards,
-  matchday context, Fan Token verification, economics, policy, learning, SPORT,
-  and protocol transparency.
-- Search, filters, market views, interactive chart fixtures, estimators, reward
-  previews, accordions, wallet detection, and a four-step draft builder.
-- Private launch-draft persistence in Cloudflare D1.
+- A responsive product site covering discovery, launch creation, rewards,
+  matchday, official Fan Tokens, economics, policy, learning, SPORTPAD, and
+  protocol transparency.
+- A four-step private draft builder with a required drag-and-drop or file-picker
+  token image. PNG, JPEG, and WebP files up to 5 MB are accepted. Description is
+  optional.
+- Draft metadata in Cloudflare D1 and uploaded draft images in private
+  Cloudflare R2 objects.
+- A 96-asset FanTokens catalog view: 82 assets have official Solana mints in the
+  Chiliz registry and are selectable; 14 catalog-only assets are shown without
+  an invented Solana address or execution route.
+- A public launch feed backed by D1 rows whose status is `live`. Clearly marked
+  product examples appear only while there are no public launch records and are
+  removed automatically when the first public record appears.
 - Read-only Helius and Jupiter health canaries with short timeouts, sanitized
   output, and cached health responses.
-- Integer-safe 80/20 accounting, time-weighted reward allocation, idempotent fee
-  ingestion identifiers, and settlement/epoch/claim schemas.
-- Exact Solana Fan Token mints sourced from the official Chiliz registry.
+- Integer-safe accounting helpers and versioned D1 schemas for later fee,
+  settlement, epoch, and claim processing.
 
-All market rows, balances, reward events, and launch concepts shown in the UI are
-clearly labeled demo fixtures.
+The interface does not display fabricated market caps, trading volume, holder
+counts, reward balances, settlement events, or match results.
 
 ## Intentionally disabled
 
-Token creation, trading, creator-fee collection, swaps, signing, custody,
-cross-chain replenishment, SPORT burns, and reward claims are hard-locked. They
-must not be enabled until signer isolation, rate limits, dependency upgrades,
-contract review, legal/commercial review, monitoring, capped canaries, and an
-external security audit are complete.
+Creating or trading a token, configuring creator-fee sharing, collecting fees,
+swapping, signing, custody, cross-chain replenishment, SPORTPAD burns, and
+reward claims are not deployed. A saved draft or a `live` public record is not
+an onchain launch.
 
-Raw private keys and seed phrases do not belong in this repository or in local
-environment files. Production signers must use policy-controlled KMS, HSM, or
-MPC references.
+Those capabilities must remain locked until signer isolation, rate limits,
+dependency review, legal and commercial review, monitoring, capped canaries,
+and an external security audit are complete.
+
+Raw private keys and seed phrases do not belong in this repository, chat, or
+local environment files. Production signers must use policy-controlled KMS,
+HSM, or MPC references.
 
 ## Product routes
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Product overview and protocol story |
-| `/discover` | Searchable launch-concept market |
-| `/launches/[slug]` | Interactive concept detail |
-| `/launch` | Private four-step draft builder |
-| `/rewards` | Holder reward dashboard preview |
-| `/fan-tokens` | Verified Fan Token registry and history |
-| `/matchday` | Sports-native fixture context |
-| `/how-it-works` | Accounting and acquisition mechanics |
-| `/transparency` | Provider health and demo evidence ledger |
-| `/sport` | Planned SPORT token status |
+| `/` | Product overview and honest public-launch or example feed |
+| `/discover` | Search public launch records, with examples only when the feed is empty |
+| `/launches/[slug]` | Public launch or clearly marked example detail |
+| `/launch` | Private four-step draft builder and image upload |
+| `/rewards` | Empty reward state until the reward system is deployed |
+| `/fan-tokens` | Official Fan Token catalog and Solana mint registry |
+| `/matchday` | Empty matchday state until a real data source is connected |
+| `/how-it-works` | Planned accounting and acquisition mechanics |
+| `/transparency` | Provider health and deployment status |
+| `/sport` | Planned SPORTPAD token status |
 | `/learn` | Guides, glossary, and risk disclosure |
 | `/policy` | Creator rules and mainnet readiness gates |
 
@@ -66,14 +77,13 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Add server-only Helius and Jupiter credentials to `.env.local`. That file is
-ignored by Git. Leave `MAINNET_EXECUTION_ENABLED=false`.
+Add server-only Helius and Jupiter credentials to `.env.local` if you want the
+read-only provider checks. The file is ignored by Git. Keep
+`MAINNET_EXECUTION_ENABLED=false`.
 
-```dotenv
-HELIUS_API_KEY=
-JUPITER_API_KEY=
-MAINNET_EXECUTION_ENABLED=false
-```
+Cloudflare deployments bind D1 as `DB` and R2 as `BUCKET`. Versioned D1
+migrations live in `drizzle/`; migration `0002_eager_sentinels.sql` adds the R2
+image metadata fields to launch drafts.
 
 ## Verification
 
@@ -93,6 +103,6 @@ The same gates run in GitHub Actions for every pull request and push to `main`.
 - [Integration requirements](docs/INTEGRATIONS.md)
 - [Security reporting](SECURITY.md)
 
-Community-created tokens are not club-issued. SportPad is not affiliated with
-or endorsed by any club, league, Chiliz, Socios.com, or FanTokens. Digital
-assets are volatile and may lose all value.
+The reward catalog identifies official Fan Tokens and their published Solana
+mints. SPORTPAD community tokens are separate assets. Digital assets are
+volatile and may lose all value.

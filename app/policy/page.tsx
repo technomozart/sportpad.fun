@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 const lifecycle = [
   { icon: Sparkles, title: "Private draft", copy: "A creator defines an original community identity, selects an allowlisted reward asset, and acknowledges the proposed economics." },
   { icon: FileCheck2, title: "Policy review", copy: "Names, media, links, claims, rights, and prohibited-content checks must pass before a public launch can be prepared." },
-  { icon: Layers3, title: "Technical review", copy: "Mint configuration, Pump fee shares, reward route, exclusions, signers, and monitoring are simulated and verified." },
+  { icon: Layers3, title: "Technical review", copy: "Mint configuration, Pump fee shares, reward route, exclusions, signers, and monitoring must be simulated and verified." },
   { icon: ShieldCheck, title: "Capped canary", copy: "After audits, a limited-value launch tests indexing, settlement, inventory, claims, pauses, and incident response." },
   { icon: BadgeCheck, title: "Public readiness", copy: "Only a reviewed launch with complete disclosures, functioning evidence links, and supported operations can leave the mainnet lock." },
 ];
@@ -76,7 +76,7 @@ export default function PolicyPage() {
           />
           <div className="four-checks">
             <article><span>01</span><Goal /><h3>Independent identity</h3><p>Use an original community brand. Do not copy a club crest, league mark, athlete likeness, sponsor artwork, or confusingly similar trade dress without documented rights.</p></article>
-            <article><span>02</span><BadgeCheck /><h3>Honest affiliation</h3><p>Clearly state that the community token is unofficial. A verified reward mint never makes the launch team-issued, sponsored, approved, or endorsed.</p></article>
+            <article><span>02</span><BadgeCheck /><h3>Official reward identity</h3><p>Use the exact official Fan Token name and mint only for the selected reward asset. Keep the community token&apos;s own name, image, and creator identity clear.</p></article>
             <article><span>03</span><Scale /><h3>Accurate claims</h3><p>Do not promise price performance, guaranteed rewards, APR, dividends, ownership, official utility, or a benefit the launch cannot independently substantiate.</p></article>
             <article><span>04</span><KeyRound /><h3>Controlled wallets</h3><p>Creators must use wallets they control, disclose relevant allocations and conflicts, and never request another person’s seed phrase or private key.</p></article>
           </div>
@@ -108,7 +108,7 @@ export default function PolicyPage() {
         <section id="lifecycle" className="page-section scroll-mt-28">
           <SectionHeading
             eyebrow="Launch lifecycle"
-            title="Saving a draft is the beginning—not an approval."
+            title="Saving a draft is the beginning, not an approval."
             copy="The current builder creates a private concept record only. Token creation, trading, fee routing, and mainnet settlement remain disabled."
           />
           <div className="process-timeline">
@@ -186,7 +186,7 @@ export default function PolicyPage() {
               ["IP and abuse intake", "Process designed", "Staffed verified contact and response targets", "Blocked"],
               ["Creator moderation", "Rules designed", "Review tooling, audit log, appeals", "Blocked"],
               ["Protocol security", "Private prototype", "External review and capped canary", "Blocked"],
-              ["Public disclosures", "Demo surfaces", "Live addresses, fees, risks, incidents", "Blocked"],
+              ["Public disclosures", "Prototype surfaces", "Live addresses, fees, risks, incidents", "Blocked"],
             ].map(([control, state, evidence, gate]) => (
               <div className="asset-row" key={control}>
                 <div><ShieldCheck className="size-5 text-[#9cff57]" /><span><strong>{control}</strong><small>Launch requirement</small></span></div>

@@ -1,4 +1,4 @@
-import { DemoBadge, PageIntro, SafetyNotice } from "@/components/sport-ui";
+import { PageIntro, SafetyNotice } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { MarketExplorer } from "./market-explorer";
 
@@ -7,10 +7,10 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Pro
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Discover launches" title="Every community coin, reward route, and market state." copy="Compare independently created sports coins without confusing them for official club assets. Filter by sport, verified reward token, and route availability.">
-          <div className="page-stat-card"><DemoBadge /><strong>6</strong><span>indexed launch concepts</span><small>Execution disabled</small></div>
+        <PageIntro kicker="Discover launches" title="Sports community coins with official Fan Token rewards." copy="Published SportPad records appear here without invented market figures. If the public feed is confirmed empty, clearly marked product examples explain how a launch could work.">
+          <div className="page-stat-card"><strong>Public feed</strong><span>Published records only</span><small>Examples appear only when empty</small></div>
         </PageIntro>
-        <SafetyNotice>Community tokens are speculative and unaffiliated. “Verified” applies only to the linked reward mint. All market values on this private build are demo fixtures.</SafetyNotice>
+        <SafetyNotice>The named reward assets are official Fan Tokens with registry-listed Solana mints. Market and reward figures are withheld unless a verifiable source is available.</SafetyNotice>
         <section className="content-section"><MarketExplorer initialQuery={params.q ?? ""} /></section>
       </main>
     </SiteChrome>
