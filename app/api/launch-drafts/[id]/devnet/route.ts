@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getDb } from "@/db";
 import { devnetSubmissions, launchDrafts } from "@/db/schema";
+import { isUuidV4 } from "@/lib/protocol/identifiers";
 import {
   normalizeTransactionSignature,
   validateDevnetRecipients,
@@ -60,10 +61,6 @@ function privateJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 
-function validDraftId(id: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-}
-
 type DevnetSubmission = typeof devnetSubmissions.$inferSelect;
 
 function serializeDevnetState(
@@ -73,6 +70,7 @@ function serializeDevnetState(
   const pendingCreate = submissions.find((submission) => submission.kind === "create" && ["recorded", "verified"].includes(submission.status));
   const pendingFee = submissions.find((submission) => submission.kind === "fee" && ["recorded", "verified"].includes(submission.status));
   const frozenSubmission = pendingFee ?? pendingCreate;
+  const isPublished = draft.status === "devnet_published" && Boolean(draft.devnetPublishedAt);
   return {
     draftId: draft.id,
     chain: "solana:devnet",
@@ -84,6 +82,8 @@ function serializeDevnetState(
     rewardWallet: frozenSubmission?.rewardWallet ?? draft.devnetRewardWallet,
     burnWallet: frozenSubmission?.burnWallet ?? draft.devnetBurnWallet,
     verifiedAt: draft.devnetVerifiedAt,
+    publishedAt: draft.devnetPublishedAt,
+    publicPath: isPublished ? `/launches/${encodeURIComponent(draft.id)}` : null,
     pendingMint: pendingCreate?.mint ?? null,
     pendingCreateSignature: pendingCreate?.signature ?? null,
     pendingCreateBlockhash: pendingCreate?.blockhash ?? null,
@@ -91,7 +91,7 @@ function serializeDevnetState(
     pendingFeeSignature: pendingFee?.signature ?? null,
     pendingFeeBlockhash: pendingFee?.blockhash ?? null,
     pendingFeeLastValidBlockHeight: pendingFee?.lastValidBlockHeight ?? null,
-    status: draft.devnetVerifiedAt ? "verified" : draft.devnetCreateSignature ? "coin_created" : draft.devnetMetadataUri ? "prepared" : "not_started",
+    status: isPublished ? "published" : draft.devnetVerifiedAt ? "verified" : draft.devnetCreateSignature ? "coin_created" : draft.devnetMetadataUri ? "prepared" : "not_started",
   };
 }
 
@@ -236,7 +236,7 @@ export async function GET(request: Request, context: DevnetRouteContext) {
   const ownerUserId = getLaunchDraftOwner(request);
   if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
   const { id } = await context.params;
-  if (!validDraftId(id)) return privateJson({ error: "Draft not found." }, 404);
+  if (!isUuidV4(id)) return privateJson({ error: "Draft not found." }, 404);
   try {
     const draft = await ownerDraft(id, ownerUserId);
     if (!draft) return privateJson({ error: "Draft not found." }, 404);
@@ -258,7 +258,7 @@ export async function POST(request: Request, context: DevnetRouteContext) {
   const origin = request.headers.get("origin");
   if (origin !== url.origin) return privateJson({ error: "Cross-origin launch requests are not allowed." }, 403);
   const { id } = await context.params;
-  if (!validDraftId(id)) return privateJson({ error: "Draft not found." }, 404);
+  if (!isUuidV4(id)) return privateJson({ error: "Draft not found." }, 404);
 
   let input: z.infer<typeof actionSchema>;
   try {

@@ -10,7 +10,8 @@ read-only provider health.
 ### Cloudflare D1
 
 - Binding name: `DB`.
-- Stores private launch drafts and public rows selected by `status = live`.
+- Stores private launch drafts and creator-published devnet receipts selected by
+  `status = devnet_published`.
 - Stores the R2 object key, MIME type, and size for each uploaded image.
 - Schema changes are versioned under `drizzle/`; apply every pending migration
   to each environment before deploying matching application code.
@@ -20,8 +21,8 @@ read-only provider health.
 - Binding name: `BUCKET`.
 - Receives PNG, JPEG, or WebP draft images up to 5 MB after server-side type and
   signature checks.
-- Objects remain private. A public launch image is served through an API that verifies
-  the matching D1 record has `live` status.
+- Objects remain private. A public launch image is served through an API that
+  verifies the matching D1 record has `devnet_published` status.
 - A failed draft insert removes the newly uploaded object.
 
 ### Solana wallet verification
@@ -32,6 +33,9 @@ read-only provider health.
   24-hour session token in D1.
 - The browser receives an HttpOnly, SameSite wallet-session cookie. Connecting
   a wallet alone never authenticates a launch request.
+- Phantom, Solflare, Backpack, Brave Wallet, and compatible injected Solana
+  providers are detected. The selected provider is used consistently for the
+  challenge and transaction approvals.
 - Every devnet transaction still requires a separate wallet approval.
 
 ### Pump devnet
@@ -42,10 +46,15 @@ read-only provider health.
 - The creator wallet signs Pump V2 coin creation with no initial buy, mayhem,
   cashback, or Pump holder-reward mode.
 - The creator wallet separately signs an exact 8,000 / 2,000 bps fee-sharing
-  configuration for the reward and SPORTPAD treasury addresses.
+  configuration for the two creator-supplied devnet recipient addresses.
 - SportPad verifies finalized transactions, program ownership, creator state,
   the Token-2022 mint, exact shareholders, and revoked fee-share admin before
   marking a draft devnet-verified.
+- Devnet verification remains private. Publication requires a second explicit
+  creator action with the verified wallet session and a devnet-only
+  acknowledgement. The public record exposes the metadata URI, configured
+  recipient addresses, and transaction receipts, not owner or session data. The
+  creator wallet is still discoverable from the linked public Solana transaction.
 - Signed evidence is persisted in D1 before broadcast. Unique mint and signature
   indexes plus compare-and-set final writes prevent duplicate or racing launches.
 - Pump creator fees accrue in program vaults and still require later sweeping
@@ -54,10 +63,13 @@ read-only provider health.
 
 ### Official Fan Token data
 
-- The selectable registry contains 82 exact Solana mints from the official
-  Chiliz token address registry.
+- Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain supply
+  model across Chiliz Chain, Solana, and Base through LayerZero.
+- The selectable registry contains 82 exact Solana token addresses from the
+  official Chiliz token address registry. These identify official Fan Tokens
+  on Solana, not independent SportPad copies.
 - Another 14 FanTokens catalog assets are displayed as catalog-only because the
-  snapshot has no official Solana mint for them.
+  snapshot has no official Solana token address for them.
 - Registry membership never enables swaps by itself. Liquidity, inventory, and
   canary checks are still required per asset.
 
@@ -76,7 +88,7 @@ will report that configuration is unavailable.
 - Policy-controlled references for the reward treasury, reward vault, and
   SPORTPAD buyback executor signers.
 - A deployed and independently verified SPORTPAD mint for buyback and burn.
-- A written allowlist limited to official Fan Token Solana mints with verified
+- A written allowlist limited to official Fan Token Solana addresses with verified
   liquidity and inventory routes.
 - Per-transaction and daily limits, pause controls, monitoring, and independent
   RPC reconciliation.

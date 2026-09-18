@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, BadgeCheck, Check, CheckCircle2, Flame, Goal, ImagePlus, Info, LockKeyhole, Search, ShieldCheck, Sparkles, Trash2, Trophy, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeCheck, Check, CheckCircle2, Clock3, Flame, Goal, ImagePlus, Info, LockKeyhole, LogIn, Search, ShieldCheck, Sparkles, Trash2, Trophy, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,28 @@ import { fanAssets } from "@/lib/site-data";
 import { DevnetLaunchPanel } from "./devnet-launch-panel";
 
 const steps = ["Community token", "Reward asset", "Economics", "Review"];
+
+type SavedLaunchDraft = {
+  id: string;
+  name: string;
+  symbol: string;
+  description: string;
+  sport: string;
+  website: string | null;
+  social: string | null;
+  rewardSymbol: string;
+  rightsAttested: boolean;
+  unofficialAttested: boolean;
+  economicsAttested: boolean;
+  imageUrl: string | null;
+  createdAt: string;
+};
+
+function savedDate(value: string) {
+  const timestamp = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
+  if (!Number.isFinite(timestamp)) return "Saved draft";
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(timestamp);
+}
 
 export function LaunchBuilder() {
   const [step, setStep] = useState(0);
@@ -33,7 +55,12 @@ export function LaunchBuilder() {
   const [terms, setTerms] = useState({ rights: false, unofficial: false, economics: false });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [resumed, setResumed] = useState(false);
   const [savedDraftId, setSavedDraftId] = useState("");
+  const [savedDrafts, setSavedDrafts] = useState<SavedLaunchDraft[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(true);
+  const [authenticationRequired, setAuthenticationRequired] = useState(false);
+  const [draftsError, setDraftsError] = useState("");
   const [error, setError] = useState("");
   const [validationMessage, setValidationMessage] = useState("");
   const [rewardNotice, setRewardNotice] = useState("");
@@ -47,8 +74,32 @@ export function LaunchBuilder() {
   const canContinue = step === 0 ? name.trim().length >= 2 && symbol.length >= 2 && Boolean(imageFile) && !imageValidating : step === 1 ? Boolean(selected) : step === 2 ? Object.values(terms).every(Boolean) : true;
 
   useEffect(() => () => {
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    if (imagePreview.startsWith("blob:")) URL.revokeObjectURL(imagePreview);
   }, [imagePreview]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/launch-drafts", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json() as { drafts?: SavedLaunchDraft[]; error?: string };
+        if (response.status === 401) {
+          setAuthenticationRequired(true);
+          setSavedDrafts([]);
+          return;
+        }
+        if (!response.ok) throw new Error(body.error ?? "Saved drafts could not be loaded.");
+        setAuthenticationRequired(false);
+        setSavedDrafts(Array.isArray(body.drafts) ? body.drafts : []);
+      })
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setDraftsError(caught instanceof Error ? caught.message : "Saved drafts could not be loaded.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDraftsLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
 
   async function chooseImage(file: File | null) {
     const selection = ++imageSelection.current;
@@ -118,7 +169,7 @@ export function LaunchBuilder() {
       return;
     }
     if (step === 0) setValidationMessage("Add a name, a 2-10 character ticker, and a token image.");
-    if (step === 1) setValidationMessage("Choose an official Fan Token with a registry-listed Solana mint.");
+    if (step === 1) setValidationMessage("Choose an official Fan Token with a registry-listed Solana token address.");
     if (step === 2) setValidationMessage("Confirm all three creator attestations before continuing.");
   }
 
@@ -136,10 +187,38 @@ export function LaunchBuilder() {
     setTerms({ rights: false, unofficial: false, economics: false });
     setSaving(false);
     setSaved(false);
+    setResumed(false);
     setSavedDraftId("");
     setError("");
     setValidationMessage("");
     setRewardNotice("");
+  }
+
+  function resumeDraft(draft: SavedLaunchDraft) {
+    const rewardAsset = fanAssets.find((asset) => asset.symbol === draft.rewardSymbol);
+    if (!rewardAsset) {
+      setDraftsError("That draft uses a Fan Token that is no longer in the supported registry.");
+      return;
+    }
+    setName(draft.name);
+    setSymbol(draft.symbol);
+    setDescription(draft.description);
+    setSport(draft.sport);
+    setWebsite(draft.website ?? "");
+    setSocial(draft.social ?? "");
+    setReward(rewardAsset.symbol);
+    setImageFile(null);
+    setImagePreview(draft.imageUrl ?? "");
+    setTerms({
+      rights: draft.rightsAttested,
+      unofficial: draft.unofficialAttested,
+      economics: draft.economicsAttested,
+    });
+    setSavedDraftId(draft.id);
+    setError("");
+    setDraftsError("");
+    setResumed(true);
+    setSaved(true);
   }
 
   async function saveDraft() {
@@ -150,37 +229,54 @@ export function LaunchBuilder() {
       form.set("payload", JSON.stringify({ name, symbol, description, sport, website, social, rewardSymbol: reward, attestations: terms }));
       form.set("image", imageFile, imageFile.name);
       const response = await fetch("/api/launch-drafts", { method: "POST", body: form });
-      const body = (await response.json()) as { error?: string; imageStored?: boolean; draft?: { id?: string } };
+      const body = (await response.json()) as { error?: string; imageStored?: boolean; draft?: SavedLaunchDraft };
+      if (response.status === 401) {
+        setAuthenticationRequired(true);
+        throw new Error("Sign in before saving this private draft.");
+      }
       if (!response.ok) throw new Error(body.error ?? "Draft could not be saved.");
       if (body.imageStored !== true) throw new Error("The image was not stored. Please retry.");
       if (!body.draft?.id) throw new Error("The saved draft identifier was missing. Please retry.");
       setSavedDraftId(body.draft.id);
+      setSavedDrafts((current) => [body.draft as SavedLaunchDraft, ...current.filter((draft) => draft.id !== body.draft?.id)]);
+      setResumed(false);
       setSaved(true);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Draft could not be saved."); }
     finally { setSaving(false); }
   }
 
-  if (saved) return <div className="launch-success"><div className="success-mark"><CheckCircle2 /></div>{imagePreview ? <img className="saved-artwork-preview" src={imagePreview} alt={`${name} token image`} /> : null}<p className="section-eyebrow">Private draft saved</p><h2>${symbol} is ready for technical review.</h2><p>Your image and draft details were stored. Mainnet remains locked. You can now test the actual Pump creation and creator-fee configuration on Solana devnet.</p><div className="success-summary"><span><strong>{name}</strong><small>Community token</small></span><span><strong>{selected.symbol}</strong><small>Official Fan Token reward</small></span><span><strong>80 / 20</strong><small>Proposed routing</small></span><span><strong>Draft saved</strong><small>Execution status</small></span></div>{savedDraftId ? <DevnetLaunchPanel draftId={savedDraftId} name={name} symbol={symbol} /> : null}<Button onClick={resetDraft} variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">Create another draft</Button></div>;
+  if (saved) return <div className="launch-success"><div className="success-mark"><CheckCircle2 /></div>{imagePreview ? <img className="saved-artwork-preview" src={imagePreview} alt={`${name} token image`} /> : null}<p className="section-eyebrow">{resumed ? "Private draft resumed" : "Private draft saved"}</p><h2>${symbol} is ready for technical review.</h2><p>{resumed ? "This private draft was restored from your account. Mainnet remains locked. You can continue its Pump creation and creator-fee configuration on Solana devnet." : "Your image and draft details were stored. Mainnet remains locked. You can now test the actual Pump creation and creator-fee configuration on Solana devnet."}</p><div className="success-summary"><span><strong>{name}</strong><small>Community token</small></span><span><strong>{selected.symbol}</strong><small>Official Fan Token reward</small></span><span><strong>80 / 20</strong><small>Proposed routing</small></span><span><strong>{resumed ? "Draft resumed" : "Draft saved"}</strong><small>Execution status</small></span></div>{savedDraftId ? <DevnetLaunchPanel draftId={savedDraftId} name={name} symbol={symbol} /> : null}<Button onClick={resetDraft} variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">Create another draft</Button></div>;
 
   return (
-    <div className="launch-builder">
-      <aside className="launch-steps"><div><p className="section-eyebrow">Launch builder</p><h2>Build a community token.</h2><p>The draft steps do not request a signature. Devnet approvals appear only after saving.</p></div><ol>{steps.map((label,index)=><li key={label} className={index === step ? "active" : index < step ? "complete" : ""}><span>{index < step ? <Check /> : index + 1}</span><div><strong>{label}</strong><small>{["Identity and community", "Official mint selection", "Immutable fee flow", "Confirm every detail"][index]}</small></div></li>)}</ol><div className="builder-safety"><ShieldCheck /><span><strong>Wallet safety</strong><small>SportPad never asks for private keys or seed phrases.</small></span></div></aside>
+    <>
+      <section className={`saved-drafts-panel ${authenticationRequired ? "sign-in-required" : ""}`} aria-labelledby="saved-drafts-title">
+        <div className="saved-drafts-heading">
+          <span className="saved-drafts-icon">{authenticationRequired ? <LogIn /> : <Clock3 />}</span>
+          <span><strong id="saved-drafts-title">{authenticationRequired ? "Sign in to keep drafts private" : "Your saved drafts"}</strong><small>{authenticationRequired ? "You can explore the builder now. Sign in before saving so only your account can reopen the draft." : draftsLoading ? "Checking this account for private drafts." : savedDrafts.length ? "Resume a private draft and continue its devnet review." : "You are signed in. Saved drafts will appear here."}</small></span>
+          {authenticationRequired ? <a href="/signin-with-chatgpt?return_to=%2Flaunch">Sign in with ChatGPT <ArrowRight /></a> : null}
+        </div>
+        {savedDrafts.length ? <div className="saved-draft-list">{savedDrafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><span className="saved-draft-art">{draft.imageUrl ? <img src={draft.imageUrl} alt="" /> : <TokenMark token={draft.symbol} color="#9cff57" />}</span><span><strong>{draft.name}</strong><small>${draft.symbol} · {draft.rewardSymbol} rewards</small><small>{savedDate(draft.createdAt)}</small></span><b>Resume <ArrowRight /></b></button>)}</div> : null}
+        {draftsError ? <p className="saved-drafts-error" role="status">{draftsError}</p> : null}
+      </section>
+      <div className="launch-builder">
+      <aside className="launch-steps"><div><p className="section-eyebrow">Launch builder</p><h2>Build a community token.</h2><p>The draft steps do not request a signature. Devnet approvals appear only after saving.</p></div><ol>{steps.map((label,index)=><li key={label} className={index === step ? "active" : index < step ? "complete" : ""}><span>{index < step ? <Check /> : index + 1}</span><div><strong>{label}</strong><small>{["Identity and community", "Official reward selection", "Immutable fee flow", "Confirm every detail"][index]}</small></div></li>)}</ol><div className="builder-safety"><ShieldCheck /><span><strong>Wallet safety</strong><small>SportPad never asks for private keys or seed phrases.</small></span></div></aside>
 
       <div className="launch-form-panel">
         <div className="form-panel-head"><span>STEP {step + 1} OF {steps.length}</span><strong>{steps[step]}</strong></div>
         {step === 0 ? <div className="form-step"><div className="form-title"><Sparkles /><span><h3>Create your token.</h3><p>Add the core details and upload the image people will recognize.</p></span></div><div className="form-grid"><label className="span-2">Token name<Input value={name} onChange={(event)=>setName(event.target.value.slice(0,32))} placeholder="e.g. The 12th Player" /><small>{name.length}/32</small></label><label>Ticker<Input value={symbol} onChange={(event)=>setSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,10))} placeholder="PLAYER" /></label><label>Sport<select value={sport} onChange={(event)=>setSport(event.target.value)}><option>Football</option><option>Combat</option><option>Motorsport</option><option>Basketball</option></select></label><label className="span-2">Description (optional)<Textarea value={description} onChange={(event)=>setDescription(event.target.value.slice(0,280))} placeholder="Tell people what the token is about." /><small>{description.length}/280</small></label><label>Website<Input value={website} onChange={(event)=>setWebsite(event.target.value)} placeholder="https://" /></label><label>X / social URL<Input value={social} onChange={(event)=>setSocial(event.target.value)} placeholder="https://x.com/" /></label><div className={`image-uploader span-2 ${dragActive ? "drag-active" : ""} ${imagePreview ? "has-image" : ""}`} onDragEnter={(event)=>{ event.preventDefault(); setDragActive(true); }} onDragOver={(event)=>event.preventDefault()} onDragLeave={(event)=>{ event.preventDefault(); setDragActive(false); }} onDrop={(event)=>{ event.preventDefault(); setDragActive(false); void chooseImage(event.dataTransfer.files[0] ?? null); }}>{imagePreview ? <><img src={imagePreview} alt="Token image preview" /><div className="image-upload-copy"><strong>{imageFile?.name}</strong><small>{imageFile ? `${(imageFile.size / 1_000_000).toFixed(2)} MB` : "Image selected"}</small><span><button type="button" onClick={()=>imageInput.current?.click()}><Upload /> Replace</button><button type="button" onClick={removeImage}><Trash2 /> Remove</button></span></div></> : <><ImagePlus /><span className="image-upload-copy"><strong>Drop image here or choose file</strong><small>{imageValidating ? "Checking image..." : `PNG, JPEG, or WebP. Maximum 5 MB and ${MAX_LAUNCH_IMAGE_DIMENSION} x ${MAX_LAUNCH_IMAGE_DIMENSION} px.`}</small><button type="button" disabled={imageValidating} onClick={()=>imageInput.current?.click()}><Upload /> {imageValidating ? "Checking" : "Choose image"}</button></span></>}<input ref={imageInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event)=>void chooseImage(event.target.files?.[0] ?? null)} /></div>{imageError ? <p className="form-error span-2" role="alert">{imageError}</p> : null}</div></div> : null}
 
-        {step === 1 ? <div className="form-step"><div className="form-title"><BadgeCheck /><span><h3>Choose the official Fan Token holders may earn.</h3><p>Every option below has an exact Solana mint published by the official registry.</p></span></div><label className="reward-search"><Search /><span className="sr-only">Search official Fan Tokens</span><Input value={rewardQuery} onChange={(event)=>setRewardQuery(event.target.value)} placeholder={`Search ${fanAssets.length} official Fan Tokens`} /></label><div className="reward-selector">{filteredAssets.map((asset)=><button key={asset.symbol} type="button" aria-pressed={reward === asset.symbol} className={reward === asset.symbol ? "selected" : ""} onClick={()=>{ setReward(asset.symbol); setRewardNotice(""); }}><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} size="lg" /><span><strong>{asset.name}</strong><small>${asset.symbol} · {asset.category}</small><code>{asset.mint.slice(0,7)}...{asset.mint.slice(-6)}</code></span><span className="asset-status status-registry-listed">Official mint</span>{reward === asset.symbol ? <CheckCircle2 className="selected-check" /> : null}</button>)}</div>{filteredAssets.length === 0 ? <div className="form-info"><Info /><p>No official Fan Token matches that search.</p></div> : null}{rewardNotice ? <div className="form-info" role="status"><Info /><p>{rewardNotice}</p></div> : null}<div className="form-info"><Info /><p><strong>{selected.name} is an official Fan Token.</strong> Its Solana mint is registry-listed. The SportPad reward vault and acquisition route are not deployed yet.</p></div></div> : null}
+        {step === 1 ? <div className="form-step"><div className="form-title"><BadgeCheck /><span><h3>Choose the official Fan Token holders may earn.</h3><p>Every option below is an official Fan Token with a Solana token address published by Chiliz.</p></span></div><label className="reward-search"><Search /><span className="sr-only">Search official Fan Tokens</span><Input value={rewardQuery} onChange={(event)=>setRewardQuery(event.target.value)} placeholder={`Search ${fanAssets.length} official Fan Tokens`} /></label><div className="reward-selector">{filteredAssets.map((asset)=><button key={asset.symbol} type="button" aria-pressed={reward === asset.symbol} className={reward === asset.symbol ? "selected" : ""} onClick={()=>{ setReward(asset.symbol); setRewardNotice(""); }}><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} size="lg" /><span><strong>{asset.name}</strong><small>${asset.symbol} · {asset.category}</small><code>{asset.mint.slice(0,7)}...{asset.mint.slice(-6)}</code></span><span className="asset-status status-registry-listed">Official on Solana</span>{reward === asset.symbol ? <CheckCircle2 className="selected-check" /> : null}</button>)}</div>{filteredAssets.length === 0 ? <div className="form-info"><Info /><p>No official Fan Token matches that search.</p></div> : null}{rewardNotice ? <div className="form-info" role="status"><Info /><p>{rewardNotice}</p></div> : null}<div className="form-info"><Info /><p><strong>{selected.name} is an official Fan Token rooted in the Chiliz ecosystem.</strong> Its Solana token address is registry-listed. The SportPad reward vault and acquisition route are not deployed yet.</p></div></div> : null}
 
         {step === 2 ? <div className="form-step"><div className="form-title"><LockKeyhole /><span><h3>Review the proposed immutable route.</h3><p>The creator receives 0% of this creator fee stream in the initial model.</p></span></div><div className="economics-cards"><div><Trophy /><span><small>80%</small><strong>Official Fan Token rewards</strong><p>Qualifying creator fees would fund {selected.symbol} acquisition and time-weighted holder epochs after execution is audited and enabled.</p></span></div><div><Flame /><span><small>20%</small><strong>SPORTPAD buyback + burn</strong><p>After the main SPORTPAD token is deployed, the purchased output would be burned and the supply reduction verified onchain.</p></span></div></div><div className="rules-table"><div><span>Reward calculation</span><strong>Time-weighted token-seconds</strong></div><div><span>Distribution</span><strong>Periodic claim epochs</strong></div><div><span>System accounts</span><strong>Excluded</strong></div><div><span>Unsafe acquisition</span><strong>Pause, never force</strong></div><div><span>Pump holder rewards</span><strong>Disabled</strong></div><div><span>Mainnet execution</span><strong className="negative">Locked</strong></div></div><div className="terms-list">{[{key:"rights",label:"I have the right to use the submitted name, copy, and image."},{key:"unofficial",label:"I understand the community token and official Fan Token reward are separate assets."},{key:"economics",label:"I understand the proposed 80/20 fee route and that final fee share setup may be irreversible."}].map((item)=><label key={item.key}><input type="checkbox" checked={terms[item.key as keyof typeof terms]} onChange={(event)=>setTerms((current)=>({...current,[item.key]:event.target.checked}))}/><span>{terms[item.key as keyof typeof terms] ? <Check /> : null}</span>{item.label}</label>)}</div></div> : null}
 
-        {step === 3 ? <div className="form-step"><div className="form-title"><Goal /><span><h3>One last check before saving.</h3><p>This creates a private project draft, not an onchain token.</p></span></div><div className="review-card"><div className="review-identity">{imagePreview ? <img className="review-artwork" src={imagePreview} alt={`${name} token image`} /> : <TokenMark token={symbol || "SP"} color="#9cff57" size="lg" />}<span><strong>{name}</strong><small>${symbol} · Community token draft</small></span></div><dl><div><dt>Description</dt><dd>{description || "No description provided"}</dd></div><div><dt>Reward asset</dt><dd>{selected.name} (${selected.symbol}) official Fan Token</dd></div><div><dt>Official Solana mint</dt><dd><code>{selected.mint}</code></dd></div><div><dt>Reward execution</dt><dd>{selected.status} · route {selected.route.toLowerCase()} · vault {selected.vault.toLowerCase()}</dd></div><div><dt>Economics</dt><dd>80% Fan Token rewards · 20% SPORTPAD buyback + burn</dd></div><div><dt>Execution</dt><dd className="negative">Private draft · mainnet locked</dd></div></dl></div>{error ? <p className="form-error" role="alert">{error}</p> : null}</div> : null}
+        {step === 3 ? <div className="form-step"><div className="form-title"><Goal /><span><h3>One last check before saving.</h3><p>This creates a private project draft, not an onchain token.</p></span></div><div className="review-card"><div className="review-identity">{imagePreview ? <img className="review-artwork" src={imagePreview} alt={`${name} token image`} /> : <TokenMark token={symbol || "SP"} color="#9cff57" size="lg" />}<span><strong>{name}</strong><small>${symbol} · Community token draft</small></span></div><dl><div><dt>Description</dt><dd>{description || "No description provided"}</dd></div><div><dt>Reward asset</dt><dd>{selected.name} (${selected.symbol}) official Fan Token</dd></div><div><dt>Solana token address</dt><dd><code>{selected.mint}</code></dd></div><div><dt>Reward execution</dt><dd>{selected.status} · route {selected.route.toLowerCase()} · vault {selected.vault.toLowerCase()}</dd></div><div><dt>Economics</dt><dd>80% Fan Token rewards · 20% SPORTPAD buyback + burn</dd></div><div><dt>Execution</dt><dd className="negative">Private draft · mainnet locked</dd></div></dl></div>{error ? <p className="form-error" role="alert">{error}</p> : null}</div> : null}
 
         {validationMessage ? <p className="form-error" role="alert">{validationMessage}</p> : null}
         <div className="builder-actions"><Button variant="outline" disabled={step === 0 || saving} onClick={()=>{ setValidationMessage(""); setStep((value)=>value-1); }} className="border-white/10 bg-transparent text-white hover:bg-white/8 hover:text-white"><ArrowLeft /> Back</Button>{step < steps.length-1 ? <Button onClick={nextStep} className="bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">Continue <ArrowRight /></Button> : <Button disabled={saving} onClick={saveDraft} className="bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">{saving ? "Saving…" : "Save private draft"} <Check /></Button>}</div>
       </div>
 
       <aside className="launch-preview"><div className="preview-label"><span>DRAFT PREVIEW</span><small>Private draft</small></div><div className="preview-token">{imagePreview ? <img className="preview-artwork" src={imagePreview} alt="Token image preview" /> : <TokenMark token={symbol || "SP"} color="#9cff57" size="lg" />}<span><strong>{name || "Your token"}</strong><small>${symbol || "TICKER"}</small></span></div><p>{description || "Description is optional."}</p><div className="preview-reward"><TokenMark token={selected.symbol} color={selected.color} imagePath={selected.imagePath} /><span><small>Official Fan Token reward</small><strong>{selected.symbol}</strong></span><BadgeCheck /></div><div className="preview-split"><span><b style={{width:"80%"}} />80% Fan Token rewards</span><span><b style={{width:"20%"}} />20% SPORTPAD burn</span></div><div className="preview-disclaimer">Mainnet execution, reward routes, and reward vaults are not deployed.</div></aside>
-    </div>
+      </div>
+    </>
   );
 }

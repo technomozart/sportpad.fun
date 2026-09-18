@@ -18,6 +18,8 @@ type DevnetState = {
   rewardWallet: string | null;
   burnWallet: string | null;
   verifiedAt: string | null;
+  publishedAt: string | null;
+  publicPath: string | null;
   pendingMint: string | null;
   pendingCreateSignature: string | null;
   pendingCreateBlockhash: string | null;
@@ -25,7 +27,7 @@ type DevnetState = {
   pendingFeeSignature: string | null;
   pendingFeeBlockhash: string | null;
   pendingFeeLastValidBlockHeight: number | null;
-  status: "not_started" | "prepared" | "coin_created" | "verified";
+  status: "not_started" | "prepared" | "coin_created" | "verified" | "published";
 };
 
 type PendingDevnetEvidence = {
@@ -83,6 +85,7 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [publicationAccepted, setPublicationAccepted] = useState(false);
+  const [publicReceiptAccepted, setPublicReceiptAccepted] = useState(false);
   const [pendingEvidence, setPendingEvidence] = useState<PendingDevnetEvidence>({ version: 2 });
 
   useEffect(() => {
@@ -92,7 +95,7 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         setDevnet(state);
         setRewardWallet(state.rewardWallet ?? "");
         setBurnWallet(state.burnWallet ?? "");
-        if (state.status === "verified") {
+        if (state.status === "verified" || state.status === "published") {
           setPendingEvidence({ version: 2 });
         } else {
           const serverEvidence: PendingDevnetEvidence = {
@@ -293,7 +296,46 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
     }
   }
 
-  const complete = devnet?.status === "verified";
+  async function publishReceipt() {
+    setBusy(true);
+    setError("");
+    try {
+      if (!walletSession.wallet) throw new Error("Connect and verify the creator wallet first.");
+      if (!devnet || devnet.status !== "verified" || !devnet.verifiedAt) {
+        throw new Error("Complete devnet verification before publishing.");
+      }
+      if (!publicReceiptAccepted) {
+        throw new Error("Confirm that the public receipt is devnet-only.");
+      }
+      const response = await fetch(`/api/launch-drafts/${encodeURIComponent(draftId)}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "publish_verified_devnet_receipt",
+          devnetOnlyAccepted: true,
+        }),
+      });
+      const body = await response.json() as {
+        error?: string;
+        published?: boolean;
+        publishedAt?: string;
+        publicPath?: string;
+      };
+      if (!response.ok || !body.published || !body.publishedAt || !body.publicPath) {
+        throw new Error(body.error ?? "The verified devnet receipt could not be published.");
+      }
+      setDevnet({ ...devnet, status: "published", publishedAt: body.publishedAt, publicPath: body.publicPath });
+      setPublicReceiptAccepted(false);
+      setStatus("Verified devnet receipt published. It is clearly labeled devnet and is not a mainnet launch.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The verified devnet receipt could not be published.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const complete = devnet?.status === "verified" || devnet?.status === "published";
+  const published = devnet?.status === "published";
   const started = Boolean(devnet?.mint);
 
   return (
@@ -320,12 +362,12 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
       {!complete ? (
         <div className="devnet-recipient-grid">
           <label>
-            80% reward treasury address
+            80% reward test recipient
             <Input value={rewardWallet} disabled={started || busy} onChange={(event) => setRewardWallet(event.target.value.trim())} placeholder="Solana devnet public address" />
             <small>Receives 80% of Pump creator fees for the future Fan Token reward pipeline.</small>
           </label>
           <label>
-            20% SPORTPAD treasury address
+            20% SPORTPAD test recipient
             <Input value={burnWallet} disabled={started || busy} onChange={(event) => setBurnWallet(event.target.value.trim())} placeholder="Different Solana devnet public address" />
             <small>Receives 20% for the future SPORTPAD buyback and burn executor.</small>
           </label>
@@ -357,6 +399,24 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
           <ShieldCheck /> {busy ? "Working on devnet..." : started ? "Finish devnet fee split" : "Launch on Pump devnet"}
         </Button>
       )}
+      {complete && !published ? (
+        <>
+          <label className="devnet-consent">
+            <input type="checkbox" checked={publicReceiptAccepted} onChange={(event) => setPublicReceiptAccepted(event.target.checked)} />
+            <span><strong>Publish this verified devnet receipt</strong><small>This makes the token name, ticker, image, website and social links, metadata URI, devnet mint, both transaction signatures, and both configured fee-recipient addresses public. The creator wallet is also visible in the public Solana transaction. It does not publish a mainnet launch, market, rewards, or claims.</small></span>
+          </label>
+          <Button onClick={publishReceipt} disabled={busy || !walletSession.wallet || !publicReceiptAccepted} className="devnet-launch-button">
+            <ShieldCheck /> {busy ? "Publishing receipt..." : "Publish verified devnet receipt"}
+          </Button>
+        </>
+      ) : null}
+      {published && devnet.publicPath ? (
+        <div className="devnet-complete">
+          <CheckCircle2 />
+          <span><strong>Public devnet receipt</strong><small>Clearly labeled Solana devnet. No mainnet launch or reward execution is implied.</small></span>
+          <a href={devnet.publicPath}>View public receipt <ExternalLink /></a>
+        </div>
+      ) : null}
       {status ? <p className="devnet-status" role="status">{status}</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
     </section>

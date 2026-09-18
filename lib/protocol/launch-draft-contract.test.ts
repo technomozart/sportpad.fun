@@ -73,6 +73,20 @@ test("launch builder keeps description optional and verifies decoded image stora
   assert.doesNotMatch(builderSource, /artworkStored/);
 });
 
+test("private drafts can be listed and resumed only through the authenticated owner API", () => {
+  const builderSource = readProjectFile("app", "launch", "launch-builder.tsx");
+  const routeSource = readProjectFile("app", "api", "launch-drafts", "route.ts");
+  const accountRouteSource = readProjectFile("app", "api", "account", "route.ts");
+
+  assert.match(builderSource, /fetch\("\/api\/launch-drafts", \{ cache: "no-store"/);
+  assert.match(builderSource, /function resumeDraft\(draft: SavedLaunchDraft\)/);
+  assert.match(builderSource, /\/signin-with-chatgpt\?return_to=%2Flaunch/);
+  assert.match(routeSource, /eq\(launchDrafts\.ownerUserId, ownerUserId\)/);
+  assert.match(routeSource, /Cache-Control": "private, no-store"/);
+  assert.match(accountRouteSource, /getLaunchDraftOwner\(request\)/);
+  assert.doesNotMatch(accountRouteSource, /ownerUserId/);
+});
+
 test("devnet launch records signed evidence before broadcast and finalizes with database guards", () => {
   const clientSource = readProjectFile("lib", "client", "pump-devnet.ts");
   const routeSource = readProjectFile("app", "api", "launch-drafts", "[id]", "devnet", "route.ts");

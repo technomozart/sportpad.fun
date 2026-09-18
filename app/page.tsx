@@ -42,7 +42,7 @@ export default function Home() {
               </Button>
             </div>
             <div className="hero-proof-row">
-              <span><BadgeCheck /> {fanAssets.length} official Solana mints</span>
+              <span><BadgeCheck /> {fanAssets.length} official Fan Tokens on Solana</span>
               <span><WalletCards /> One Solana wallet</span>
               <span><ShieldCheck /> Honest deployment states</span>
             </div>
@@ -53,7 +53,7 @@ export default function Home() {
             <div className="scoreboard">
               <div><small>COMMUNITY TOKEN</small><TokenMark token="YOURS" color="#9cff57" size="lg" /><strong>Your coin</strong><span>Creator name and image</span></div>
               <div className="scoreboard-center"><span>EARNS<br />REWARDS</span><Goal /><small>After funding</small></div>
-              <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Official Solana mint</span></div>
+              <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Available on Solana</span></div>
             </div>
             <div className="fee-split-visual">
               <div className="split-source"><CircleDollarSign /><span>Eligible creator fees</span><strong>Not live</strong></div>
@@ -66,7 +66,7 @@ export default function Home() {
 
         <section className="protocol-stats page-wrap" aria-label="Current protocol deployment status">
           <div><span>Mainnet execution</span><strong>Not deployed</strong><small>Pump devnet testing available</small></div>
-          <div><span>Official Solana Fan Tokens</span><strong>{fanAssets.length}</strong><small>Exact mints registry-listed</small></div>
+          <div><span>Official Fan Tokens on Solana</span><strong>{fanAssets.length}</strong><small>Exact token addresses registry-listed</small></div>
           <div><span>Reward vaults and claims</span><strong>Not deployed</strong><small>No balances or positions</small></div>
           <div><span>SPORTPAD main token</span><strong>Not deployed</strong><small>No burns have occurred</small></div>
         </section>
@@ -85,8 +85,8 @@ export default function Home() {
             <div className="identity-card reward-card">
               <span className="identity-number">02</span><div className="identity-icon"><BadgeCheck /></div>
               <p className="section-eyebrow">What holders can earn</p><h2>Official Fan Token</h2>
-              <p>An official Fan Token issued for the named sports organization, identified by its exact registry-listed Solana mint.</p>
-              <ul><li>Official sports organization Fan Token</li><li>Exact Solana mint shown publicly</li><li>Route and vault status checked separately</li></ul>
+              <p>An official Fan Token issued for the named sports organization. Chiliz Chain is its core network, with an official Solana token address published for this omnichain asset.</p>
+              <ul><li>Official sports organization Fan Token</li><li>Official Solana token address shown publicly</li><li>Route and vault status checked separately</li></ul>
             </div>
           </div>
         </section>
@@ -105,9 +105,9 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens publish Solana mints.`} copy="The official image, name, symbol, and exact mint come from the FanTokens and Chiliz registry. Mainnet acquisition and reward vault execution remain disabled until route and vault checks are built." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens are published on Solana.`} copy="Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain model across Chiliz Chain, Solana, and Base. The official image, identity, and Solana token address come from FanTokens and Chiliz sources. Mainnet acquisition and reward vault execution remain disabled until route and vault checks are built." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
           <div className="asset-directory">
-            <div className="asset-directory-head"><span>Official Fan Token</span><span>Solana mint</span><span>Reward route</span><span>Vault</span></div>
+            <div className="asset-directory-head"><span>Official Fan Token</span><span>Solana token address</span><span>Reward route</span><span>Vault</span></div>
             {fanAssets.slice(0, 5).map((asset) => (
               <div className="asset-row" key={asset.symbol}>
                 <div><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>{asset.category} · ${asset.symbol}</small></span></div>

@@ -21,6 +21,7 @@ jobs:
       - run: npm ci
       - run: npm run test:protocol
       - run: npm run test:providers
+      - run: npm run test:wallets
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run build

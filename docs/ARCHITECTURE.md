@@ -25,8 +25,11 @@ Saved draft devnet test
   -> finalized recipient and revoked-admin verification
 
 Public discovery
+  -> creator explicitly accepts devnet-only publication
+  -> POST /api/launch-drafts/{id}/publish with the verified wallet session
+  -> exact verified submissions checked again
   -> GET /api/public-launches
-  -> D1 rows with status = live
+  -> D1 rows with status = devnet_published
   -> GET /api/public-launches/{id}/image for the stored image
 ```
 
@@ -35,22 +38,28 @@ or a file picker. It validates the declared MIME type and file signature before
 storing the object. Description is optional. A failed D1 insert triggers cleanup
 of the newly uploaded R2 object.
 
-Drafts are private by default. The public API reads only rows explicitly marked
-`live`; that status means published in the SPORTPAD interface, not minted or
-tradable onchain. Product examples are clearly labeled and shown only when the
-public feed is available and contains no live rows. Any live row replaces the
-examples automatically.
+Drafts are private by default. Devnet verification does not publish a draft.
+The creator must reconnect the wallet that created the coin, accept the
+devnet-only disclosure, and invoke the publication endpoint. The endpoint
+rechecks both exact verified submissions before atomically changing the row to
+`devnet_published`. The public API omits owner IDs, wallet-session data, and a
+separate creator-wallet field, while exposing the devnet mint, metadata URI,
+finalized transaction receipts, configured fee recipients, and slots. The creator
+wallet remains discoverable from the linked public Solana transaction. Product
+examples disappear when the first valid receipt is published.
 
 ## Official Fan Token registry
 
 The catalog currently contains 96 FanTokens entries:
 
-- 82 selectable assets with exact Solana mints from the official Chiliz token
-  address registry and official token imagery.
-- 14 catalog-only assets without a published official Solana mint in the
+- 82 selectable official Fan Tokens with exact Solana token addresses from the
+  Chiliz registry and official token imagery. Fan Tokens are rooted in the
+  Chiliz ecosystem and use an omnichain supply model across Chiliz Chain,
+  Solana, and Base. The Solana address is not an independent SportPad copy.
+- 14 catalog-only assets without a published official Solana address in the
   registry snapshot. They remain visible but are not given an invented route.
 
-Every reward asset is marked `not_enabled`. A published mint proves identity,
+Every reward asset is marked `not_enabled`. A published token address proves identity,
 not liquidity, inventory, or execution readiness.
 
 ## Data stores and migrations
@@ -67,6 +76,7 @@ not liquidity, inventory, or execution readiness.
   creator and configuration snapshot used to verify each exact signed attempt.
   Migration `0006` adds the persisted blockhash-invalidity observation used to
   prevent an edge-of-window transaction from being replaced prematurely.
+  Migration `0007` adds the explicit devnet publication timestamp.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
@@ -76,8 +86,9 @@ presence does not mean those workers or economic actions are live.
 ## Implemented devnet coordinator
 
 The creator supplies two distinct public Solana addresses, one for the 80%
-reward treasury and one for the 20% SPORTPAD treasury. SportPad does not create
-or retain either treasury's private key.
+reward test recipient and one for the 20% SPORTPAD test recipient. These are
+creator-configured devnet addresses, not verified platform treasuries. SportPad
+does not create or retain either address's private key.
 
 Pump V2 creates a SOL-paired Token-2022 community coin on devnet. The browser
 keeps the new mint signer only long enough to co-sign coin creation; the creator

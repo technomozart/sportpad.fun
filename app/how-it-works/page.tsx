@@ -7,7 +7,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { FeeCalculator } from "./fee-calculator";
 
 const stages = [
-  { icon: BadgeCheck, title: "Select an official reward", copy: "The creator chooses an official Fan Token whose exact registry-listed Solana mint is visible." },
+  { icon: BadgeCheck, title: "Select an official reward", copy: "The creator chooses an official Fan Token whose registry-listed Solana token address is visible." },
   { icon: CircleDollarSign, title: "Creator fees finalize", copy: "The planned system accepts only qualifying creator fees actually received after Solana finality." },
   { icon: Radio, title: "Reconcile each event", copy: "The planned indexer deduplicates events and matches them against treasury balance changes before economic action." },
   { icon: Layers3, title: "Apply the fee split", copy: "80% becomes an official Fan Token reward intent; 20% becomes a SPORTPAD buyback + burn intent." },

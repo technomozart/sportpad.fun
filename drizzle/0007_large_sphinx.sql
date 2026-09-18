@@ -1,0 +1,1 @@
+ALTER TABLE `launch_drafts` ADD `devnet_published_at` text;

@@ -13,7 +13,7 @@ export type RewardAsset = {
 const OFFICIAL_REGISTRY = "https://docs.chiliz.com/quick-start/token-contract-addresses";
 
 // Snapshot of the official Chiliz cross-chain Fan Token registry.
-// Every entry below has an official Solana mint in the cited registry.
+// Every entry below has an official Solana token address in the cited registry.
 export const REWARD_ASSETS: ReadonlyArray<RewardAsset> = [
   {
     symbol: "ACM",

@@ -9,9 +9,12 @@ import {
   GitFork,
   Goal,
   Menu,
+  LogIn,
+  LogOut,
   ShieldCheck,
   Sparkles,
   Trophy,
+  UserRound,
   Wallet,
   X,
 } from "lucide-react";
@@ -71,6 +74,66 @@ function WalletButton() {
         </div>
         {message ? <p role="status" className={`text-sm ${messageTone === "success" ? "text-[#a9ff74]" : messageTone === "error" ? "text-[#ff8f94]" : "text-white/65"}`}>{message}</p> : null}
         {wallet ? <Button onClick={disconnect} disabled={busy} variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">{busy ? "Disconnecting..." : "Disconnect or change wallet"}</Button> : <Button onClick={connectAndVerify} disabled={busy || !providerAvailable} className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]">{busy ? "Waiting for wallet..." : "Connect and verify"}</Button>}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AccountButton({ pathname }: { pathname: string }) {
+  const [status, setStatus] = useState<"loading" | "signed_in" | "signed_out">("loading");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/account", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Account status could not be loaded.");
+        return response.json() as Promise<{ authenticated?: boolean }>;
+      })
+      .then((body) => setStatus(body.authenticated === true ? "signed_in" : "signed_out"))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setStatus("signed_out");
+      });
+    return () => controller.abort();
+  }, []);
+
+  const returnTo = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
+  const signInPath = `/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`;
+  const signOutPath = `/signout-with-chatgpt?return_to=${encodeURIComponent("/")}`;
+
+  if (status === "signed_out") {
+    return (
+      <Button asChild variant="outline" className="header-account rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+        <a href={signInPath}><LogIn className="size-4" /><span>Sign in</span></a>
+      </Button>
+    );
+  }
+
+  if (status === "loading") {
+    return (
+      <Button disabled aria-label="Checking sign-in status" variant="outline" className="header-account rounded-full border-white/10 bg-white/[0.04] text-white">
+        <UserRound className="size-4" /><span>Account</span>
+      </Button>
+    );
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button aria-label="SportPad account signed in" variant="outline" className="header-account rounded-full border-[#9cff57]/20 bg-[#9cff57]/[0.06] text-white hover:bg-[#9cff57]/10 hover:text-white">
+          <UserRound className="size-4 text-[#9cff57]" /><span>Signed in</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="border-white/10 bg-[#0b100d] text-white sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>SportPad account</DialogTitle>
+          <DialogDescription className="leading-relaxed text-white/45">
+            You are signed in. Drafts stay private unless you explicitly publish a verified devnet launch record.
+          </DialogDescription>
+        </DialogHeader>
+        <Button asChild variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
+          <a href={signOutPath}><LogOut className="size-4" /> Sign out</a>
+        </Button>
       </DialogContent>
     </Dialog>
   );
@@ -139,10 +202,10 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="pointer-glow" aria-hidden="true" />
       <div className="pitch-grid" aria-hidden="true" />
-      <div className="ticker-rail" aria-label="Official Fan Tokens with registry-listed Solana mints">
+      <div className="ticker-rail" aria-label="Official Fan Tokens with registry-listed Solana token addresses">
         <div className="ticker-track">
           {[...fanAssets.slice(0, 24), ...fanAssets.slice(0, 24)].map((asset, index) => (
-            <span key={`${asset.symbol}-${index}`}><span className="ticker-dot" /> {asset.symbol} · OFFICIAL SOLANA MINT</span>
+            <span key={`${asset.symbol}-${index}`}><span className="ticker-dot" /> {asset.symbol} · OFFICIAL FAN TOKEN · SOLANA</span>
           ))}
         </div>
       </div>
@@ -158,6 +221,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
         <div className="header-actions">
           <div className="network-pill"><span /> Solana</div>
           <a className="github-header-link" href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer" aria-label="SportPad source code on GitHub"><GitFork /><span>GitHub</span></a>
+          <AccountButton pathname={pathname} />
           <WalletButton />
           <Button asChild className="hidden rounded-full bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d] xl:inline-flex">
             <Link href="/launch"><Sparkles className="size-4" /> Build draft</Link>
@@ -187,7 +251,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
           <div><h3>Learn</h3><Link href="/learn"><BookOpen /> Guides</Link><Link href="/learn#faq">FAQ</Link><Link href="/learn#glossary">Glossary</Link><Link href="/learn#risk">Risk disclosure</Link><Link href="/policy">Creator policy</Link><a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> Source code</a></div>
         </div>
         <div className="footer-bottom">
-          <p>Official Fan Token names, images, and Solana mints come from published FanTokens and Chiliz sources. SportPad community tokens remain separate creator-made assets.</p>
+          <p>Official Fan Token names, images, and Solana token addresses come from published FanTokens and Chiliz sources. Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply model. SportPad community tokens remain separate creator-made assets.</p>
           <p>Digital assets are volatile and may lose all value. Mainnet execution remains disabled in this release.</p>
         </div>
       </footer>

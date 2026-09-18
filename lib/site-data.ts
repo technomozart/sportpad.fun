@@ -1,4 +1,5 @@
 import { REWARD_ASSETS } from "@/lib/protocol/reward-assets";
+import type { PublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
 
 export type Launch = {
   slug: string;
@@ -12,11 +13,12 @@ export type Launch = {
   description: string;
   imagePath?: string;
   isExample: boolean;
+  devnet?: PublicDevnetReceipt;
 };
 
 /**
- * These cards explain the product before the first public launch exists.
- * Public launch data will replace this array as soon as the publish pipeline
+ * These cards explain the product before the first public devnet receipt exists.
+ * Public receipt data will replace this array as soon as the publish pipeline
  * is enabled. They contain no price, volume, holder, funding, or timing data.
  */
 export const exampleLaunches: Launch[] = [
@@ -59,7 +61,7 @@ export const exampleLaunches: Launch[] = [
 ];
 
 // Static examples are used only after the public feed confirms there are no
-// published records. Feed consumers omit them as soon as a live record exists.
+// published receipts. Feed consumers omit them as soon as one exists.
 export const launches = exampleLaunches;
 
 export type FanAsset = {
@@ -100,11 +102,11 @@ export const fanAssets: FanAsset[] = REWARD_ASSETS.map((asset) => ({
 export const faqItems = [
   {
     question: "Which assets are official Fan Tokens?",
-    answer: "The reward registry contains official sports organization Fan Tokens with exact Solana mints published by Chiliz. A SportPad community coin is a separate asset created by its own creator.",
+    answer: "The reward registry contains official sports organization Fan Tokens published by Chiliz. They are rooted in the Chiliz ecosystem and can exist across Chiliz Chain, Solana, and Base through an omnichain supply model. A SportPad community coin is a separate asset created by its own creator.",
   },
   {
     question: "Why can rewards use the same Solana wallet?",
-    answer: "The official registry publishes Solana mints for the listed Fan Tokens. Once SportPad deploys and funds its claim system, supported rewards can be sent to a holder's existing Solana address without requiring MetaMask.",
+    answer: "The official registry publishes Solana token addresses for the listed Fan Tokens. Once SportPad deploys and funds its claim system, supported rewards can be sent to a holder's existing Solana address without requiring MetaMask.",
   },
   {
     question: "What happens to creator fees?",
@@ -128,7 +130,7 @@ export const faqItems = [
   },
   {
     question: "What does not enabled mean?",
-    answer: "The official Solana mint is known, but SportPad has not yet deployed or funded a reward vault or enabled an acquisition route for that asset.",
+    answer: "The official Fan Token's Solana address is known, but SportPad has not yet deployed or funded a reward vault or enabled an acquisition route for that asset.",
   },
 ];
 

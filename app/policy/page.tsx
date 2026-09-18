@@ -76,7 +76,7 @@ export default function PolicyPage() {
           />
           <div className="four-checks">
             <article><span>01</span><Goal /><h3>Independent identity</h3><p>Use an original community brand. Do not copy a club crest, league mark, athlete likeness, sponsor artwork, or confusingly similar trade dress without documented rights.</p></article>
-            <article><span>02</span><BadgeCheck /><h3>Official reward identity</h3><p>Use the exact official Fan Token name and mint only for the selected reward asset. Keep the community token&apos;s own name, image, and creator identity clear.</p></article>
+            <article><span>02</span><BadgeCheck /><h3>Official reward identity</h3><p>Use the exact official Fan Token name and chain-specific token address only for the selected reward asset. Keep the community token&apos;s own name, image, and creator identity clear.</p></article>
             <article><span>03</span><Scale /><h3>Accurate claims</h3><p>Do not promise price performance, guaranteed rewards, APR, dividends, ownership, official utility, or a benefit the launch cannot independently substantiate.</p></article>
             <article><span>04</span><KeyRound /><h3>Controlled wallets</h3><p>Creators must use wallets they control, disclose relevant allocations and conflicts, and never request another person’s seed phrase or private key.</p></article>
           </div>

@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db";
-import { launchDrafts } from "@/db/schema";
+import { devnetSubmissions, launchDrafts } from "@/db/schema";
+import { buildPublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
 import { getRewardAsset } from "@/lib/protocol/reward-assets";
 import type { Launch } from "@/lib/site-data";
 
@@ -10,7 +11,12 @@ function sportName(value: string): Launch["sport"] {
   return "Football";
 }
 
-function toPublicLaunch(row: typeof launchDrafts.$inferSelect): Launch {
+function toPublicLaunch(
+  row: typeof launchDrafts.$inferSelect,
+  submissions: (typeof devnetSubmissions.$inferSelect)[],
+): Launch | null {
+  const devnet = buildPublicDevnetReceipt(row, submissions);
+  if (!devnet) return null;
   const reward = getRewardAsset(row.rewardSymbol);
   const sport = sportName(row.sport);
   return {
@@ -25,26 +31,40 @@ function toPublicLaunch(row: typeof launchDrafts.$inferSelect): Launch {
     description: row.description || "No description provided.",
     imagePath: row.imageKey ? `/api/public-launches/${row.id}/image` : undefined,
     isExample: false,
+    devnet,
   };
 }
 
 export async function getPublicLaunches(limit = 24) {
   const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 100)) : 24;
-  const rows = await getDb()
+  const db = getDb();
+  const rows = await db
     .select()
     .from(launchDrafts)
-    .where(eq(launchDrafts.status, "live"))
+    .where(eq(launchDrafts.status, "devnet_published"))
     .orderBy(desc(launchDrafts.updatedAt))
     .limit(safeLimit);
-  return rows.map(toPublicLaunch);
+  if (!rows.length) return [];
+  const submissions = await db.select().from(devnetSubmissions).where(and(
+    inArray(devnetSubmissions.draftId, rows.map((row) => row.id)),
+    eq(devnetSubmissions.status, "verified"),
+  ));
+  return rows
+    .map((row) => toPublicLaunch(row, submissions.filter((submission) => submission.draftId === row.id)))
+    .filter((launch): launch is Launch => launch !== null);
 }
 
 export async function getPublicLaunch(id: string) {
-  const [row] = await getDb()
+  const db = getDb();
+  const [row] = await db
     .select()
     .from(launchDrafts)
-    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "live")))
+    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "devnet_published")))
     .limit(1);
   if (!row) return undefined;
-  return toPublicLaunch(row);
+  const submissions = await db.select().from(devnetSubmissions).where(and(
+    eq(devnetSubmissions.draftId, id),
+    eq(devnetSubmissions.status, "verified"),
+  ));
+  return toPublicLaunch(row, submissions) ?? undefined;
 }

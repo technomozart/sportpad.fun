@@ -24,20 +24,25 @@ Live site: [sportpad.fun](https://sportpad.fun)
   Cloudflare R2 objects.
 - A one-time signed wallet challenge that binds a Solana address to the signed-in
   account through an opaque, expiring, HttpOnly session. Seed phrases and private
-  keys never enter the application.
+  keys never enter the application. Phantom, Solflare, Backpack, Brave Wallet,
+  and compatible injected Solana wallets are detected without storing a private key.
 - Wallet-approved Pump devnet coin creation with no initial buy, no Pump holder
   rewards, and server-side verification of the finalized creator and bonding
   curve state.
 - A wallet-approved Pump fee-sharing configuration with exactly 8,000 bps sent
-  to the reward treasury and 2,000 bps sent to the SPORTPAD treasury. The server
-  verifies both recipients and the revoked fee-share admin onchain before marking
-  the draft verified.
-- A 96-asset FanTokens catalog view: 82 assets have official Solana mints in the
-  Chiliz registry and are selectable; 14 catalog-only assets are shown without
-  an invented Solana address or execution route.
-- A public launch feed backed by D1 rows whose status is `live`. Clearly marked
-  product examples appear only while there are no public launch records and are
-  removed automatically when the first public record appears.
+  to the configured reward test recipient and 2,000 bps sent to the configured
+  SPORTPAD test recipient. The server verifies both recipients and the revoked
+  fee-share admin onchain before marking the draft verified.
+- A 96-asset FanTokens catalog view: 82 official Fan Tokens have published
+  Solana token addresses in the Chiliz registry and are selectable; 14
+  catalog-only assets are shown without an invented Solana address or route.
+  Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply
+  model across Chiliz Chain, Solana, and Base. The Solana addresses are not
+  separate SportPad copies.
+- A creator-authorized public receipt flow for independently verified Solana
+  devnet launches. Only rows explicitly changed to `devnet_published` appear,
+  with their devnet mint, transaction signatures, and finalized slots. Clearly
+  marked product examples disappear when the first receipt is published.
 - Read-only Helius and Jupiter health canaries with short timeouts, sanitized
   output, and cached health responses.
 - Integer-safe accounting helpers and versioned D1 schemas for later fee,
@@ -51,7 +56,7 @@ counts, reward balances, settlement events, or match results.
 Mainnet token creation and trading, automated fee collection, Jupiter swaps,
 Fan Token acquisition, custody, cross-chain replenishment, SPORTPAD burns, and
 reward claims are not deployed. The devnet launcher creates only a valueless
-test coin and fee-share configuration. A saved draft or a `live` public record
+test coin and fee-share configuration. A saved draft or a public devnet receipt
 is not a mainnet launch.
 
 Those capabilities must remain locked until signer isolation, rate limits,
@@ -66,12 +71,12 @@ HSM, or MPC references.
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Product overview and honest public-launch or example feed |
-| `/discover` | Search public launch records, with examples only when the feed is empty |
-| `/launches/[slug]` | Public launch or clearly marked example detail |
+| `/` | Product overview and honest public-devnet-receipt or example feed |
+| `/discover` | Search public devnet receipts, with examples only when the feed is empty |
+| `/launches/[slug]` | Public devnet receipt or clearly marked example detail |
 | `/launch` | Private four-step draft builder, image upload, and Pump devnet test launcher |
 | `/rewards` | Empty reward state until the reward system is deployed |
-| `/fan-tokens` | Official Fan Token catalog and Solana mint registry |
+| `/fan-tokens` | Official Fan Token catalog and Solana token-address registry |
 | `/matchday` | Empty matchday state until a real data source is connected |
 | `/how-it-works` | Planned accounting and acquisition mechanics |
 | `/transparency` | Provider health and deployment status |
@@ -102,13 +107,15 @@ challenges, wallet sessions, and verified Pump devnet evidence. Migration
 devnet mint and signature constraints. Migration `0005_round_gwen_stacy.sql`
 adds immutable creator and launch-configuration snapshots to each submission.
 Migration `0006_fantastic_crusher_hogan.sql` persists the blockhash-invalidity
-observation used for a guarded retry grace period.
+observation used for a guarded retry grace period. Migration
+`0007_large_sphinx.sql` adds the explicit devnet receipt publication timestamp.
 
 ## Verification
 
 ```powershell
 npm run test:protocol
 npm run test:providers
+npm run test:wallets
 npm run lint
 npx tsc --noEmit
 npm run build
@@ -123,5 +130,5 @@ The same gates run in GitHub Actions for every pull request and push to `main`.
 - [Security reporting](SECURITY.md)
 
 The reward catalog identifies official Fan Tokens and their published Solana
-mints. SPORTPAD community tokens are separate assets. Digital assets are
+token addresses. SPORTPAD community tokens are separate assets. Digital assets are
 volatile and may lose all value.

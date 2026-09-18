@@ -23,6 +23,7 @@ export const launchDrafts = sqliteTable(
     devnetRewardWallet: text("devnet_reward_wallet"),
     devnetBurnWallet: text("devnet_burn_wallet"),
     devnetVerifiedAt: text("devnet_verified_at"),
+    devnetPublishedAt: text("devnet_published_at"),
     rightsAttested: integer("rights_attested", { mode: "boolean" }).notNull().default(false),
     unofficialAttested: integer("unofficial_attested", { mode: "boolean" }).notNull().default(false),
     economicsAttested: integer("economics_attested", { mode: "boolean" }).notNull().default(false),

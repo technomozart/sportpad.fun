@@ -35,8 +35,8 @@ export function LaunchCard({ launch, compact = false }: { launch: Launch; compac
   return (
     <Link href={`/launches/${launch.slug}`} className={`launch-card-v2 group ${compact ? "launch-card-compact" : ""}`}>
       <div className="launch-card-topline">
-        <span>{launch.isExample ? "Example concept" : "Public launch"}</span>
-        <span className={launch.isExample ? "route-research" : "route-ready"}>{launch.isExample ? "Not live" : "Published"}</span>
+        <span>{launch.isExample ? "Example concept" : "Public devnet receipt"}</span>
+        <span className={launch.isExample ? "route-research" : "route-ready"}>{launch.isExample ? "Not live" : "Verified devnet"}</span>
       </div>
       <div className="launch-card-identity">
         <TokenMark token={launch.ticker} color={launch.tone} imagePath={launch.imagePath} size="lg" />
@@ -51,7 +51,7 @@ export function LaunchCard({ launch, compact = false }: { launch: Launch; compac
         <div><BadgeCheck /><span>{launch.isExample ? "Official Fan Token reward example" : "Selected official Fan Token"}</span><strong>{launch.rewardSymbol}</strong></div>
         <TokenMark token={launch.rewardSymbol} color={reward?.color ?? launch.tone} imagePath={reward?.imagePath} />
       </div>
-      <div className="launch-card-footer">{launch.isExample ? "No token, market, holders, fees, or rewards exist for this example." : "Published SportPad record. Market activity and rewards appear only when supported by a verifiable source."}</div>
+      <div className="launch-card-footer">{launch.isExample ? "No token, market, holders, fees, or rewards exist for this example." : "Verified Solana devnet mint and fee receipts. This is not a mainnet launch, market, reward, or claim."}</div>
     </Link>
   );
 }

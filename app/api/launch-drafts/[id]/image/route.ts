@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 
 import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
+import { isUuidV4 } from "@/lib/protocol/identifiers";
 import { LAUNCH_IMAGE_MIME_TYPES } from "@/lib/protocol/launch-image";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 
@@ -23,7 +24,7 @@ export async function GET(request: Request, context: ImageRouteContext) {
   if (!env.BUCKET) return privateError("Image storage is unavailable.", 503);
 
   const { id } = await context.params;
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+  if (!isUuidV4(id)) {
     return privateError("Image not found.", 404);
   }
 

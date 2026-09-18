@@ -11,7 +11,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const [launch] = await getDb()
     .select({ imageKey: launchDrafts.imageKey })
     .from(launchDrafts)
-    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "live")))
+    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "devnet_published")))
     .limit(1);
 
   if (!launch?.imageKey) return new Response("Image not found", { status: 404 });

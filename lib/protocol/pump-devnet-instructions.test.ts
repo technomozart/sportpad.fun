@@ -21,7 +21,7 @@ function fixture(instruction: ReturnType<typeof buildPumpCreateV2Instruction>) {
 test("builds the official Pump create_v2 instruction exactly", () => {
   const instruction = buildPumpCreateV2Instruction({ mint, creator, name: "Name", symbol: "SYM", uri: "uri" });
   assert.equal(instruction.programId.toBase58(), "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
-  assert.equal(instruction.data.toString("hex"), "d6904cec5f8b31b4040000004e616d650300000053594d0300000075726900000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+  assert.equal(Buffer.from(instruction.data).toString("hex"), "d6904cec5f8b31b4040000004e616d650300000053594d0300000075726900000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
   assert.deepEqual(fixture(instruction), [
     ["So11111111111111111111111111111111111111112", true, true],
     ["TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM", false, false],
@@ -44,7 +44,7 @@ test("builds the official Pump create_v2 instruction exactly", () => {
 
 test("builds the official Pump fee config and immutable 80/20 update exactly", () => {
   const createConfig = buildPumpCreateFeeConfigInstruction({ creator, mint });
-  assert.equal(createConfig.data.toString("hex"), "c34e564c6f34fbd5");
+  assert.equal(Buffer.from(createConfig.data).toString("hex"), "c34e564c6f34fbd5");
   assert.deepEqual(fixture(createConfig), [
     ["D6QxXDt6hhcCpto4HiZKkN2YQ2iZRF5R7S3caCHpUsML", false, false],
     ["pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", false, false],
@@ -69,7 +69,7 @@ test("builds the official Pump fee config and immutable 80/20 update exactly", (
     rewardShareBps: 8000,
     burnShareBps: 2000,
   });
-  assert.equal(update.data.toString("hex"), "6ffb31064e4e6a120200000006a7d517192c5c51218cc94c3d4af17f58daee089ba1fd44e3dbd98a00000000401f0761481d357474bb7c4d7624ebd3bdb3d8355e73d11043fc0da3538000000000d007");
+  assert.equal(Buffer.from(update.data).toString("hex"), "6ffb31064e4e6a120200000006a7d517192c5c51218cc94c3d4af17f58daee089ba1fd44e3dbd98a00000000401f0761481d357474bb7c4d7624ebd3bdb3d8355e73d11043fc0da3538000000000d007");
   assert.deepEqual(fixture(update), [
     ["D6QxXDt6hhcCpto4HiZKkN2YQ2iZRF5R7S3caCHpUsML", false, false],
     ["pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ", false, false],
