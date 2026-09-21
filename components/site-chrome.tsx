@@ -93,7 +93,7 @@ function WalletButton({ pathname }: { pathname: string }) {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 rounded-2xl border border-white/8 bg-white/[0.025] p-4 text-sm text-white/50">
-          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> Every devnet transaction still requires a separate wallet approval.</p>
+          <p className="flex items-center gap-2 text-white/80"><ShieldCheck className="size-4 text-[#9cff57]" /> Every mainnet transaction requires a separate wallet approval.</p>
           <p>SportPad never asks for a seed phrase or private key. Wallet sessions expire automatically.</p>
           {!providerAvailable ? <p className="text-[#ffcf66]">Install or enable a compatible injected Solana wallet in this browser.</p> : null}
           {wallet ? <p className="break-all font-mono text-xs text-white/65">{wallet}</p> : null}
@@ -158,7 +158,7 @@ function AccountButton({ pathname }: { pathname: string }) {
         <DialogHeader>
           <DialogTitle>SportPad account</DialogTitle>
           <DialogDescription className="leading-relaxed text-white/45">
-            You are signed in. Drafts stay private unless you explicitly publish a verified devnet launch record.
+            You are signed in. Drafts stay private until reviewed and verified onchain.
           </DialogDescription>
         </DialogHeader>
         <Button asChild variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
@@ -283,7 +283,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
         </div>
         <div className="footer-bottom">
           <p>Official Fan Token names, images, and Solana token addresses come from published FanTokens and Chiliz sources. Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply model. SportPad community tokens remain separate creator-made assets.</p>
-          <p>Digital assets are volatile and may lose all value. Mainnet execution remains disabled in this release.</p>
+          <p>Digital assets are volatile and may lose all value. Check the live system status before signing any mainnet transaction.</p>
         </div>
       </footer>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">

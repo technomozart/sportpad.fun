@@ -24,6 +24,8 @@ test("operator decisions cannot skip moderation stages", () => {
   assert.equal(operatorModerationTransition("receipt_review", "approve_receipt"), "devnet_published");
   assert.equal(operatorModerationTransition("devnet_published", "suspend"), "suspended");
   assert.equal(operatorModerationTransition("suspended", "restore"), "devnet_published");
+  assert.equal(operatorModerationTransition("mainnet_published", "suspend"), "mainnet_suspended");
+  assert.equal(operatorModerationTransition("mainnet_suspended", "restore"), "mainnet_published");
   assert.equal(operatorModerationTransition("draft", "approve_receipt"), null);
 });
 
@@ -38,6 +40,7 @@ test("operator decision reasons match the decision authority", () => {
 test("publication and preparation fail closed", () => {
   assert.equal(isPublicModerationState("devnet_published"), true);
   assert.equal(isPublicModerationState("suspended"), false);
+  assert.equal(isPublicModerationState("mainnet_suspended"), false);
   assert.equal(canPrepareDevnet("content_approved", "moderated", false), true);
   assert.equal(canPrepareDevnet("draft", "moderated", false), false);
   assert.equal(canPrepareDevnet("draft", "closed", true), false);

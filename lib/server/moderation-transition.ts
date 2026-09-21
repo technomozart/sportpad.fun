@@ -54,7 +54,7 @@ export async function commitModerationTransition({
     moderationAction: action,
     moderationReason: reasonCode,
     moderationOwnerMessage: ownerMessage,
-    devnetPublishedAt: toState === "devnet_published" ? now : toState === "suspended" || action === "restore" ? undefined : null,
+    devnetPublishedAt: toState === "devnet_published" ? now : toState === "suspended" || toState === "mainnet_suspended" || action === "restore" ? undefined : null,
     updatedAt: now,
   }).where(and(
     eq(launchDrafts.id, draftId),

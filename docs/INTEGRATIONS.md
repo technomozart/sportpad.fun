@@ -1,24 +1,26 @@
 # Integration checklist
 
-Mainnet execution is disabled. Current integrations support private draft
-storage, signed Solana wallet sessions, wallet-approved Pump devnet launches,
-finalized onchain verification, moderated public records, official asset
-identity, and read-only provider health. The devnet path still requires a fresh
-end-to-end release canary before it is treated as operational.
+Mainnet launch execution is configuration-gated. Current integrations support
+private draft storage, signed Solana wallet sessions, wallet-approved Pump
+mainnet launches, exact finalized onchain verification, public launch receipts,
+official asset identity, and live read-only provider and reward-route checks.
+Fee sweeping, swaps, vault custody, holder accounting, claims, and burns remain
+undeployed.
 
 ## Implemented infrastructure
 
 ### Cloudflare D1
 
 - Binding name: `DB`.
-- Stores private launch drafts and operator-approved devnet receipts selected by
-  `status = devnet_published`.
+- Stores private launch drafts, legacy devnet receipts, and verified mainnet
+  launch receipts selected by explicit public states.
 - Stores the R2 object key, MIME type, and size for each uploaded image.
 - Stores immutable moderation audit events and fixed-window rate-limit counters.
 - Schema changes are versioned under `drizzle/`; apply every pending migration
   to each environment before deploying matching application code. Migration
   `0008_whole_franklin_richards.sql` is required for the moderation and abuse
-  controls.
+  controls. `0009_confused_ender_wiggin.sql` adds mainnet receipt evidence and
+  unique onchain identity constraints.
 
 ### Cloudflare R2
 
@@ -26,7 +28,8 @@ end-to-end release canary before it is treated as operational.
 - Receives PNG, JPEG, or WebP draft images up to 5 MB after server-side type and
   signature checks.
 - Objects remain private. A public launch image is served through an API that
-  verifies the matching D1 record has `devnet_published` status.
+  verifies the matching D1 record has `devnet_published` or
+  `mainnet_published` status.
 - Public image responses use `no-store`, so a suspension is not retained by an
   application cache.
 - A failed draft insert removes the newly uploaded object.
@@ -45,13 +48,10 @@ end-to-end release canary before it is treated as operational.
 - `SPORTPAD_OPERATOR_USER_IDS` is a comma-separated list of exact authenticated
   Sites user IDs. Client input, wallet ownership, display names, and email text
   are not accepted as substitutes.
-- `SPORTPAD_ALLOW_SELF_REVIEW=false` preserves separated duties. Setting it to
-  `true` is limited to a deliberately single-operator, valueless devnet beta.
-  The decision is still audited, but this flag is not an acceptable mainnet
-  control.
+- `SPORTPAD_ALLOW_SELF_REVIEW=false` preserves separated duties. Self-review is
+  not an acceptable mainnet control.
 - Content must be approved before Pump metadata can be placed on public IPFS or
-  any devnet transaction can be prepared. A separately approved receipt is the
-  only path into `devnet_published`.
+  any mainnet transaction can be prepared.
 - Operator decisions use expected moderation versions and database
   compare-and-set updates. A D1 trigger records each successful versioned
   moderation transition in `launch_moderation_events` in the same database
@@ -60,7 +60,7 @@ end-to-end release canary before it is treated as operational.
 ### Solana wallet verification
 
 - The browser requests a five-minute, single-use challenge bound to the current
-  domain, URI, wallet address, and `solana:devnet`.
+  domain, URI, wallet address, and `solana:mainnet`.
 - The server verifies the Ed25519 signature and stores only a hash of a random
   24-hour session token in D1.
 - The browser receives an HttpOnly, SameSite wallet-session cookie. Connecting
@@ -68,7 +68,25 @@ end-to-end release canary before it is treated as operational.
 - Phantom, Solflare, Backpack, Brave Wallet, and compatible injected Solana
   providers are detected. The selected provider is used consistently for the
   challenge and transaction approvals.
-- Every devnet transaction still requires a separate wallet approval.
+- Every mainnet transaction requires a separate wallet approval.
+
+### Pump mainnet launcher
+
+- `MAINNET_EXECUTION_ENABLED=true` is required together with valid, distinct
+  `SOLANA_REWARD_TREASURY_ADDRESS` and
+  `SOLANA_BUYBACK_TREASURY_ADDRESS` values. Missing or invalid configuration
+  fails closed.
+- The creator's verified wallet must differ from both platform treasuries.
+- The selected reward address must still match the official registry and have
+  a live Jupiter SOL route immediately before signing.
+- The first wallet approval creates the Pump V2 Token-2022 coin with no initial
+  buy. The second creates and irrevocably locks the exact 8,000 / 2,000 bps
+  creator-fee recipients.
+- Helius mainnet RPC independently verifies both finalized transactions,
+  instruction bytes, accounts, signers, bonding curve, treasuries, fee shares,
+  and revoked admin before publication.
+- Operators can immediately suspend a verified mainnet launch from public list,
+  detail, and image routes. Restore revalidates the stored evidence shape.
 
 ### Pump devnet
 
@@ -109,8 +127,8 @@ end-to-end release canary before it is treated as operational.
 
 ### Provider checks and verification
 
-- Helius API key for the health canary and finalized devnet verification.
-- Jupiter API key for the health canary and future executable quote checks.
+- Helius API key for the health canary and finalized mainnet verification.
+- Jupiter API key for the health canary and live reward-route checks.
 - Credentials stay server-side. Health responses are sanitized and do not
   expose keys, upstream payloads, or request URLs containing credentials.
 
@@ -127,7 +145,7 @@ The current D1 fixed-window limits are:
 | Saved drafts returned to a creator | 20 most recent drafts |
 | Wallet challenge | 10 per authenticated account per 10 minutes |
 | Wallet challenge for one address | 5 per wallet address per 10 minutes |
-| Pump IPFS preparation | 5 per account and verified wallet pair per hour, with a stricter 3 per day cap |
+| Pump mainnet IPFS preparation | 3 per account and verified wallet pair per hour, with a 5 per day cap |
 | Content review submission | 3 per authenticated creator per day |
 | Receipt review submission | 3 per authenticated creator per day |
 | Operator decisions | 30 per operator per minute |
@@ -139,20 +157,17 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
 
 ## Readiness boundary
 
-- Implemented: private drafts, image validation and storage, Solana devnet
-  wallet sessions, Pump transaction construction, durable pre-broadcast
-  evidence, finalized verification, two-stage moderation, public receipt
-  filtering, and read-only Helius and Jupiter checks.
-- Still required for the devnet beta: a fresh end-to-end canary using a newly
-  controlled wallet and valueless devnet SOL, followed by verification of the
-  approved public receipt and suspension path.
-- Not deployed: mainnet token creation, fee sweeping or ingestion, treasury
-  custody, Jupiter execution, official Fan Token acquisition, holder
-  accounting, claims, SPORTPAD mint or burns, and cross-chain replenishment.
-- Mainnet remains locked until capped canaries, signer isolation, monitoring,
-  independent security review, and legal and commercial approval are complete.
+- Implemented: private drafts, image validation and storage, Solana mainnet
+  wallet sessions, Pump transaction construction, local pre-broadcast evidence,
+  finalized mainnet verification, content moderation, public receipt filtering,
+  operator suspension, and read-only Helius and Jupiter checks.
+- Activation still requires two policy-controlled public treasury addresses,
+  an explicit deployment flag, and a capped mainnet canary.
+- Not deployed: fee sweeping or ingestion, treasury swap automation, reward
+  vaults, holder accounting, claims, SPORTPAD mint or burns, and cross-chain
+  replenishment.
 
-## Future mainnet transaction stages
+## Remaining mainnet transaction stages
 
 - Policy-controlled references for the reward treasury, reward vault, and
   SPORTPAD buyback executor signers.

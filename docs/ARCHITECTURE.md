@@ -1,9 +1,10 @@
 # SPORTPAD architecture
 
-Status: product interface, private draft storage, wallet authentication, and a
-wallet-approved Pump devnet launch path are implemented. The devnet path is
-guarded by a fail-closed moderation queue and still requires a fresh full-stack
-release canary. Mainnet execution is deliberately disabled.
+Status: product interface, private draft storage, wallet authentication, legacy
+devnet testing, and a configuration-gated Pump mainnet launch path are
+implemented. Mainnet remains fail closed until two distinct public treasury
+addresses and the explicit execution flag are configured. Automated fee
+collection, swaps, reward accounting, claims, and burns are not deployed.
 
 ## Implemented application path
 
@@ -20,7 +21,7 @@ Content review
   -> only content_approved drafts may prepare Pump metadata or transactions
 
 Wallet verification
-  -> one-time signed challenge bound to solana:devnet
+  -> one-time signed challenge bound to solana:mainnet
   -> Ed25519 verification on the server
   -> opaque HttpOnly wallet session, hashed in D1
 
@@ -39,6 +40,15 @@ Public discovery
   -> GET /api/public-launches
   -> D1 rows with status = devnet_published
   -> GET /api/public-launches/{id}/image for the stored image
+
+Mainnet launch after content approval
+  -> live Jupiter route check for the selected official Fan Token
+  -> frozen creator wallet, metadata URI, and two platform treasuries
+  -> wallet-approved Pump V2 coin creation with no initial buy
+  -> wallet-approved one-time 8,000 / 2,000 bps fee lock
+  -> independent finalized mainnet verification of both exact transactions
+  -> D1 row with status = mainnet_published
+  -> public receipt with mint, signatures, slots, and treasuries
 ```
 
 The builder accepts a PNG, JPEG, or WebP image up to 5 MB through drag and drop
@@ -82,6 +92,9 @@ draft -> content_review -> content_approved -> devnet_verified
 devnet_verified -> receipt_review -> devnet_published -> suspended
                    receipt_review -> receipt_rejected
                    suspended -> devnet_published
+
+content_approved -> mainnet_published -> mainnet_suspended
+                    mainnet_suspended -> mainnet_published
 ```
 
 Creators can withdraw `content_review` back to `draft` and `receipt_review`
@@ -95,7 +108,8 @@ only for a deliberately single-operator, valueless devnet beta and does not
 remove the audit event. Production or mainnet operation requires separated
 duties.
 
-Public list, detail, and image routes select only `devnet_published` rows.
+Public list, detail, and image routes select only `devnet_published` and
+`mainnet_published` rows.
 Suspension therefore removes all three surfaces immediately, and public images
 use `no-store` caching so a takedown is not held by an application cache.
 
@@ -110,8 +124,10 @@ The catalog currently contains 96 FanTokens entries:
 - 14 catalog-only assets without a published official Solana address in the
   registry snapshot. They remain visible but are not given an invented route.
 
-Every reward asset is marked `not_enabled`. A published token address proves identity,
-not liquidity, inventory, or execution readiness.
+Every selected reward asset receives a live Jupiter route check before mainnet
+signing. A published token address proves identity, not liquidity, inventory,
+or execution readiness. A route check proves quote availability only; it does
+not prove a funded reward vault or claim system.
 
 ## Data stores and migrations
 
@@ -131,7 +147,8 @@ not liquidity, inventory, or execution readiness.
   Migration `0007` adds the explicit devnet publication timestamp. Migration
   `0008` adds moderation state and actor metadata, the moderation audit table,
   rate-limit windows, and the trigger that records each versioned moderation
-  transition atomically.
+  transition atomically. Migration `0009` adds frozen mainnet launch evidence,
+  finalized slots, treasury addresses, and unique mint and signature indexes.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
@@ -165,6 +182,29 @@ This is execution testing, not a mainnet product. Devnet SOL and devnet tokens
 have no intended value. The fee split does not acquire Fan Tokens, distribute
 rewards, buy SPORTPAD, or burn supply.
 
+## Implemented mainnet launch coordinator
+
+The production launcher is a separate wallet-approved path. It is available
+only when `MAINNET_EXECUTION_ENABLED=true` and two valid, distinct public Solana
+addresses are configured as `SOLANA_REWARD_TREASURY_ADDRESS` and
+`SOLANA_BUYBACK_TREASURY_ADDRESS`.
+
+Immediately before signing, the server confirms the reviewed reward address is
+still in the official registry and requests a live SOL-to-reward quote from
+Jupiter. It then freezes the creator wallet, Pump metadata URI, 80% reward
+treasury, and 20% SPORTPAD buyback treasury in D1. The creator wallet signs two
+transactions: Pump V2 coin creation with no initial buy, followed by the
+one-time fee-sharing configuration and admin revocation.
+
+After finality, the server independently checks the exact instruction bytes,
+program accounts, creator and mint signers, Token-2022 ownership, SOL-paired
+bonding curve, both treasury recipients, exact 8,000 / 2,000 bps shares, and
+revoked fee-share admin. Only then does the draft become
+`mainnet_published`. Operators can suspend and restore the public receipt.
+
+This launch coordinator does not sweep fees, execute a swap, credit a holder,
+create a claim, buy SPORTPAD, or burn supply. Those are separate systems.
+
 ## Current readiness
 
 - The interface, draft storage, wallet challenge, Pump transaction assembly,
@@ -173,18 +213,19 @@ rewards, buy SPORTPAD, or burn supply.
 - Unit tests cover the moderation transitions and private-versus-public receipt
   boundary. Provider, wallet, type, lint, and production build checks remain
   release gates.
-- A fresh end-to-end canary with a newly controlled devnet wallet and valueless
-  devnet SOL is still required before the devnet beta is considered operational.
+- A capped mainnet canary is still required after production treasury policy is
+  established and before the launcher flag is enabled.
 - The production public feed contains no approved receipt until that process
   completes. Example cards remain explicitly labeled and disappear only after
   the first approved receipt.
-- Mainnet fee ingestion, custody, swaps, rewards, claims, SPORTPAD mint and burn,
-  operations, audit, and legal approval are not implemented.
+- Mainnet launch construction and exact receipt verification are implemented.
+  Fee ingestion, custody, swaps, rewards, claims, SPORTPAD mint and burn,
+  operations, audit, and legal approval remain separate work.
 
 ## Proposed economic model
 
-If mainnet execution is later approved and deployed, qualifying creator fees
-would follow this split:
+The implemented launch configuration assigns qualifying Pump creator fees to
+this split:
 
 - 80% funds acquisition and holder distribution of the launch's selected
   official Fan Token.
@@ -207,34 +248,30 @@ For a funded reward epoch `F` and wallet token-seconds `t_i`:
 All onchain quantities must remain atomic-unit integer strings. Decimals and
 authorities must be read from chain state.
 
-## Planned mainnet execution components
+## Remaining mainnet execution components
 
-None of the following are deployed today:
+The launch coordinator is implemented but configuration-gated. The remaining
+economic workers are not deployed today:
 
-1. **Production launch coordinator**
-   - Reuses the verified devnet flow only after dependency review, transaction
-     limits, monitoring, policy controls, and an external security review.
-   - Publishes the production mint and fee-sharing evidence before trading.
-
-2. **Fee indexer and settlement keeper**
+1. **Fee indexer and settlement keeper**
    - Observes pre-graduation and post-graduation creator-fee paths.
    - Waits for Solana finalization and deduplicates by transaction signature and
      instruction position.
    - Uses Jupiter only after quote age, depth, slippage, price-impact, mint
      allowlist, and daily-limit checks pass.
 
-3. **Holder indexer and reward publisher**
+2. **Holder indexer and reward publisher**
    - Aggregates token accounts by owner and excludes controlled accounts.
    - Uses time-weighted token-seconds instead of an end-of-epoch snapshot.
    - Publishes only fully funded allocations with deterministic proofs and
      single-claim protection.
 
-4. **SPORTPAD burn executor**
+3. **SPORTPAD burn executor**
    - Buys the deployed SPORTPAD mint from the 20% share.
    - Calls SPL `BurnChecked`, waits for finalization, and verifies the supply
      reduction.
 
-5. **Optional cross-chain replenishment**
+4. **Optional cross-chain replenishment**
    - Remains a treasury inventory operation, not a user claim dependency.
    - Requires a validated route, capped signer, decimal handling, timeout
      policy, and sufficient prefunded inventory.

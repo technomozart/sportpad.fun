@@ -33,8 +33,18 @@ function rpcUrl() {
     : "https://api.devnet.solana.com";
 }
 
+function mainnetRpcUrl() {
+  return env.HELIUS_API_KEY
+    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(env.HELIUS_API_KEY)}`
+    : "https://api.mainnet-beta.solana.com";
+}
+
 export function getDevnetConnection() {
   return new Connection(rpcUrl(), { commitment: "confirmed", confirmTransactionInitialTimeout: 45_000 });
+}
+
+export function getMainnetConnection() {
+  return new Connection(mainnetRpcUrl(), { commitment: "confirmed", confirmTransactionInitialTimeout: 45_000 });
 }
 
 type SubmissionWindow = {
@@ -47,6 +57,20 @@ export async function validateDevnetSubmissionWindow({
   lastValidBlockHeight,
 }: SubmissionWindow) {
   const connection = getDevnetConnection();
+  const [validity, currentBlockHeight] = await Promise.all([
+    connection.isBlockhashValid(blockhash, { commitment: "confirmed" }),
+    connection.getBlockHeight("confirmed"),
+  ]);
+  return validity.value &&
+    lastValidBlockHeight >= currentBlockHeight &&
+    lastValidBlockHeight <= currentBlockHeight + 300;
+}
+
+export async function validateMainnetSubmissionWindow({
+  blockhash,
+  lastValidBlockHeight,
+}: SubmissionWindow) {
+  const connection = getMainnetConnection();
   const [validity, currentBlockHeight] = await Promise.all([
     connection.isBlockhashValid(blockhash, { commitment: "confirmed" }),
     connection.getBlockHeight("confirmed"),
@@ -152,10 +176,10 @@ async function finalizedTransaction(
       { searchTransactionHistory: true },
     );
     if (signatureStatus.value[0]?.err) {
-      throw new DevnetTransactionStateError("failed", "The devnet transaction failed.");
+      throw new DevnetTransactionStateError("failed", "The transaction failed.");
     }
     if (signatureStatus.value[0]) {
-      throw new DevnetTransactionStateError("pending", "The transaction is not finalized on devnet yet.");
+      throw new DevnetTransactionStateError("pending", "The transaction is not finalized yet.");
     }
 
     const blockhashValidity = await connection.isBlockhashValid(
@@ -163,7 +187,7 @@ async function finalizedTransaction(
       { commitment: "confirmed" },
     );
     if (blockhashValidity.value) {
-      throw new DevnetTransactionStateError("pending", "The transaction is not finalized on devnet yet.");
+      throw new DevnetTransactionStateError("pending", "The transaction is not finalized yet.");
     }
 
     // Invalidity is only a candidate for expiry. Re-read after observing it so
@@ -188,10 +212,10 @@ async function finalizedTransaction(
         invalidityGraceElapsed,
       });
       if (state === "failed") {
-        throw new DevnetTransactionStateError("failed", "The devnet transaction failed.");
+        throw new DevnetTransactionStateError("failed", "The transaction failed.");
       }
       if (state === "expired") {
-        throw new DevnetTransactionStateError("expired", "The devnet transaction expired before finalization.");
+        throw new DevnetTransactionStateError("expired", "The transaction expired before finalization.");
       }
       throw new DevnetTransactionStateError(
         "pending",
@@ -201,7 +225,7 @@ async function finalizedTransaction(
     }
   }
   if (transaction.meta?.err) {
-    throw new DevnetTransactionStateError("failed", "The devnet transaction failed.");
+    throw new DevnetTransactionStateError("failed", "The transaction failed.");
   }
   if (transactionBlockhash(transaction) !== submission.blockhash) {
     throw new DevnetTransactionStateError("failed", "The transaction blockhash does not match the submitted launch.");
@@ -219,6 +243,7 @@ export async function verifyPumpDevnetCreate({
   blockhash,
   lastValidBlockHeight,
   invalidBlockhashObservedAt,
+  connectionOverride,
 }: {
   signature: string;
   mintAddress: string;
@@ -229,8 +254,9 @@ export async function verifyPumpDevnetCreate({
   blockhash: string;
   lastValidBlockHeight: number;
   invalidBlockhashObservedAt: number | null;
+  connectionOverride?: Connection;
 }) {
-  const connection = getDevnetConnection();
+  const connection = connectionOverride ?? getDevnetConnection();
   const transaction = await finalizedTransaction(connection, signature, {
     blockhash,
     lastValidBlockHeight,
@@ -268,10 +294,10 @@ export async function verifyPumpDevnetCreate({
     bondingCurvePda(mint),
   ], "finalized");
   if (!mintInfo || !mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-    throw new Error("The devnet mint is not owned by the expected Token-2022 program.");
+    throw new Error("The mint is not owned by the expected Token-2022 program.");
   }
   if (!curveInfo || !curveInfo.owner.equals(PUMP_PROGRAM_ID)) {
-    throw new Error("The Pump bonding curve could not be verified on devnet.");
+    throw new Error("The Pump bonding curve could not be verified onchain.");
   }
   const curve = decodePumpBondingCurve(curveInfo.data);
   if (
@@ -295,6 +321,7 @@ export async function verifyPumpDevnetFeeSplit({
   blockhash,
   lastValidBlockHeight,
   invalidBlockhashObservedAt,
+  connectionOverride,
 }: {
   signature: string;
   mintAddress: string;
@@ -304,8 +331,9 @@ export async function verifyPumpDevnetFeeSplit({
   blockhash: string;
   lastValidBlockHeight: number;
   invalidBlockhashObservedAt: number | null;
+  connectionOverride?: Connection;
 }) {
-  const connection = getDevnetConnection();
+  const connection = connectionOverride ?? getDevnetConnection();
   const transaction = await finalizedTransaction(connection, signature, {
     blockhash,
     lastValidBlockHeight,
@@ -365,4 +393,15 @@ export async function verifyPumpDevnetFeeSplit({
     throw new Error("The immutable Pump fee split does not match the required 80/20 recipients.");
   }
   return { slot: transaction.slot, sharingConfig: configPda.toBase58() };
+}
+
+type VerifyCreateInput = Omit<Parameters<typeof verifyPumpDevnetCreate>[0], "connectionOverride">;
+type VerifyFeeSplitInput = Omit<Parameters<typeof verifyPumpDevnetFeeSplit>[0], "connectionOverride">;
+
+export function verifyPumpMainnetCreate(input: VerifyCreateInput) {
+  return verifyPumpDevnetCreate({ ...input, connectionOverride: getMainnetConnection() });
+}
+
+export function verifyPumpMainnetFeeSplit(input: VerifyFeeSplitInput) {
+  return verifyPumpDevnetFeeSplit({ ...input, connectionOverride: getMainnetConnection() });
 }

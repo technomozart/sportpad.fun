@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { devnetSubmissions, launchDrafts } from "@/db/schema";
 import { buildPublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
+import { buildPublicMainnetReceipt } from "@/lib/protocol/public-mainnet-launch";
 import { getRewardAsset } from "@/lib/protocol/reward-assets";
 import type { Launch } from "@/lib/site-data";
 
@@ -15,8 +16,9 @@ function toPublicLaunch(
   row: typeof launchDrafts.$inferSelect,
   submissions: (typeof devnetSubmissions.$inferSelect)[],
 ): Launch | null {
+  const mainnet = buildPublicMainnetReceipt(row);
   const devnet = buildPublicDevnetReceipt(row, submissions);
-  if (!devnet) return null;
+  if (!mainnet && !devnet) return null;
   const reward = getRewardAsset(row.rewardSymbol);
   const sport = sportName(row.sport);
   return {
@@ -33,7 +35,8 @@ function toPublicLaunch(
     social: row.social ?? undefined,
     imagePath: row.imageKey ? `/api/public-launches/${row.id}/image` : undefined,
     isExample: false,
-    devnet,
+    devnet: devnet ?? undefined,
+    mainnet: mainnet ?? undefined,
   };
 }
 
@@ -43,7 +46,7 @@ export async function getPublicLaunches(limit = 24) {
   const rows = await db
     .select()
     .from(launchDrafts)
-    .where(eq(launchDrafts.status, "devnet_published"))
+    .where(inArray(launchDrafts.status, ["mainnet_published", "devnet_published"]))
     .orderBy(desc(launchDrafts.updatedAt))
     .limit(safeLimit);
   if (!rows.length) return [];
@@ -61,7 +64,7 @@ export async function getPublicLaunch(id: string) {
   const [row] = await db
     .select()
     .from(launchDrafts)
-    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "devnet_published")))
+    .where(and(eq(launchDrafts.id, id), inArray(launchDrafts.status, ["mainnet_published", "devnet_published"])))
     .limit(1);
   if (!row) return undefined;
   const submissions = await db.select().from(devnetSubmissions).where(and(

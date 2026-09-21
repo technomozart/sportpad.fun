@@ -38,12 +38,12 @@ export function LaunchShowcase() {
   return (
     <section className="page-section page-wrap">
       <SectionHeading
-        eyebrow={examplesOnly ? "Product examples" : "Verified devnet receipts"}
-        title={examplesOnly ? "See how a community launch could select an official reward." : "Verified devnet launch receipts with official Fan Token selections."}
-        copy={examplesOnly ? "These examples explain the product. They are not tokens, markets, holders, fees, or funded rewards." : "Creator-submitted, operator-approved Solana devnet receipts appear here with their verified mint and transaction evidence. They are not mainnet launches."}
+        eyebrow={examplesOnly ? "Product examples" : "Verified launches"}
+        title={examplesOnly ? "See how a community launch could select an official reward." : "Verified Solana launches with official Fan Token reward selections."}
+        copy={examplesOnly ? "These examples explain the product. They are not tokens, markets, holders, fees, or funded rewards." : "Every listed launch includes independently verified coin-creation and creator-fee configuration receipts."}
         action={<Link href="/discover" className="text-link">View all <ArrowRight /></Link>}
       />
-      {feedLoading ? <div className="examples-notice"><span>Loading public devnet receipts.</span></div> : null}
+      {feedLoading ? <div className="examples-notice"><span>Loading public launch receipts.</span></div> : null}
       {feedUnavailable ? <div className="examples-notice"><span>The public launch feed is temporarily unavailable. Examples are withheld until the feed can be checked.</span></div> : null}
       {examplesOnly ? <div className="examples-notice"><ExampleBadge /><span>Examples are hidden automatically when the first public launch is published.</span></div> : null}
       <div className="featured-launch-grid">{visibleLaunches.slice(0, 3).map((launch) => <LaunchCard key={launch.slug} launch={launch} />)}</div>

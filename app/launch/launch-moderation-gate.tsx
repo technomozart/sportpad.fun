@@ -4,7 +4,7 @@ import { Clock3, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { DevnetLaunchPanel } from "./devnet-launch-panel";
+import { MainnetLaunchPanel } from "./mainnet-launch-panel";
 
 type ModerationState = {
   state: string;
@@ -69,20 +69,20 @@ export function LaunchModerationGate({ draftId, name, symbol }: { draftId: strin
     return <section className="launch-review-gate"><Clock3 /><span><strong>{busy ? "Loading review status" : "Review status unavailable"}</strong><small>No image or metadata will be published until this check completes.</small></span>{!busy ? <Button variant="outline" onClick={() => void load()}><RefreshCw /> Retry</Button> : null}{error ? <p className="form-error">{error}</p> : null}</section>;
   }
 
-  if (moderation.state === "suspended") {
-    return <section className="launch-review-gate rejected"><XCircle /><span><strong>Public receipt suspended</strong><small>{moderation.ownerMessage || "The public devnet receipt is hidden while an operator reviews it."}</small></span><Button variant="outline" disabled={busy} onClick={() => void load()}><RefreshCw /> Refresh</Button>{error ? <p className="form-error">{error}</p> : null}</section>;
+  if (moderation.state === "suspended" || moderation.state === "mainnet_suspended") {
+    return <section className="launch-review-gate rejected"><XCircle /><span><strong>Public launch suspended</strong><small>{moderation.ownerMessage || "The public launch is hidden while an operator reviews it."}</small></span><Button variant="outline" disabled={busy} onClick={() => void load()}><RefreshCw /> Refresh</Button>{error ? <p className="form-error">{error}</p> : null}</section>;
   }
 
   if (moderation.state === "content_rejected" || moderation.state === "receipt_rejected") {
     return <section className="launch-review-gate rejected"><XCircle /><span><strong>{moderation.state === "content_rejected" ? "Content review rejected" : "Receipt review rejected"}</strong><small>{moderation.ownerMessage || "This submission cannot proceed. Create a new draft after addressing the review decision."}</small></span>{error ? <p className="form-error">{error}</p> : null}</section>;
   }
 
-  const canLaunch = ["content_approved", "devnet_verified", "receipt_review", "devnet_published"].includes(moderation.state);
+  const canLaunch = ["content_approved", "devnet_verified", "receipt_review", "devnet_published", "mainnet_published"].includes(moderation.state);
   if (canLaunch) {
     return (
       <>
-        <section className="launch-review-gate approved"><ShieldCheck /><span><strong>{moderation.state === "content_approved" ? "Content approved for devnet preparation" : "Content review complete"}</strong><small>The stored name, image, links, sport, and reward selection passed the publication gate.</small></span></section>
-        <DevnetLaunchPanel draftId={draftId} name={name} symbol={symbol} moderationVersion={moderation.version} onReviewSubmitted={() => void load()} />
+        <section className="launch-review-gate approved"><ShieldCheck /><span><strong>{moderation.state === "mainnet_published" ? "Mainnet launch verified" : "Content approved for mainnet"}</strong><small>The stored name, image, links, sport, and reward selection passed the publication gate.</small></span></section>
+        <MainnetLaunchPanel draftId={draftId} name={name} symbol={symbol} />
       </>
     );
   }
@@ -96,7 +96,7 @@ export function LaunchModerationGate({ draftId, name, symbol }: { draftId: strin
   return (
     <section className="launch-review-gate rejected">
       <XCircle />
-      <span><strong>{moderation.publicationMode === "closed" ? "Publication review is paused" : "Submit content before devnet"}</strong><small>{moderation.ownerMessage || (moderation.publicationMode === "closed" ? "Drafts remain private while the operator gate is closed." : "An operator must approve the stored content before SportPad publishes it to IPFS or prepares a Pump transaction.")}</small></span>
+      <span><strong>{moderation.publicationMode === "closed" ? "Publication review is paused" : "Submit content before mainnet"}</strong><small>{moderation.ownerMessage || (moderation.publicationMode === "closed" ? "Drafts remain private while the operator gate is closed." : "An operator must approve the stored content before SportPad publishes it to IPFS or prepares a Pump transaction.")}</small></span>
       {moderation.publicationMode !== "closed" ? <Button disabled={busy} onClick={() => void transition("submit_content_review")}><ShieldCheck /> {busy ? "Submitting" : "Submit for content review"}</Button> : null}
       {error ? <p className="form-error">{error}</p> : null}
     </section>

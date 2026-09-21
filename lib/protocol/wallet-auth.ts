@@ -31,11 +31,11 @@ export function buildWalletChallenge(fields: WalletChallengeFields) {
     `Wallet: ${fields.walletAddress}`,
     `URI: ${fields.uri}`,
     "Version: 1",
-    "Chain: solana:devnet",
+    "Chain: solana:mainnet",
     `Nonce: ${fields.nonce}`,
     `Issued At: ${fields.issuedAt.toISOString()}`,
     `Expiration Time: ${fields.expiresAt.toISOString()}`,
-    "Purpose: Bind this wallet to your SportPad account for devnet launch testing.",
+    "Purpose: Bind this wallet to your SportPad account for reviewed Solana launch actions.",
     "This request does not create a transaction or authorize spending.",
   ].join("\n");
 }

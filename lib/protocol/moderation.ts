@@ -10,7 +10,9 @@ export const MODERATION_STATES = [
   "receipt_review",
   "receipt_rejected",
   "devnet_published",
+  "mainnet_published",
   "suspended",
+  "mainnet_suspended",
 ] as const;
 export type ModerationState = (typeof MODERATION_STATES)[number];
 
@@ -33,8 +35,8 @@ const operatorTransitions: Record<OperatorModerationAction, Partial<Record<Moder
   reject_content: { content_review: "content_rejected" },
   approve_receipt: { receipt_review: "devnet_published" },
   reject_receipt: { receipt_review: "receipt_rejected" },
-  suspend: { devnet_published: "suspended" },
-  restore: { suspended: "devnet_published" },
+  suspend: { devnet_published: "suspended", mainnet_published: "mainnet_suspended" },
+  restore: { suspended: "devnet_published", mainnet_suspended: "mainnet_published" },
 };
 
 export function isModerationState(value: string): value is ModerationState {
@@ -52,7 +54,7 @@ export function operatorModerationTransition(state: string, action: OperatorMode
 }
 
 export function isPublicModerationState(state: string) {
-  return state === "devnet_published";
+  return state === "devnet_published" || state === "mainnet_published";
 }
 
 export function canPrepareDevnet(state: string, mode: PublicationMode, operator: boolean) {

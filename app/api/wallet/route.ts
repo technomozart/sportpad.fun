@@ -19,10 +19,10 @@ function privateJson(body: unknown, status = 200, headers?: Record<string, strin
 export async function GET(request: Request) {
   try {
     const session = await getVerifiedWalletSession(request);
-    if (!session) return privateJson({ wallet: null, chain: "solana:devnet" });
+    if (!session) return privateJson({ wallet: null, chain: "solana:mainnet" });
     return privateJson({
       wallet: session.walletAddress,
-      chain: "solana:devnet",
+      chain: "solana:mainnet",
       expiresAt: session.expiresAt,
     });
   } catch (error) {
@@ -41,14 +41,14 @@ export async function DELETE(request: Request) {
       await getDb().delete(walletSessions).where(eq(walletSessions.tokenHash, await sha256Base64Url(token)));
     }
     return privateJson(
-      { wallet: null, chain: "solana:devnet" },
+      { wallet: null, chain: "solana:mainnet" },
       200,
       { "Set-Cookie": clearWalletSessionCookie(request) },
     );
   } catch (error) {
     console.error("wallet_session_delete_failed", error);
     return privateJson(
-      { wallet: null, chain: "solana:devnet", storageCleanup: "deferred" },
+      { wallet: null, chain: "solana:mainnet", storageCleanup: "deferred" },
       200,
       { "Set-Cookie": clearWalletSessionCookie(request) },
     );

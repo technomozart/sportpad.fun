@@ -1,5 +1,6 @@
 import { REWARD_ASSETS } from "@/lib/protocol/reward-assets";
 import type { PublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
+import type { PublicMainnetReceipt } from "@/lib/protocol/public-mainnet-launch";
 
 export type Launch = {
   slug: string;
@@ -16,10 +17,11 @@ export type Launch = {
   imagePath?: string;
   isExample: boolean;
   devnet?: PublicDevnetReceipt;
+  mainnet?: PublicMainnetReceipt;
 };
 
 /**
- * These cards explain the product before the first public devnet receipt exists.
+ * These cards explain the product before the first public launch receipt exists.
  * Public receipt data will replace this array as soon as the publish pipeline
  * is enabled. They contain no price, volume, holder, funding, or timing data.
  */
@@ -73,7 +75,7 @@ export type FanAsset = {
   mint: string;
   imagePath: string;
   status: "Registry listed";
-  route: "Not enabled";
+  route: "Checked at launch";
   vault: "Not deployed";
   source: string;
   color: string;
@@ -95,7 +97,7 @@ export const fanAssets: FanAsset[] = REWARD_ASSETS.map((asset) => ({
   mint: asset.solanaMint,
   imagePath: asset.imagePath,
   status: "Registry listed",
-  route: "Not enabled",
+  route: "Checked at launch",
   vault: "Not deployed",
   source: asset.source,
   color: assetColors[asset.symbol] ?? "#9cff57",
@@ -112,7 +114,7 @@ export const faqItems = [
   },
   {
     question: "What happens to creator fees?",
-    answer: "The planned configuration assigns 80% of eligible creator fees to official Fan Token rewards and 20% to SPORTPAD buybacks and burns. Mainnet fee routing is not deployed yet.",
+    answer: "Each verified mainnet launch locks its Pump creator-fee configuration to send 80% to the selected official Fan Token reward treasury and 20% to the SPORTPAD buyback treasury. Automated fee collection, reward purchases, holder accounting, claims, and burns remain separate deployment stages.",
   },
   {
     question: "Are rewards instant?",
@@ -132,7 +134,7 @@ export const faqItems = [
   },
   {
     question: "What does not enabled mean?",
-    answer: "The official Fan Token's Solana address is known, but SportPad has not yet deployed or funded a reward vault or enabled an acquisition route for that asset.",
+    answer: "The official Fan Token's Solana address is known, but a launch can proceed only when SportPad finds a live Jupiter acquisition route. Reward vaults and holder claims still require separate deployed infrastructure.",
   },
 ];
 

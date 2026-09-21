@@ -1,5 +1,6 @@
 import { readProviderCredentials } from "@/lib/server/providers/runtime-config";
 import { getProviderStatus } from "@/lib/server/providers/status";
+import { readMainnetConfig } from "@/lib/server/mainnet-config";
 
 type Providers = Awaited<ReturnType<typeof getProviderStatus>>;
 
@@ -23,6 +24,7 @@ async function readCachedProviderStatus() {
 
 export async function GET() {
   const providers = await readCachedProviderStatus();
+  const mainnet = readMainnetConfig();
   const configuredCount = Number(providers.helius.configured) + Number(providers.jupiter.configured);
   const healthyCount = Number(providers.helius.healthy) + Number(providers.jupiter.healthy);
 
@@ -35,10 +37,11 @@ export async function GET() {
   return Response.json(
     {
       status,
-      mode: "devnet-testing",
+      mode: mainnet.ready ? "mainnet-launch" : "mainnet-configuration-required",
       providers,
-      // Deliberately hard-locked. Helius also verifies finalized devnet evidence.
-      mainnetExecution: false,
+      mainnetExecution: mainnet.ready,
+      mainnetMissing: mainnet.missing,
+      sportpadMintConfigured: Boolean(mainnet.sportpadMint),
     },
     {
       headers: {

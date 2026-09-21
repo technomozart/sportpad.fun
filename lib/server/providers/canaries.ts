@@ -6,7 +6,7 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 3_000;
 const HELIUS_RPC_ORIGIN = "https://mainnet.helius-rpc.com/";
-const JUPITER_QUOTE_ENDPOINT = "https://api.jup.ag/swap/v1/quote";
+const JUPITER_QUOTE_ENDPOINT = "https://api.jup.ag/swap/v2/order";
 const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -140,8 +140,6 @@ export async function checkJupiterQuote(
     endpoint.searchParams.set("inputMint", WRAPPED_SOL_MINT);
     endpoint.searchParams.set("outputMint", USDC_MINT);
     endpoint.searchParams.set("amount", "1000000");
-    endpoint.searchParams.set("slippageBps", "50");
-    endpoint.searchParams.set("restrictIntermediateTokens", "true");
 
     const response = await fetchWithTimeout(
       fetcher,
@@ -169,12 +167,8 @@ export async function checkJupiterQuote(
     }
 
     const validQuote = isRecord(payload)
-      && payload.inputMint === WRAPPED_SOL_MINT
-      && payload.outputMint === USDC_MINT
-      && payload.inAmount === "1000000"
       && isPositiveIntegerString(payload.outAmount)
-      && Array.isArray(payload.routePlan)
-      && payload.routePlan.length > 0;
+      && typeof payload.requestId === "string";
 
     if (!validQuote) return result(true, false, "invalid_response", now);
     return result(true, true, "operational", now);

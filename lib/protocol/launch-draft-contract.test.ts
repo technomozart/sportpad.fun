@@ -118,3 +118,34 @@ test("devnet launch records signed evidence before broadcast and finalizes with 
   assert.match(schemaSource, /creatorWallet: text\("creator_wallet"\)/);
   assert.match(schemaSource, /invalidBlockhashObservedAt: integer\("invalid_blockhash_observed_at"\)/);
 });
+
+test("mainnet launch fails closed, freezes treasuries, and verifies exact onchain evidence", () => {
+  const clientSource = readProjectFile("lib", "client", "pump-mainnet.ts");
+  const panelSource = readProjectFile("app", "launch", "mainnet-launch-panel.tsx");
+  const routeSource = readProjectFile("app", "api", "launch-drafts", "[id]", "mainnet", "route.ts");
+  const configSource = readProjectFile("lib", "server", "mainnet-config.ts");
+  const walletSessionSource = readProjectFile("lib", "server", "wallet-session.ts");
+  const schemaSource = readProjectFile("db", "schema.ts");
+
+  assert.ok(
+    clientSource.indexOf("await onSubmitted") < clientSource.indexOf("sendRawTransaction"),
+    "signed mainnet evidence must be persisted locally before broadcast",
+  );
+  assert.match(configSource, /MAINNET_EXECUTION_ENABLED/);
+  assert.match(configSource, /SOLANA_REWARD_TREASURY_ADDRESS/);
+  assert.match(configSource, /SOLANA_BUYBACK_TREASURY_ADDRESS/);
+  assert.match(walletSessionSource, /sportpad_mainnet_wallet_session_v1/);
+  assert.match(routeSource, /checkRewardRoute/);
+  assert.match(routeSource, /verifyPumpMainnetCreate/);
+  assert.match(routeSource, /verifyPumpMainnetFeeSplit/);
+  assert.match(routeSource, /mainnetRewardTreasury: config\.rewardTreasury/);
+  assert.match(routeSource, /mainnetBuybackTreasury: config\.buybackTreasury/);
+  assert.match(routeSource, /status: "mainnet_published"/);
+  assert.match(routeSource, /isNull\(launchDrafts\.mainnetMint\)/);
+  assert.ok(
+    panelSource.indexOf('post({ action: "prepare"') < panelSource.indexOf("createPumpMainnetCoin"),
+    "the live reward route must be rechecked immediately before signing",
+  );
+  assert.match(schemaSource, /idx_launch_drafts_mainnet_mint/);
+  assert.match(schemaSource, /idx_launch_drafts_mainnet_fee_signature/);
+});

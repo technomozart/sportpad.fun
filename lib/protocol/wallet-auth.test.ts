@@ -28,10 +28,10 @@ test("normalizes canonical 32-byte Solana addresses", () => {
   assert.equal(normalizeSolanaAddress(`${walletAddress} `), walletAddress);
 });
 
-test("builds a domain, URI, wallet, nonce, and devnet bound message", () => {
+test("builds a domain, URI, wallet, nonce, and mainnet bound message", () => {
   assert.match(challenge, /^sportpad\.fun wants you to verify/);
   assert.match(challenge, new RegExp(`Wallet: ${walletAddress}`));
-  assert.match(challenge, /Chain: solana:devnet/);
+  assert.match(challenge, /Chain: solana:mainnet/);
   assert.match(challenge, /Nonce: test-nonce-123/);
   assert.match(challenge, /does not create a transaction or authorize spending/);
 });

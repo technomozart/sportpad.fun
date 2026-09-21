@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 
 import { getDb } from "@/db";
@@ -11,7 +11,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const [launch] = await getDb()
     .select({ imageKey: launchDrafts.imageKey })
     .from(launchDrafts)
-    .where(and(eq(launchDrafts.id, id), eq(launchDrafts.status, "devnet_published")))
+    .where(and(eq(launchDrafts.id, id), inArray(launchDrafts.status, ["mainnet_published", "devnet_published"])))
     .limit(1);
 
   if (!launch?.imageKey) return new Response("Image not found", { status: 404 });

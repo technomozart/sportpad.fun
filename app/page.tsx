@@ -21,18 +21,20 @@ import { SectionHeading, TokenMark } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { LaunchShowcase } from "@/components/launch-showcase";
 import { fanAssets, faqItems } from "@/lib/site-data";
+import { readMainnetConfig } from "@/lib/server/mainnet-config";
 
 export default function Home() {
   const bar = fanAssets.find((asset) => asset.symbol === "BAR") ?? fanAssets[0];
+  const mainnet = readMainnetConfig();
 
   return (
     <SiteChrome>
       <main>
         <section className="home-hero page-wrap">
           <div className="home-hero-copy">
-            <div className="hero-kicker"><span className="live-pulse" /> Solana launch drafts · official Fan Token rewards</div>
-            <h1>Build the culture.<br /><span>Plan the rewards.</span></h1>
-            <p>Draft a sports community token on Solana, select an official Fan Token reward, and review the proposed creator-fee split for holder rewards and SPORTPAD buyback + burn.</p>
+            <div className="hero-kicker"><span className="live-pulse" /> Solana sports launches · official Fan Token rewards</div>
+            <h1>Launch the culture.<br /><span>Route the rewards.</span></h1>
+            <p>Create a Pump coin on Solana, select a routed official Fan Token reward, and lock creator fees 80% to rewards and 20% to SPORTPAD buyback.</p>
             <div className="hero-actions">
               <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 font-semibold text-[#071008] hover:bg-[#adff7d]">
                 <Link href="/launch"><Sparkles className="size-4" /> Start a launch draft</Link>
@@ -48,24 +50,24 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="match-console" aria-label="SportPad planned fee configuration">
-            <div className="match-console-head"><span><Radio /> Planned configuration</span><span className="route-research">Mainnet off</span></div>
+          <div className="match-console" aria-label="SportPad mainnet fee configuration">
+            <div className="match-console-head"><span><Radio /> Mainnet configuration</span><span className={mainnet.ready ? "route-ready" : "route-research"}>{mainnet.ready ? "Launcher live" : "Treasury setup required"}</span></div>
             <div className="scoreboard">
               <div><small>COMMUNITY TOKEN</small><TokenMark token="YOURS" color="#9cff57" size="lg" /><strong>Your coin</strong><span>Creator name and image</span></div>
               <div className="scoreboard-center"><span>EARNS<br />REWARDS</span><Goal /><small>After funding</small></div>
               <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Available on Solana</span></div>
             </div>
             <div className="fee-split-visual">
-              <div className="split-source"><CircleDollarSign /><span>Eligible creator fees</span><strong>Not live</strong></div>
+              <div className="split-source"><CircleDollarSign /><span>Pump creator fees</span><strong>{mainnet.ready ? "Mainnet" : "Awaiting setup"}</strong></div>
               <div className="split-line"><span style={{ width: "80%" }} /><span style={{ width: "20%" }} /></div>
-              <div className="split-destinations"><div><Trophy /><span>80% official Fan Token rewards</span><strong>Planned</strong></div><div><Flame /><span>20% SPORTPAD buyback + burn</span><strong>Planned</strong></div></div>
+              <div className="split-destinations"><div><Trophy /><span>80% official Fan Token rewards</span><strong>{mainnet.rewardTreasury ? "Treasury set" : "Address required"}</strong></div><div><Flame /><span>20% SPORTPAD buyback + burn</span><strong>{mainnet.buybackTreasury ? "Treasury set" : "Address required"}</strong></div></div>
             </div>
-            <p className="match-console-note">This shows the intended configuration. No fee routing, reward vault, claim, or burn is deployed.</p>
+            <p className="match-console-note">Pump coins trade against SOL. The selected official Fan Token is the reward asset purchased from the 80% creator-fee treasury, not the market pair.</p>
           </div>
         </section>
 
         <section className="protocol-stats page-wrap" aria-label="Current protocol deployment status">
-          <div><span>Mainnet execution</span><strong>Not deployed</strong><small>Pump devnet testing available</small></div>
+          <div><span>Mainnet launcher</span><strong>{mainnet.ready ? "Enabled" : "Setup required"}</strong><small>{mainnet.ready ? "Wallet-signed Pump launch and 80/20 fee lock" : mainnet.missing.join(", ")}</small></div>
           <div><span>Official Fan Tokens on Solana</span><strong>{fanAssets.length}</strong><small>Exact token addresses registry-listed</small></div>
           <div><span>Reward vaults and claims</span><strong>Not deployed</strong><small>No balances or positions</small></div>
           <div><span>SPORTPAD main token</span><strong>Not deployed</strong><small>No burns have occurred</small></div>
@@ -78,8 +80,8 @@ export default function Home() {
             <div className="identity-card community-card">
               <span className="identity-number">01</span><div className="identity-icon"><Sparkles /></div>
               <p className="section-eyebrow">What you launch</p><h2>Community token</h2>
-              <p>A planned Solana coin built around a supporter narrative, matchday moment, athlete meme, or sports community.</p>
-              <ul><li>Designed from your own wallet</li><li>Uses your uploaded name and image</li><li>Would trade through its own market after launch</li></ul>
+              <p>A Solana coin built around a supporter narrative, matchday moment, athlete meme, or sports community.</p>
+              <ul><li>Created from your own wallet</li><li>Uses your uploaded name and image</li><li>Trades against SOL through its Pump market</li></ul>
             </div>
             <div className="identity-link"><span>REWARDED IN</span><ArrowRight /></div>
             <div className="identity-card reward-card">
@@ -92,7 +94,7 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Protocol" title="One fee stream. Two visible outcomes." copy="This is the proposed mainnet flow. Every stage must be deployed, funded, audited, and enabled before it can process value." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Protocol" title="One fee stream. Two visible outcomes." copy="The launch transaction can lock the 80/20 Pump fee recipients on mainnet. Collection, reward acquisition, holder accounting, claims, and SPORTPAD burns require their own deployed and verified workers." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
           <div className="how-flow">
             {[
               { icon: Coins, step: "01", title: "Fees are finalized", copy: "Eligible creator fee events would be indexed and credited only after Solana finality." },
@@ -105,7 +107,7 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens are published on Solana.`} copy="Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain model across Chiliz Chain, Solana, and Base. The official image, identity, and Solana token address come from FanTokens and Chiliz sources. Mainnet acquisition and reward vault execution remain disabled until route and vault checks are built." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens are published on Solana.`} copy="Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain model across Chiliz Chain, Solana, and Base. The official image, identity, and Solana token address come from FanTokens and Chiliz sources. Every selected asset is checked for a live Jupiter route before a mainnet launch can proceed." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
           <div className="asset-directory">
             <div className="asset-directory-head"><span>Official Fan Token</span><span>Solana token address</span><span>Reward route</span><span>Vault</span></div>
             {fanAssets.slice(0, 5).map((asset) => (
@@ -131,7 +133,7 @@ export default function Home() {
             <div className="proof-list"><span><BarChart3 /> Finality and reconciliation state</span><span><Trophy /> Reward purchase and vault reservation</span><span><Flame /> SPORTPAD buyback and verified burn</span><span><ShieldCheck /> Pauses, exceptions, and safe retries</span></div>
             <Button asChild variant="outline" className="mt-7 rounded-full border-white/12 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">Open transparency explorer <ArrowRight /></Link></Button>
           </div>
-          <div className="ledger-card"><div className="ledger-head"><span>Protocol events</span><span className="route-research">Mainnet off</span></div><div className="empty-ledger"><ShieldCheck /><strong>No protocol events</strong><p>No creator fees, reward purchases, claims, or SPORTPAD burns have occurred.</p></div></div>
+          <div className="ledger-card"><div className="ledger-head"><span>Protocol events</span><span className={mainnet.ready ? "route-ready" : "route-research"}>{mainnet.ready ? "Launcher enabled" : "Setup required"}</span></div><div className="empty-ledger"><ShieldCheck /><strong>No economic events recorded</strong><p>No reward purchases, claims, or SPORTPAD burns have occurred.</p></div></div>
         </section>
 
         <section className="page-section page-wrap">

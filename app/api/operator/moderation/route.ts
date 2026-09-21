@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
 import { isOperatorRequest } from "@/lib/server/publication-policy";
 
-const queueStates = ["content_review", "receipt_review", "devnet_published", "suspended", "content_rejected", "receipt_rejected"];
+const queueStates = ["content_review", "receipt_review", "devnet_published", "mainnet_published", "suspended", "mainnet_suspended", "content_rejected", "receipt_rejected"];
 
 function privateJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -42,6 +42,11 @@ export async function GET(request: Request) {
         feeSignature: draft.devnetFeeSignature,
         rewardWallet: draft.devnetRewardWallet,
         burnWallet: draft.devnetBurnWallet,
+        mainnetMint: draft.mainnetMint,
+        mainnetCreateSignature: draft.mainnetCreateSignature,
+        mainnetFeeSignature: draft.mainnetFeeSignature,
+        mainnetRewardTreasury: draft.mainnetRewardTreasury,
+        mainnetBuybackTreasury: draft.mainnetBuybackTreasury,
         imageUrl: draft.imageKey ? `/api/operator/moderation/${encodeURIComponent(draft.id)}/image` : null,
       })),
     });

@@ -56,6 +56,7 @@ test("Jupiter canary sends the API key in a header and returns no quote data", a
     assert.equal(url.searchParams.has("api-key"), false);
     assert.equal(new Headers(init?.headers).get("x-api-key"), dummyKey);
     return new Response(JSON.stringify({
+      requestId: "test-request-id",
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       inAmount: "1000000",

@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       lastUsedAt: now,
     });
     return privateJson(
-      { walletAddress, chain: "solana:devnet", expiresAt },
+      { walletAddress, chain: "solana:mainnet", expiresAt },
       200,
       { "Set-Cookie": walletSessionCookie(token, request) },
     );

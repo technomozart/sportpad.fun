@@ -2,20 +2,22 @@ import { AlertTriangle, ArrowDown, CircleDollarSign, Flame, Radio, ShieldCheck, 
 
 import { PageIntro, SectionHeading } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
+import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { SystemStatus } from "./system-status";
 
 export default function TransparencyPage() {
+  const mainnet = readMainnetConfig();
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
         <PageIntro
           kicker="Proof of Rewards"
-          title="Mainnet economic evidence will appear here after deployment."
-          copy="No mainnet fee, reward, claim, or SPORTPAD burn events exist in this build. Private drafts can record verified Pump devnet creation and fee-share transactions. SportPad will publish only records backed by source transactions and reconciled balances."
+          title="Mainnet evidence appears only after verified execution."
+          copy="The launcher records verified Pump mainnet coin creation and immutable 80/20 fee configuration receipts. Reward purchases, holder allocations, claims, and SPORTPAD burns will appear only when their separate workers are deployed and backed by source transactions."
         >
           <div className="transparency-fresh">
             <Radio />
-            <span><strong>No mainnet events yet</strong><small>Mainnet execution is disabled</small></span>
+            <span><strong>No economic events yet</strong><small>{mainnet.ready ? "Launcher enabled; settlement workers not deployed" : `Launcher waiting for ${mainnet.missing.join(", ")}`}</small></span>
           </div>
         </PageIntro>
 
@@ -80,7 +82,7 @@ export default function TransparencyPage() {
 
         <div className="incident-note">
           <AlertTriangle />
-          <div><strong>No mainnet execution is active.</strong><p>Production treasury addresses, mainnet transaction links, settlement batches, reward vaults, claims, and SPORTPAD burn proofs will appear only after those systems are deployed and independently verifiable.</p></div>
+          <div><strong>{mainnet.ready ? "Mainnet launcher is enabled; economic settlement is not." : "Mainnet launcher setup is incomplete."}</strong><p>Verified launch receipts can appear after a successful launch. Settlement batches, reward vaults, claims, and SPORTPAD burn proofs will appear only after those systems are deployed and independently verifiable.</p></div>
         </div>
       </main>
     </SiteChrome>

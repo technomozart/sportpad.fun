@@ -29,6 +29,11 @@ type ModerationItem = {
   feeSignature: string | null;
   rewardWallet: string | null;
   burnWallet: string | null;
+  mainnetMint: string | null;
+  mainnetCreateSignature: string | null;
+  mainnetFeeSignature: string | null;
+  mainnetRewardTreasury: string | null;
+  mainnetBuybackTreasury: string | null;
   imageUrl: string | null;
 };
 
@@ -36,6 +41,10 @@ const reasons = ["rights_risk", "impersonation", "unsafe_link", "prohibited_cont
 
 function explorer(value: string, type: "address" | "tx") {
   return `https://explorer.solana.com/${type}/${encodeURIComponent(value)}?cluster=devnet`;
+}
+
+function mainnetExplorer(value: string, type: "address" | "tx") {
+  return `https://explorer.solana.com/${type}/${encodeURIComponent(value)}`;
 }
 
 export function ModerationConsole() {
@@ -110,8 +119,8 @@ export function ModerationConsole() {
         {items.map((item) => {
           const contentReview = item.state === "content_review";
           const receiptReview = item.state === "receipt_review";
-          const published = item.state === "devnet_published";
-          const suspended = item.state === "suspended";
+          const published = item.state === "devnet_published" || item.state === "mainnet_published";
+          const suspended = item.state === "suspended" || item.state === "mainnet_suspended";
           return (
             <article key={item.id} className="operator-card">
               <div className="operator-card-head">
@@ -130,6 +139,11 @@ export function ModerationConsole() {
                 {item.feeSignature ? <div><dt>Fee receipt</dt><dd><a href={explorer(item.feeSignature, "tx")} target="_blank" rel="noopener noreferrer">Inspect <ExternalLink /></a></dd></div> : null}
                 {item.rewardWallet ? <div><dt>80% recipient</dt><dd><code>{item.rewardWallet}</code></dd></div> : null}
                 {item.burnWallet ? <div><dt>20% recipient</dt><dd><code>{item.burnWallet}</code></dd></div> : null}
+                {item.mainnetMint ? <div><dt>Mainnet mint</dt><dd><a href={mainnetExplorer(item.mainnetMint, "address")} target="_blank" rel="noopener noreferrer">Inspect <ExternalLink /></a></dd></div> : null}
+                {item.mainnetCreateSignature ? <div><dt>Mainnet create receipt</dt><dd><a href={mainnetExplorer(item.mainnetCreateSignature, "tx")} target="_blank" rel="noopener noreferrer">Inspect <ExternalLink /></a></dd></div> : null}
+                {item.mainnetFeeSignature ? <div><dt>Mainnet fee receipt</dt><dd><a href={mainnetExplorer(item.mainnetFeeSignature, "tx")} target="_blank" rel="noopener noreferrer">Inspect <ExternalLink /></a></dd></div> : null}
+                {item.mainnetRewardTreasury ? <div><dt>80% reward treasury</dt><dd><code>{item.mainnetRewardTreasury}</code></dd></div> : null}
+                {item.mainnetBuybackTreasury ? <div><dt>20% buyback treasury</dt><dd><code>{item.mainnetBuybackTreasury}</code></dd></div> : null}
               </dl>
               {contentReview || receiptReview || published ? (
                 <div className="operator-reason">

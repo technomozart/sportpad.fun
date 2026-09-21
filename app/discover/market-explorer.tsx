@@ -63,7 +63,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
         <div className="view-toggle"><button className={view === "cards" ? "active" : ""} onClick={() => setView("cards")} aria-label="Card view" aria-pressed={view === "cards"}><Grid2X2 /></button><button className={view === "table" ? "active" : ""} onClick={() => setView("table")} aria-label="Table view" aria-pressed={view === "table"}><List /></button></div>
       </div>
 
-      <div className="results-summary"><span><SlidersHorizontal /> {filtered.length} {showingExamples ? "example concepts" : "verified devnet receipts"}</span>{hasFilters ? <button onClick={clearFilters}><X /> Clear filters</button> : <span>{feedLoading ? "Checking the public feed" : feedUnavailable ? "Feed unavailable" : showingExamples ? "No public receipts yet" : "Operator-approved devnet records"}</span>}</div>
+      <div className="results-summary"><span><SlidersHorizontal /> {filtered.length} {showingExamples ? "example concepts" : "verified launches"}</span>{hasFilters ? <button onClick={clearFilters}><X /> Clear filters</button> : <span>{feedLoading ? "Checking the public feed" : feedUnavailable ? "Feed unavailable" : showingExamples ? "No public receipts yet" : "Verified onchain records"}</span>}</div>
 
       {!feedLoading && !feedUnavailable && filtered.length === 0 ? (
         <div className="empty-state"><Search /><h2>No result matches these filters.</h2><p>Try another ticker, sport, or Fan Token symbol.</p><Button onClick={clearFilters} className="rounded-full bg-white text-black hover:bg-white/90">Reset filters</Button></div>
@@ -75,7 +75,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
             <thead><tr><th>Community token</th><th>Official Fan Token reward</th><th>Sport</th><th>State</th><th>Description</th></tr></thead>
             <tbody>{filtered.map((launch) => {
               const reward = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol);
-              return <tr key={launch.slug}><td><Link href={`/launches/${launch.slug}`}><TokenMark token={launch.ticker} color={launch.tone} imagePath={launch.imagePath} /><span><strong>{launch.name}</strong><small>${launch.ticker} · {launch.isExample ? "example concept" : "Solana devnet receipt"}</small></span></Link></td><td><span className="reward-cell"><TokenMark token={launch.rewardSymbol} color={reward?.color ?? launch.tone} imagePath={reward?.imagePath} size="sm" /><strong>{launch.rewardSymbol}</strong></span></td><td>{launch.sport}</td><td><span className={launch.isExample ? "route-research" : "route-ready"}>{launch.isExample ? "Not live" : "Verified devnet"}</span></td><td>{launch.narrative}</td></tr>;
+              return <tr key={launch.slug}><td><Link href={`/launches/${launch.slug}`}><TokenMark token={launch.ticker} color={launch.tone} imagePath={launch.imagePath} /><span><strong>{launch.name}</strong><small>${launch.ticker} · {launch.isExample ? "example concept" : launch.mainnet ? "Solana mainnet" : "Solana devnet receipt"}</small></span></Link></td><td><span className="reward-cell"><TokenMark token={launch.rewardSymbol} color={reward?.color ?? launch.tone} imagePath={reward?.imagePath} size="sm" /><strong>{launch.rewardSymbol}</strong></span></td><td>{launch.sport}</td><td><span className={launch.isExample ? "route-research" : "route-ready"}>{launch.isExample ? "Not live" : launch.mainnet ? "LIVE" : "Verified devnet"}</span></td><td>{launch.narrative}</td></tr>;
             })}</tbody>
           </table>
         </div>

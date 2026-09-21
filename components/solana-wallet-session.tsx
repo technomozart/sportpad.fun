@@ -15,7 +15,7 @@ type SignedTransaction = Transaction | VersionedTransaction;
 type WalletSessionContextValue = {
   wallet: string;
   connectedAddress: string;
-  chain: "solana:devnet";
+  chain: "solana:mainnet";
   busy: boolean;
   message: string;
   messageTone: "success" | "error" | "neutral";
@@ -185,7 +185,7 @@ export function SolanaWalletSessionProvider({ children }: { children: ReactNode 
         throw new Error("Wallet verification was superseded by a newer wallet action.");
       }
       setWallet(walletAddress);
-      setMessage(`${entry.name} ownership verified for Solana devnet.`);
+      setMessage(`${entry.name} ownership verified for Solana.`);
       setMessageTone("success");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Wallet verification failed.");
@@ -256,7 +256,7 @@ export function SolanaWalletSessionProvider({ children }: { children: ReactNode 
   const value = useMemo<WalletSessionContextValue>(() => ({
     wallet,
     connectedAddress,
-    chain: "solana:devnet",
+    chain: "solana:mainnet",
     busy,
     message,
     messageTone,

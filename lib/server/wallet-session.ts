@@ -9,7 +9,9 @@ import {
 } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 
-export const WALLET_SESSION_COOKIE = "sportpad_wallet_session";
+// Versioned so sessions created from the previous devnet-bound challenge can
+// never authorize a mainnet launch. Users must sign the mainnet-bound message.
+export const WALLET_SESSION_COOKIE = "sportpad_mainnet_wallet_session_v1";
 
 function randomBase64Url(byteLength = 32) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLength));

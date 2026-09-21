@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { devnetSubmissions, launchDrafts } from "@/db/schema";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
 import { isModerationDecisionReasonValid, operatorModerationTransition } from "@/lib/protocol/moderation";
+import { buildPublicMainnetReceipt } from "@/lib/protocol/public-mainnet-launch";
 import { buildVerifiedDevnetEvidence } from "@/lib/protocol/public-devnet-launch";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 import { commitModerationTransition } from "@/lib/server/moderation-transition";
@@ -56,7 +57,11 @@ export async function POST(request: Request, context: DecisionRouteContext) {
     if (input.data.action === "approve_content" && (!draft.imageKey || !draft.rewardMint)) {
       return privateJson({ error: "The draft is missing its stored image or reward token identity." }, 409);
     }
-    if (input.data.action === "approve_receipt" || input.data.action === "restore") {
+    if (input.data.action === "restore" && draft.status === "mainnet_suspended") {
+      if (!buildPublicMainnetReceipt({ ...draft, status: "mainnet_published" })) {
+        return privateJson({ error: "The verified mainnet evidence no longer matches this draft." }, 409);
+      }
+    } else if (input.data.action === "approve_receipt" || input.data.action === "restore") {
       const submissions = await getDb().select().from(devnetSubmissions).where(and(
         eq(devnetSubmissions.draftId, id),
         eq(devnetSubmissions.status, "verified"),

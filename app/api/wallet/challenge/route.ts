@@ -66,7 +66,7 @@ export async function POST(request: Request) {
       expiresAt,
       createdAt: now,
     });
-    return privateJson({ id, message, walletAddress, expiresAt, chain: "solana:devnet" }, 201);
+    return privateJson({ id, message, walletAddress, expiresAt, chain: "solana:mainnet" }, 201);
   } catch (error) {
     console.error("wallet_challenge_create_failed", error);
     return privateJson({ error: "Wallet verification is temporarily unavailable." }, 503);

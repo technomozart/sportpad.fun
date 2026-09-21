@@ -12,7 +12,9 @@ type ProviderState = {
 type HealthResponse = {
   status: "ok" | "degraded" | "configuration_required";
   providers: { helius: ProviderState; jupiter: ProviderState };
-  mainnetExecution: false;
+  mainnetExecution: boolean;
+  mainnetMissing: string[];
+  sportpadMintConfigured: boolean;
 };
 
 const detailLabel: Record<ProviderState["detail"], string> = {
@@ -63,6 +65,7 @@ export function SystemStatus() {
           <code>{provider.healthy ? "OPERATIONAL" : provider.configured ? "DEGRADED" : "NOT CONFIGURED"}</code>
         </div>
       ))}
+      <div><span className={health?.mainnetExecution ? "healthy" : "warning"} /><strong>Mainnet launcher</strong><small>{health?.mainnetExecution ? "Pump launch and fee-lock path enabled" : health?.mainnetMissing.join(", ") || "Configuration unavailable"}</small><code>{health?.mainnetExecution ? "ENABLED" : "SETUP REQUIRED"}</code></div>
       <div><span className="neutral" /><strong>Fee indexer</strong><small>Worker not deployed</small><code>NOT DEPLOYED</code></div>
       <div><span className="neutral" /><strong>Reward inventory</strong><small>No reward vaults are deployed</small><code>NOT DEPLOYED</code></div>
       <div><span className="neutral" /><strong>Claims</strong><small>Claim program not deployed</small><code>NOT DEPLOYED</code></div>

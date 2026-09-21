@@ -64,6 +64,13 @@
       "when": 1789993502785,
       "tag": "0008_whole_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790025153494,
+      "tag": "0009_confused_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }
