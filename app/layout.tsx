@@ -9,7 +9,6 @@ export const metadata: Metadata = {
     template: "%s · SportPad",
   },
   description: "Explore SportPad's private Solana launch builder and the planned route from creator fees to official Fan Token rewards and SPORTPAD buyback + burn.",
-  alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     url: "/",

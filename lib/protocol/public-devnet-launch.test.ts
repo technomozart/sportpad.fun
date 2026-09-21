@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildPublicDevnetReceipt,
+  buildVerifiedDevnetEvidence,
   type PublishableDevnetDraft,
   type VerifiedDevnetSubmission,
 } from "./public-devnet-launch.ts";
@@ -64,6 +65,14 @@ test("does not publish a private verified draft", () => {
     buildPublicDevnetReceipt({ ...draft, status: "devnet_verified", devnetPublishedAt: null }, [submission("create"), submission("fee")]),
     null,
   );
+});
+
+test("builds private verified evidence for moderation without making it public", () => {
+  const privateDraft = { ...draft, status: "receipt_review", devnetPublishedAt: null };
+  const evidence = buildVerifiedDevnetEvidence(privateDraft, [submission("create"), submission("fee")]);
+  assert.equal(evidence?.mint, "mint-address");
+  assert.equal("publishedAt" in evidence!, false);
+  assert.equal(buildPublicDevnetReceipt(privateDraft, [submission("create"), submission("fee")]), null);
 });
 
 test("rejects missing, unverified, or mismatched onchain evidence", () => {

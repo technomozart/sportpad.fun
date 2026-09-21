@@ -13,6 +13,8 @@ export type PublicDevnetReceipt = {
   publishedAt: string;
 };
 
+export type VerifiedDevnetEvidence = Omit<PublicDevnetReceipt, "publishedAt">;
+
 export type PublishableDevnetDraft = {
   status: string;
   name: string;
@@ -75,6 +77,20 @@ export function buildPublicDevnetReceipt(
 ): PublicDevnetReceipt | null {
   if (
     draft.status !== "devnet_published" ||
+    !isTimestamp(draft.devnetPublishedAt)
+  ) {
+    return null;
+  }
+
+  const evidence = buildVerifiedDevnetEvidence(draft, submissions);
+  return evidence ? { ...evidence, publishedAt: draft.devnetPublishedAt } : null;
+}
+
+export function buildVerifiedDevnetEvidence(
+  draft: PublishableDevnetDraft,
+  submissions: readonly VerifiedDevnetSubmission[],
+): VerifiedDevnetEvidence | null {
+  if (
     !draft.creatorWallet ||
     !draft.rewardMint ||
     !draft.devnetMetadataUri ||
@@ -83,11 +99,8 @@ export function buildPublicDevnetReceipt(
     !draft.devnetFeeSignature ||
     !draft.devnetRewardWallet ||
     !draft.devnetBurnWallet ||
-    !isTimestamp(draft.devnetVerifiedAt) ||
-    !isTimestamp(draft.devnetPublishedAt)
-  ) {
-    return null;
-  }
+    !isTimestamp(draft.devnetVerifiedAt)
+  ) return null;
 
   const create = submissions.find((submission) =>
     submission.kind === "create" &&
@@ -113,6 +126,5 @@ export function buildPublicDevnetReceipt(
     burnWallet: draft.devnetBurnWallet,
     metadataUri: draft.devnetMetadataUri,
     verifiedAt: draft.devnetVerifiedAt,
-    publishedAt: draft.devnetPublishedAt,
   };
 }

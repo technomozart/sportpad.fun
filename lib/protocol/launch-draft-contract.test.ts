@@ -54,8 +54,9 @@ test("draft API requires one bounded multipart image and returns only a private 
   assert.match(routeSource, /launchDraftPayloadSchema\.safeParse/);
   assert.match(routeSource, /imageStored: true/);
   assert.doesNotMatch(routeSource, /artworkStored/);
-  assert.match(routeSource, /const \{ imageKey, ownerUserId: _ownerUserId, \.\.\.safeDraft \} = draft/);
-  assert.match(routeSource, /void _ownerUserId/);
+  assert.match(routeSource, /function serializeDraft/);
+  assert.doesNotMatch(routeSource, /\.\.\.safeDraft/);
+  assert.doesNotMatch(routeSource, /moderationActorUserId/);
   assert.match(imageRouteSource, /eq\(launchDrafts\.ownerUserId, ownerUserId\)/);
   assert.match(imageRouteSource, /X-Content-Type-Options/);
   assert.match(imageRouteSource, /Cache-Control.*private, no-store/);
@@ -90,6 +91,7 @@ test("private drafts can be listed and resumed only through the authenticated ow
 test("devnet launch records signed evidence before broadcast and finalizes with database guards", () => {
   const clientSource = readProjectFile("lib", "client", "pump-devnet.ts");
   const routeSource = readProjectFile("app", "api", "launch-drafts", "[id]", "devnet", "route.ts");
+  const moderationTransitionSource = readProjectFile("lib", "server", "moderation-transition.ts");
   const verifierSource = readProjectFile("lib", "server", "solana", "devnet.ts");
   const schemaSource = readProjectFile("db", "schema.ts");
 
@@ -99,9 +101,12 @@ test("devnet launch records signed evidence before broadcast and finalizes with 
   );
   assert.match(routeSource, /record_create_submission/);
   assert.match(routeSource, /record_fee_submission/);
+  assert.match(routeSource, /commitModerationTransition/);
+  assert.match(routeSource, /action: "verify_devnet"/);
   assert.match(routeSource, /publicationAccepted/);
   assert.match(routeSource, /isNull\(launchDrafts\.devnetCreateSignature\)/);
-  assert.match(routeSource, /isNull\(launchDrafts\.devnetFeeSignature\)/);
+  assert.match(moderationTransitionSource, /isNull\(launchDrafts\.devnetFeeSignature\)/);
+  assert.match(moderationTransitionSource, /isNull\(launchDrafts\.devnetVerifiedAt\)/);
   assert.match(routeSource, /exactSubmissionWhere\(recorded, "recorded"\)/);
   assert.match(routeSource, /creatorWallet: recorded\.creatorWallet/);
   assert.match(routeSource, /metadataUri: recorded\.metadataUri/);

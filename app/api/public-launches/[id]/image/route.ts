@@ -21,7 +21,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
-  headers.set("cache-control", "public, max-age=3600");
+  headers.set("cache-control", "no-store");
   headers.set("x-content-type-options", "nosniff");
   return new Response(object.body, { headers });
 }

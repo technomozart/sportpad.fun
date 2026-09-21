@@ -48,8 +48,34 @@ type WebMCPTool = {
   execute: (input: Record<string, unknown>) => unknown | Promise<unknown>;
 };
 
-function WalletButton() {
+function WalletButton({ pathname }: { pathname: string }) {
   const { wallet, busy, message, messageTone, providerAvailable, connectAndVerify, disconnect } = useSolanaWalletSession();
+  const [accountStatus, setAccountStatus] = useState<"loading" | "signed_in" | "signed_out">("loading");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/account", { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<{ authenticated?: boolean }> : Promise.reject(new Error("Account unavailable")))
+      .then((body) => setAccountStatus(body.authenticated === true ? "signed_in" : "signed_out"))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setAccountStatus("signed_out");
+      });
+    return () => controller.abort();
+  }, []);
+
+  if (accountStatus === "loading") {
+    return <Button disabled aria-label="Checking wallet access" variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white"><Wallet className="size-4" /><span>Wallet</span></Button>;
+  }
+
+  if (accountStatus === "signed_out") {
+    const returnTo = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
+    return (
+      <Button asChild variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
+        <a href={`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`}><Wallet className="size-4" /><span>Sign in to connect</span></a>
+      </Button>
+    );
+  }
 
   return (
     <Dialog>
@@ -81,15 +107,19 @@ function WalletButton() {
 
 function AccountButton({ pathname }: { pathname: string }) {
   const [status, setStatus] = useState<"loading" | "signed_in" | "signed_out">("loading");
+  const [operator, setOperator] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/account", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Account status could not be loaded.");
-        return response.json() as Promise<{ authenticated?: boolean }>;
+        return response.json() as Promise<{ authenticated?: boolean; isOperator?: boolean }>;
       })
-      .then((body) => setStatus(body.authenticated === true ? "signed_in" : "signed_out"))
+      .then((body) => {
+        setOperator(body.isOperator === true);
+        setStatus(body.authenticated === true ? "signed_in" : "signed_out");
+      })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setStatus("signed_out");
@@ -134,6 +164,7 @@ function AccountButton({ pathname }: { pathname: string }) {
         <Button asChild variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
           <a href={signOutPath}><LogOut className="size-4" /> Sign out</a>
         </Button>
+        {operator ? <Button asChild className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]"><Link href="/operator">Open moderation console</Link></Button> : null}
       </DialogContent>
     </Dialog>
   );
@@ -222,7 +253,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
           <div className="network-pill"><span /> Solana</div>
           <a className="github-header-link" href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer" aria-label="SportPad source code on GitHub"><GitFork /><span>GitHub</span></a>
           <AccountButton pathname={pathname} />
-          <WalletButton />
+          <WalletButton pathname={pathname} />
           <Button asChild className="hidden rounded-full bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d] xl:inline-flex">
             <Link href="/launch"><Sparkles className="size-4" /> Build draft</Link>
           </Button>

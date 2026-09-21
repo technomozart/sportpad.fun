@@ -40,7 +40,7 @@ export function LaunchShowcase() {
       <SectionHeading
         eyebrow={examplesOnly ? "Product examples" : "Verified devnet receipts"}
         title={examplesOnly ? "See how a community launch could select an official reward." : "Verified devnet launch receipts with official Fan Token selections."}
-        copy={examplesOnly ? "These examples explain the product. They are not tokens, markets, holders, fees, or funded rewards." : "Creator-published Solana devnet receipts appear here with their verified mint and transaction evidence. They are not mainnet launches."}
+        copy={examplesOnly ? "These examples explain the product. They are not tokens, markets, holders, fees, or funded rewards." : "Creator-submitted, operator-approved Solana devnet receipts appear here with their verified mint and transaction evidence. They are not mainnet launches."}
         action={<Link href="/discover" className="text-link">View all <ArrowRight /></Link>}
       />
       {feedLoading ? <div className="examples-notice"><span>Loading public devnet receipts.</span></div> : null}

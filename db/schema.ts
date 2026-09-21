@@ -24,6 +24,14 @@ export const launchDrafts = sqliteTable(
     devnetBurnWallet: text("devnet_burn_wallet"),
     devnetVerifiedAt: text("devnet_verified_at"),
     devnetPublishedAt: text("devnet_published_at"),
+    moderationVersion: integer("moderation_version").notNull().default(0),
+    moderationSubmittedAt: text("moderation_submitted_at"),
+    moderationReviewedAt: text("moderation_reviewed_at"),
+    moderationActorUserId: text("moderation_actor_user_id"),
+    moderationActorRole: text("moderation_actor_role"),
+    moderationAction: text("moderation_action"),
+    moderationReason: text("moderation_reason"),
+    moderationOwnerMessage: text("moderation_owner_message"),
     rightsAttested: integer("rights_attested", { mode: "boolean" }).notNull().default(false),
     unofficialAttested: integer("unofficial_attested", { mode: "boolean" }).notNull().default(false),
     economicsAttested: integer("economics_attested", { mode: "boolean" }).notNull().default(false),
@@ -188,3 +196,35 @@ export const serviceCursors = sqliteTable("service_cursors", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const launchModerationEvents = sqliteTable(
+  "launch_moderation_events",
+  {
+    id: text("id").primaryKey(),
+    draftId: text("draft_id").notNull().references(() => launchDrafts.id),
+    actorUserId: text("actor_user_id").notNull(),
+    actorRole: text("actor_role").notNull(),
+    action: text("action").notNull(),
+    fromState: text("from_state").notNull(),
+    toState: text("to_state").notNull(),
+    reasonCode: text("reason_code"),
+    ownerMessage: text("owner_message"),
+    version: integer("version").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_launch_moderation_draft_version").on(table.draftId, table.version),
+    index("idx_launch_moderation_state_created").on(table.toState, table.createdAt),
+  ],
+);
+
+export const rateLimitWindows = sqliteTable(
+  "rate_limit_windows",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull().default(0),
+    windowExpiresAt: integer("window_expires_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("idx_rate_limit_windows_expires").on(table.windowExpiresAt)],
+);

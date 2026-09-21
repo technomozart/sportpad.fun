@@ -45,7 +45,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
     const normalized = query.trim().toLowerCase();
     const source = showingExamples ? exampleLaunches : publicLaunches ?? [];
     return source
-      .filter((launch) => !normalized || `${launch.name} ${launch.ticker} ${launch.rewardSymbol} ${launch.narrative}`.toLowerCase().includes(normalized))
+      .filter((launch) => !normalized || `${launch.name} ${launch.ticker} ${launch.sport} ${launch.rewardSymbol} ${launch.rewardName} ${launch.narrative}`.toLowerCase().includes(normalized))
       .filter((launch) => sport === "All sports" || launch.sport === sport);
   }, [publicLaunches, query, showingExamples, sport]);
 
@@ -63,7 +63,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
         <div className="view-toggle"><button className={view === "cards" ? "active" : ""} onClick={() => setView("cards")} aria-label="Card view" aria-pressed={view === "cards"}><Grid2X2 /></button><button className={view === "table" ? "active" : ""} onClick={() => setView("table")} aria-label="Table view" aria-pressed={view === "table"}><List /></button></div>
       </div>
 
-      <div className="results-summary"><span><SlidersHorizontal /> {filtered.length} {showingExamples ? "example concepts" : "verified devnet receipts"}</span>{hasFilters ? <button onClick={clearFilters}><X /> Clear filters</button> : <span>{feedLoading ? "Checking the public feed" : feedUnavailable ? "Feed unavailable" : showingExamples ? "No public receipts yet" : "Creator-published devnet records"}</span>}</div>
+      <div className="results-summary"><span><SlidersHorizontal /> {filtered.length} {showingExamples ? "example concepts" : "verified devnet receipts"}</span>{hasFilters ? <button onClick={clearFilters}><X /> Clear filters</button> : <span>{feedLoading ? "Checking the public feed" : feedUnavailable ? "Feed unavailable" : showingExamples ? "No public receipts yet" : "Operator-approved devnet records"}</span>}</div>
 
       {!feedLoading && !feedUnavailable && filtered.length === 0 ? (
         <div className="empty-state"><Search /><h2>No result matches these filters.</h2><p>Try another ticker, sport, or Fan Token symbol.</p><Button onClick={clearFilters} className="rounded-full bg-white text-black hover:bg-white/90">Reset filters</Button></div>

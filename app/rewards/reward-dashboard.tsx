@@ -2,7 +2,13 @@
 
 import { CheckCircle2, Clock3, Coins, ShieldCheck, Wallet } from "lucide-react";
 
+import { useSolanaWalletSession } from "@/components/solana-wallet-session";
+
 export function RewardDashboard() {
+  const walletSession = useSolanaWalletSession();
+  const walletLabel = walletSession.wallet
+    ? `${walletSession.wallet.slice(0, 5)}...${walletSession.wallet.slice(-5)}`
+    : "Not connected";
   const lifecycle = [
     { icon: Coins, title: "Earning", copy: "Indexer not deployed" },
     { icon: Clock3, title: "Closing", copy: "No reward epochs yet" },
@@ -15,8 +21,8 @@ export function RewardDashboard() {
       <div className="reward-summary-grid">
         <div className="reward-summary-primary">
           <span>Wallet-linked reward data</span>
-          <strong>Not connected</strong>
-          <small>No wallet session is connected to a live reward indexer</small>
+          <strong>{walletLabel}</strong>
+          <small>{walletSession.wallet ? "Wallet verified. The reward indexer is not deployed yet." : "Verify a wallet to establish ownership. No live reward indexer is deployed yet."}</small>
         </div>
         <div><span>Reward positions</span><strong>No data</strong><small>No live reward indexer is deployed</small></div>
         <div><span>Claim program</span><strong>Not deployed</strong><small>No claim can be submitted</small></div>
@@ -29,7 +35,7 @@ export function RewardDashboard() {
       </div>
 
       <div className="dashboard-toolbar">
-        <div><Wallet /><span>Reward data source <code>Not connected</code></span></div>
+        <div><Wallet /><span>Verified wallet <code>{walletLabel}</code></span></div>
         <span className="claim-status">Claims not deployed</span>
       </div>
 

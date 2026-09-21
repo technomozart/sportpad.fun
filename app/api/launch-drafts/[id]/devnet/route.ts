@@ -10,6 +10,7 @@ import {
   validateDevnetRecipients,
 } from "@/lib/protocol/devnet-launch";
 import { normalizeSolanaAddress } from "@/lib/protocol/wallet-auth";
+import { canPrepareDevnet } from "@/lib/protocol/moderation";
 import { uploadPumpMetadata } from "@/lib/server/pump-metadata";
 import {
   isDevnetTransactionStateError,
@@ -18,7 +19,10 @@ import {
   verifyPumpDevnetFeeSplit,
 } from "@/lib/server/solana/devnet";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { commitModerationTransition } from "@/lib/server/moderation-transition";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
+import { getPublicationMode, isOperatorUserId } from "@/lib/server/publication-policy";
+import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
 type DevnetRouteContext = { params: Promise<{ id: string }> };
 
@@ -83,6 +87,7 @@ function serializeDevnetState(
     burnWallet: frozenSubmission?.burnWallet ?? draft.devnetBurnWallet,
     verifiedAt: draft.devnetVerifiedAt,
     publishedAt: draft.devnetPublishedAt,
+    moderationVersion: draft.moderationVersion,
     publicPath: isPublished ? `/launches/${encodeURIComponent(draft.id)}` : null,
     pendingMint: pendingCreate?.mint ?? null,
     pendingCreateSignature: pendingCreate?.signature ?? null,
@@ -91,7 +96,7 @@ function serializeDevnetState(
     pendingFeeSignature: pendingFee?.signature ?? null,
     pendingFeeBlockhash: pendingFee?.blockhash ?? null,
     pendingFeeLastValidBlockHeight: pendingFee?.lastValidBlockHeight ?? null,
-    status: isPublished ? "published" : draft.devnetVerifiedAt ? "verified" : draft.devnetCreateSignature ? "coin_created" : draft.devnetMetadataUri ? "prepared" : "not_started",
+    status: isPublished ? "published" : draft.status === "receipt_review" ? "review_pending" : draft.devnetVerifiedAt ? "verified" : draft.devnetCreateSignature ? "coin_created" : draft.devnetMetadataUri ? "prepared" : "not_started",
   };
 }
 
@@ -272,6 +277,14 @@ export async function POST(request: Request, context: DevnetRouteContext) {
     if (!draft) return privateJson({ error: "Draft not found." }, 404);
 
     if (input.action === "prepare") {
+      const publicationMode = getPublicationMode();
+      if (!canPrepareDevnet(draft.status, publicationMode, isOperatorUserId(ownerUserId))) {
+        return privateJson({
+          error: publicationMode === "closed"
+            ? "Devnet preparation is paused. No image or metadata was published."
+            : "Content review must be approved before anything is uploaded to IPFS or sent to Pump.",
+        }, 409);
+      }
       const activeCreate = (await draftSubmissions(id, ownerUserId)).find(
         (submission) => submission.kind === "create" && ["recorded", "verified"].includes(submission.status),
       );
@@ -305,6 +318,11 @@ export async function POST(request: Request, context: DevnetRouteContext) {
         if (!input.publicationAccepted) {
           return privateJson({ error: "Confirm the public IPFS upload before preparing this launch." }, 409);
         }
+        const limitSubject = `${ownerUserId}:${session.walletAddress}`;
+        const hourly = await consumeFixedWindow({ scope: "ipfs_prepare_hour", subject: limitSubject, limit: 5, windowSeconds: 3_600 });
+        if (!hourly.allowed) return rateLimitedJson("Devnet preparation limit reached. Try again later.", hourly);
+        const daily = await consumeFixedWindow({ scope: "ipfs_prepare_day", subject: limitSubject, limit: 3, windowSeconds: 86_400 });
+        if (!daily.allowed) return rateLimitedJson("Daily devnet preparation limit reached. Try again tomorrow.", daily);
         const image = await env.BUCKET.get(draft.imageKey);
         if (!image) return privateJson({ error: "The draft image is unavailable." }, 409);
         metadataUri = await uploadPumpMetadata({
@@ -655,21 +673,23 @@ export async function POST(request: Request, context: DevnetRouteContext) {
     }
     if (verifiedSlot === null) throw new DevnetConflictError("The verified fee submission is missing its finalized slot.");
     const verifiedAt = new Date().toISOString();
-    const [updated] = await getDb().update(launchDrafts).set({
-      creatorWallet: recorded.creatorWallet,
-      devnetMetadataUri: recorded.metadataUri,
-      devnetFeeSignature: signature,
-      devnetRewardWallet: recorded.rewardWallet,
-      devnetBurnWallet: recorded.burnWallet,
-      devnetVerifiedAt: verifiedAt,
-      status: "devnet_verified",
-      updatedAt: verifiedAt,
-    }).where(and(
-      eq(launchDrafts.id, id),
-      eq(launchDrafts.ownerUserId, ownerUserId),
-      isNull(launchDrafts.devnetFeeSignature),
-      isNull(launchDrafts.devnetVerifiedAt),
-    )).returning();
+    const updated = await commitModerationTransition({
+      draftId: id,
+      fromState: "content_approved",
+      toState: "devnet_verified",
+      expectedVersion: draft.moderationVersion,
+      actorUserId: ownerUserId,
+      actorRole: "creator",
+      action: "verify_devnet",
+      verifiedDevnet: {
+        creatorWallet: recorded.creatorWallet,
+        metadataUri: recorded.metadataUri,
+        feeSignature: signature,
+        rewardWallet: recorded.rewardWallet,
+        burnWallet: recorded.burnWallet,
+        verifiedAt,
+      },
+    });
     if (!updated) {
       const current = await ownerDraft(id, ownerUserId);
       if (!current || current.devnetFeeSignature !== signature) {

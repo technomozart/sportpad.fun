@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PageIntro, SafetyNotice, SectionHeading, TokenMark } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { fanAssets } from "@/lib/site-data";
+import { TokenAddressCell } from "./token-address-cell";
 
 const withoutSolana = [
   ["ALPINE", "Alpine F1 Team"], ["BJK", "Besiktas"], ["BFT", "Brazil National Team"],
@@ -43,7 +44,7 @@ export default function FanTokensPage() {
           <div className="registry-stats"><div><strong>96</strong><span>assets across both source sets</span></div><div><strong>{fanAssets.length}</strong><span>Chiliz-registry Solana addresses</span></div><div><strong>{withoutSolana.length}</strong><span>FanTokens catalog only</span></div><div><strong>Not deployed</strong><span>SportPad reward execution</span></div></div>
           <div className="registry-table-wrap">
             <table className="registry-table"><thead><tr><th>Official Fan Token</th><th>Sport</th><th>Solana token address</th><th>Identity</th><th>Route</th><th>Vault</th></tr></thead><tbody>
-              {fanAssets.map((asset) => <tr key={asset.symbol}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><code title={asset.mint}>{asset.mint.slice(0, 8)}...{asset.mint.slice(-7)}</code></td><td><span className="asset-status status-registry-listed">Registry listed</span></td><td>{asset.route}</td><td>{asset.vault}</td></tr>)}
+              {fanAssets.map((asset) => <tr key={asset.symbol}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><TokenAddressCell mint={asset.mint} symbol={asset.symbol} /></td><td><span className="asset-status status-registry-listed">Registry listed</span></td><td>{asset.route}</td><td>{asset.vault}</td></tr>)}
             </tbody></table>
           </div>
         </section>

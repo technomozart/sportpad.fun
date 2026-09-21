@@ -11,6 +11,8 @@ export type Launch = {
   rewardName: string;
   tone: string;
   description: string;
+  website?: string;
+  social?: string;
   imagePath?: string;
   isExample: boolean;
   devnet?: PublicDevnetReceipt;

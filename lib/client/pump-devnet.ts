@@ -32,6 +32,10 @@ function connection() {
   });
 }
 
+export async function getDevnetBalanceLamports(walletAddress: string) {
+  return connection().getBalance(new PublicKey(walletAddress), "confirmed");
+}
+
 async function simulateOrThrow(rpc: Connection, transaction: Transaction) {
   const simulation = await rpc.simulateTransaction(transaction);
   if (simulation.value.err) {

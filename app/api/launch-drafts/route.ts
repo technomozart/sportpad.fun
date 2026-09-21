@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 
 import { getDb } from "@/db";
@@ -11,6 +11,7 @@ import {
 } from "@/lib/protocol/launch-image";
 import { getRewardAsset } from "@/lib/protocol/reward-assets";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
 const maxPayloadBytes = 16_384;
 const maxRequestBytes = MAX_LAUNCH_IMAGE_BYTES + 32_768;
@@ -31,11 +32,22 @@ function errorMessage(error: unknown) {
 }
 
 function serializeDraft(draft: typeof launchDrafts.$inferSelect) {
-  const { imageKey, ownerUserId: _ownerUserId, ...safeDraft } = draft;
-  void _ownerUserId;
   return {
-    ...safeDraft,
-    imageUrl: imageKey ? `/api/launch-drafts/${encodeURIComponent(draft.id)}/image` : null,
+    id: draft.id,
+    name: draft.name,
+    symbol: draft.symbol,
+    description: draft.description,
+    sport: draft.sport,
+    website: draft.website,
+    social: draft.social,
+    rewardSymbol: draft.rewardSymbol,
+    rightsAttested: draft.rightsAttested,
+    unofficialAttested: draft.unofficialAttested,
+    economicsAttested: draft.economicsAttested,
+    status: draft.status,
+    moderationVersion: draft.moderationVersion,
+    createdAt: draft.createdAt,
+    imageUrl: draft.imageKey ? `/api/launch-drafts/${encodeURIComponent(draft.id)}/image` : null,
   };
 }
 
@@ -85,6 +97,23 @@ export async function POST(request: Request) {
   }
   if (contentLength > maxRequestBytes) {
     return privateJson({ error: "Request body is too large." }, 413);
+  }
+
+  try {
+    const [activeCount] = await getDb().select({ value: count() }).from(launchDrafts).where(and(
+      eq(launchDrafts.ownerUserId, ownerUserId),
+      inArray(launchDrafts.status, ["draft", "content_review", "content_approved", "devnet_verified", "receipt_review", "receipt_rejected"]),
+    ));
+    if ((activeCount?.value ?? 0) >= 20) {
+      return privateJson({ error: "This account already has 20 active drafts. Finish an existing review before adding more." }, 409);
+    }
+    const hourly = await consumeFixedWindow({ scope: "draft_create_hour", subject: ownerUserId, limit: 10, windowSeconds: 3_600 });
+    if (!hourly.allowed) return rateLimitedJson("Draft creation limit reached. Try again later.", hourly);
+    const daily = await consumeFixedWindow({ scope: "draft_create_day", subject: ownerUserId, limit: 25, windowSeconds: 86_400 });
+    if (!daily.allowed) return rateLimitedJson("Daily draft creation limit reached. Try again tomorrow.", daily);
+  } catch (error) {
+    console.error("launch_draft_limit_check_failed", error);
+    return privateJson({ error: "Draft limits could not be checked. Please retry shortly." }, 503);
   }
 
   let form: FormData;

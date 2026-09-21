@@ -1,11 +1,12 @@
 "use client";
 
-import { CheckCircle2, ExternalLink, FlaskConical, LockKeyhole, ShieldCheck, Wallet } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CheckCircle2, Clock3, ExternalLink, FlaskConical, LockKeyhole, ShieldCheck, Wallet } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useSolanaWalletSession } from "@/components/solana-wallet-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { validateDevnetRecipients } from "@/lib/protocol/devnet-launch";
 
 type DevnetState = {
   draftId: string;
@@ -19,6 +20,7 @@ type DevnetState = {
   burnWallet: string | null;
   verifiedAt: string | null;
   publishedAt: string | null;
+  moderationVersion: number;
   publicPath: string | null;
   pendingMint: string | null;
   pendingCreateSignature: string | null;
@@ -27,7 +29,7 @@ type DevnetState = {
   pendingFeeSignature: string | null;
   pendingFeeBlockhash: string | null;
   pendingFeeLastValidBlockHeight: number | null;
-  status: "not_started" | "prepared" | "coin_created" | "verified" | "published";
+  status: "not_started" | "prepared" | "coin_created" | "verified" | "review_pending" | "published";
 };
 
 type PendingDevnetEvidence = {
@@ -76,7 +78,19 @@ function explorerUrl(value: string, type: "address" | "tx") {
   return `https://explorer.solana.com/${type}/${encodeURIComponent(value)}?cluster=devnet`;
 }
 
-export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; name: string; symbol: string }) {
+export function DevnetLaunchPanel({
+  draftId,
+  name,
+  symbol,
+  moderationVersion,
+  onReviewSubmitted,
+}: {
+  draftId: string;
+  name: string;
+  symbol: string;
+  moderationVersion: number;
+  onReviewSubmitted?: () => void;
+}) {
   const walletSession = useSolanaWalletSession();
   const [devnet, setDevnet] = useState<DevnetState | null>(null);
   const [rewardWallet, setRewardWallet] = useState("");
@@ -87,6 +101,13 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
   const [publicationAccepted, setPublicationAccepted] = useState(false);
   const [publicReceiptAccepted, setPublicReceiptAccepted] = useState(false);
   const [pendingEvidence, setPendingEvidence] = useState<PendingDevnetEvidence>({ version: 2 });
+  const [walletBalanceLamports, setWalletBalanceLamports] = useState<number | null>(null);
+  const [walletBalanceUnavailable, setWalletBalanceUnavailable] = useState(false);
+
+  const recipientValidation = useMemo(() => {
+    if (!walletSession.wallet || !rewardWallet || !burnWallet) return null;
+    return validateDevnetRecipients(rewardWallet, burnWallet, walletSession.wallet);
+  }, [burnWallet, rewardWallet, walletSession.wallet]);
 
   useEffect(() => {
     fetch(`/api/launch-drafts/${encodeURIComponent(draftId)}/devnet`, { cache: "no-store" })
@@ -95,7 +116,7 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         setDevnet(state);
         setRewardWallet(state.rewardWallet ?? "");
         setBurnWallet(state.burnWallet ?? "");
-        if (state.status === "verified" || state.status === "published") {
+        if (state.status === "verified" || state.status === "review_pending" || state.status === "published") {
           setPendingEvidence({ version: 2 });
         } else {
           const serverEvidence: PendingDevnetEvidence = {
@@ -116,7 +137,31 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         }
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "Devnet state could not be loaded."));
-  }, [draftId]);
+  }, [draftId, moderationVersion]);
+
+  useEffect(() => {
+    let active = true;
+    if (!walletSession.wallet) {
+      const reset = window.setTimeout(() => {
+        if (!active) return;
+        setWalletBalanceLamports(null);
+        setWalletBalanceUnavailable(false);
+      }, 0);
+      return () => {
+        active = false;
+        window.clearTimeout(reset);
+      };
+    }
+    const wallet = walletSession.wallet;
+    import("@/lib/client/pump-devnet")
+      .then(({ getDevnetBalanceLamports }) => {
+        if (active) setWalletBalanceUnavailable(false);
+        return getDevnetBalanceLamports(wallet);
+      })
+      .then((balance) => { if (active) setWalletBalanceLamports(balance); })
+      .catch(() => { if (active) setWalletBalanceUnavailable(true); });
+    return () => { active = false; };
+  }, [walletSession.wallet]);
 
   async function post(action: Record<string, unknown>) {
     const response = await fetch(`/api/launch-drafts/${encodeURIComponent(draftId)}/devnet`, {
@@ -311,8 +356,9 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "publish_verified_devnet_receipt",
+          action: "submit_verified_devnet_receipt_for_review",
           devnetOnlyAccepted: true,
+          expectedVersion: devnet.moderationVersion,
         }),
       });
       const body = await response.json() as {
@@ -320,23 +366,35 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         published?: boolean;
         publishedAt?: string;
         publicPath?: string;
+        queued?: boolean;
+        reviewState?: string;
+        version?: number;
       };
-      if (!response.ok || !body.published || !body.publishedAt || !body.publicPath) {
-        throw new Error(body.error ?? "The verified devnet receipt could not be published.");
+      if (!response.ok) {
+        throw new Error(body.error ?? "The verified devnet receipt could not be submitted.");
       }
+      if (body.queued && body.reviewState === "receipt_review") {
+        setDevnet({ ...devnet, status: "review_pending", moderationVersion: body.version ?? devnet.moderationVersion });
+        setPublicReceiptAccepted(false);
+        setStatus("Verified devnet receipt submitted for operator review. It is not public yet.");
+        onReviewSubmitted?.();
+        return;
+      }
+      if (!body.published || !body.publishedAt || !body.publicPath) throw new Error("The receipt review response was incomplete.");
       setDevnet({ ...devnet, status: "published", publishedAt: body.publishedAt, publicPath: body.publicPath });
       setPublicReceiptAccepted(false);
       setStatus("Verified devnet receipt published. It is clearly labeled devnet and is not a mainnet launch.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The verified devnet receipt could not be published.");
+      setError(caught instanceof Error ? caught.message : "The verified devnet receipt could not be submitted.");
     } finally {
       setBusy(false);
     }
   }
 
-  const complete = devnet?.status === "verified" || devnet?.status === "published";
+  const complete = devnet?.status === "verified" || devnet?.status === "review_pending" || devnet?.status === "published";
   const published = devnet?.status === "published";
-  const started = Boolean(devnet?.mint);
+  const reviewPending = devnet?.status === "review_pending";
+  const started = Boolean(devnet?.mint || devnet?.pendingMint || devnet?.pendingCreateSignature);
 
   return (
     <section className="devnet-launch-panel" aria-labelledby="devnet-launch-title">
@@ -355,6 +413,7 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
         <span>
           <small>Verified creator wallet</small>
           <strong>{walletSession.wallet || "Not verified"}</strong>
+          {walletSession.wallet ? <small>{walletBalanceUnavailable ? "Devnet balance unavailable" : walletBalanceLamports === null ? "Checking devnet balance" : `${(walletBalanceLamports / 1_000_000_000).toFixed(4)} devnet SOL`}</small> : null}
         </span>
         {!walletSession.wallet ? <Button onClick={walletSession.connectAndVerify} disabled={walletSession.busy}>{walletSession.busy ? "Waiting..." : "Connect and verify"}</Button> : null}
       </div>
@@ -383,8 +442,10 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
 
       <div className="devnet-lock-notice">
         <LockKeyhole />
-        <p><strong>Check both public addresses carefully.</strong> Pump fee sharing can be configured once. SportPad never asks for either wallet&apos;s secret key.</p>
+        <p><strong>Check both public addresses carefully.</strong> Pump fee sharing can be configured once. SportPad never asks for either wallet&apos;s secret key. The creator wallet needs valueless devnet SOL from the <a href="https://faucet.solana.com/" target="_blank" rel="noopener noreferrer">official Solana faucet</a> to pay test transaction fees.</p>
       </div>
+
+      {recipientValidation && !recipientValidation.ok ? <p className="form-error" role="alert">{recipientValidation.error}</p> : null}
 
       {devnet?.mint ? (
         <div className="devnet-evidence">
@@ -395,21 +456,22 @@ export function DevnetLaunchPanel({ draftId, name, symbol }: { draftId: string; 
       ) : null}
 
       {complete ? <div className="devnet-complete"><CheckCircle2 /><span><strong>Onchain devnet verification complete</strong><small>Coin creation and the immutable 80/20 Pump creator-fee split are finalized and recorded.</small></span></div> : (
-        <Button onClick={runLaunch} disabled={busy || !devnet || !walletSession.wallet || !rewardWallet || !burnWallet || (!devnet.metadataUri && !publicationAccepted)} className="devnet-launch-button">
+        <Button onClick={runLaunch} disabled={busy || !devnet || !walletSession.wallet || !recipientValidation?.ok || (!devnet.metadataUri && !publicationAccepted)} className="devnet-launch-button">
           <ShieldCheck /> {busy ? "Working on devnet..." : started ? "Finish devnet fee split" : "Launch on Pump devnet"}
         </Button>
       )}
-      {complete && !published ? (
+      {complete && !published && !reviewPending ? (
         <>
           <label className="devnet-consent">
             <input type="checkbox" checked={publicReceiptAccepted} onChange={(event) => setPublicReceiptAccepted(event.target.checked)} />
-            <span><strong>Publish this verified devnet receipt</strong><small>This makes the token name, ticker, image, website and social links, metadata URI, devnet mint, both transaction signatures, and both configured fee-recipient addresses public. The creator wallet is also visible in the public Solana transaction. It does not publish a mainnet launch, market, rewards, or claims.</small></span>
+            <span><strong>Submit this verified devnet receipt for review</strong><small>An operator will recheck the token name, ticker, image, website and social links, metadata URI, devnet mint, both transaction signatures, and both configured fee-recipient addresses. Nothing appears publicly until approval.</small></span>
           </label>
           <Button onClick={publishReceipt} disabled={busy || !walletSession.wallet || !publicReceiptAccepted} className="devnet-launch-button">
-            <ShieldCheck /> {busy ? "Publishing receipt..." : "Publish verified devnet receipt"}
+            <ShieldCheck /> {busy ? "Submitting receipt..." : "Submit receipt for review"}
           </Button>
         </>
       ) : null}
+      {reviewPending ? <div className="devnet-complete review-pending"><Clock3 /><span><strong>Receipt review pending</strong><small>The verified devnet evidence is queued and remains private until an operator approves it.</small></span>{onReviewSubmitted ? <Button variant="outline" disabled={busy} onClick={onReviewSubmitted}><Clock3 /> Refresh review</Button> : null}</div> : null}
       {published && devnet.publicPath ? (
         <div className="devnet-complete">
           <CheckCircle2 />

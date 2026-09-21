@@ -1,8 +1,9 @@
 # SPORTPAD architecture
 
 Status: product interface, private draft storage, wallet authentication, and a
-wallet-approved Pump devnet launch path are implemented. Mainnet execution is
-deliberately disabled.
+wallet-approved Pump devnet launch path are implemented. The devnet path is
+guarded by a fail-closed moderation queue and still requires a fresh full-stack
+release canary. Mainnet execution is deliberately disabled.
 
 ## Implemented application path
 
@@ -12,12 +13,19 @@ Launch builder
   -> draft metadata in Cloudflare D1
   -> validated image bytes in private Cloudflare R2
 
+Content review
+  -> creator submits draft for review
+  -> exact Sites user ID checked against the operator allowlist
+  -> operator approves content
+  -> only content_approved drafts may prepare Pump metadata or transactions
+
 Wallet verification
   -> one-time signed challenge bound to solana:devnet
   -> Ed25519 verification on the server
   -> opaque HttpOnly wallet session, hashed in D1
 
 Saved draft devnet test
+  -> creator accepts permanent public IPFS publication
   -> Pump metadata URI
   -> wallet-approved Pump V2 coin creation
   -> finalized creator, mint, and bonding-curve verification
@@ -25,9 +33,9 @@ Saved draft devnet test
   -> finalized recipient and revoked-admin verification
 
 Public discovery
-  -> creator explicitly accepts devnet-only publication
-  -> POST /api/launch-drafts/{id}/publish with the verified wallet session
-  -> exact verified submissions checked again
+  -> creator submits the verified devnet receipt for review
+  -> exact wallet session and verified submissions checked again
+  -> operator independently approves the receipt
   -> GET /api/public-launches
   -> D1 rows with status = devnet_published
   -> GET /api/public-launches/{id}/image for the stored image
@@ -40,13 +48,56 @@ of the newly uploaded R2 object.
 
 Drafts are private by default. Devnet verification does not publish a draft.
 The creator must reconnect the wallet that created the coin, accept the
-devnet-only disclosure, and invoke the publication endpoint. The endpoint
-rechecks both exact verified submissions before atomically changing the row to
-`devnet_published`. The public API omits owner IDs, wallet-session data, and a
-separate creator-wallet field, while exposing the devnet mint, metadata URI,
-finalized transaction receipts, configured fee recipients, and slots. The creator
-wallet remains discoverable from the linked public Solana transaction. Product
-examples disappear when the first valid receipt is published.
+devnet-only disclosure, and submit the receipt for review. That endpoint
+rechecks both exact verified submissions and moves the row to `receipt_review`.
+Only an allowlisted operator can approve it into `devnet_published`. The public
+API omits owner IDs, wallet-session data, and a separate creator-wallet field,
+while exposing the devnet mint, metadata URI, finalized transaction receipts,
+configured fee recipients, and slots. The creator wallet remains discoverable
+from the linked public Solana transaction. Product examples disappear when the
+first approved receipt is published.
+
+## Moderation and publication policy
+
+Publication is fail closed. `SPORTPAD_PUBLICATION_MODE` accepts three values:
+
+- `closed`: no content or receipt submissions and no approvals or restores.
+  Operators can still reject or suspend items. This is also the fallback for a
+  missing or invalid value.
+- `moderated`: authenticated creators can submit drafts and verified receipts;
+  an allowlisted operator must make each approval.
+- `operator_only`: only operator-owned drafts can enter the beta workflow, and
+  the same two review stages still apply.
+
+`SPORTPAD_OPERATOR_USER_IDS` is a comma-separated allowlist of exact,
+authenticated Sites user IDs. Operator authority never comes from a wallet
+address, request body, browser state, or public profile field.
+
+The lifecycle is explicit and one-directional except for documented retries:
+
+```text
+draft -> content_review -> content_approved -> devnet_verified
+          content_review -> content_rejected
+
+devnet_verified -> receipt_review -> devnet_published -> suspended
+                   receipt_review -> receipt_rejected
+                   suspended -> devnet_published
+```
+
+Creators can withdraw `content_review` back to `draft` and `receipt_review`
+back to `devnet_verified`. Every state change compares the expected status and
+monotonic moderation version before updating. A D1 trigger writes the actor,
+role, action, reason, owner-facing message, from-state, to-state, and timestamp
+to `launch_moderation_events` in the same database transaction.
+
+Self-approval is disabled by default. `SPORTPAD_ALLOW_SELF_REVIEW=true` exists
+only for a deliberately single-operator, valueless devnet beta and does not
+remove the audit event. Production or mainnet operation requires separated
+duties.
+
+Public list, detail, and image routes select only `devnet_published` rows.
+Suspension therefore removes all three surfaces immediately, and public images
+use `no-store` caching so a takedown is not held by an application cache.
 
 ## Official Fan Token registry
 
@@ -65,7 +116,8 @@ not liquidity, inventory, or execution readiness.
 ## Data stores and migrations
 
 - D1 stores launch drafts and the schemas reserved for fee events, settlements,
-  reward epochs, reward claims, and service cursors.
+  reward epochs, reward claims, and service cursors. It also stores moderation
+  audit events and fixed-window counters for abuse controls.
 - R2 stores uploaded draft images under per-draft object keys. D1 stores only
   the object key, MIME type, and byte size.
 - Drizzle migrations are versioned in `drizzle/`. Migration `0002` adds the
@@ -76,7 +128,10 @@ not liquidity, inventory, or execution readiness.
   creator and configuration snapshot used to verify each exact signed attempt.
   Migration `0006` adds the persisted blockhash-invalidity observation used to
   prevent an edge-of-window transaction from being replaced prematurely.
-  Migration `0007` adds the explicit devnet publication timestamp.
+  Migration `0007` adds the explicit devnet publication timestamp. Migration
+  `0008` adds moderation state and actor metadata, the moderation audit table,
+  rate-limit windows, and the trigger that records each versioned moderation
+  transition atomically.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
@@ -85,8 +140,9 @@ presence does not mean those workers or economic actions are live.
 
 ## Implemented devnet coordinator
 
-The creator supplies two distinct public Solana addresses, one for the 80%
-reward test recipient and one for the 20% SPORTPAD test recipient. These are
+After content approval, the creator supplies two distinct public Solana
+addresses, one for the 80% reward test recipient and one for the 20% SPORTPAD
+test recipient. These are
 creator-configured devnet addresses, not verified platform treasuries. SportPad
 does not create or retain either address's private key.
 
@@ -108,6 +164,22 @@ or treasury recipients underneath an already signed transaction.
 This is execution testing, not a mainnet product. Devnet SOL and devnet tokens
 have no intended value. The fee split does not acquire Fan Tokens, distribute
 rewards, buy SPORTPAD, or burn supply.
+
+## Current readiness
+
+- The interface, draft storage, wallet challenge, Pump transaction assembly,
+  finalized verification, moderation state machine, and public receipt filters
+  are implemented.
+- Unit tests cover the moderation transitions and private-versus-public receipt
+  boundary. Provider, wallet, type, lint, and production build checks remain
+  release gates.
+- A fresh end-to-end canary with a newly controlled devnet wallet and valueless
+  devnet SOL is still required before the devnet beta is considered operational.
+- The production public feed contains no approved receipt until that process
+  completes. Example cards remain explicitly labeled and disappear only after
+  the first approved receipt.
+- Mainnet fee ingestion, custody, swaps, rewards, claims, SPORTPAD mint and burn,
+  operations, audit, and legal approval are not implemented.
 
 ## Proposed economic model
 

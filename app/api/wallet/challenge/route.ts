@@ -8,6 +8,7 @@ import {
   WALLET_CHALLENGE_TTL_MS,
 } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
 function privateJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -47,6 +48,10 @@ export async function POST(request: Request) {
   });
 
   try {
+    const accountLimit = await consumeFixedWindow({ scope: "wallet_challenge_account", subject: ownerUserId, limit: 10, windowSeconds: 600 });
+    if (!accountLimit.allowed) return rateLimitedJson("Too many wallet challenges. Try again later.", accountLimit);
+    const walletLimit = await consumeFixedWindow({ scope: "wallet_challenge_wallet", subject: walletAddress, limit: 5, windowSeconds: 600 });
+    if (!walletLimit.allowed) return rateLimitedJson("This wallet has received too many challenges. Try again later.", walletLimit);
     const db = getDb();
     await db.delete(walletChallenges).where(and(
       eq(walletChallenges.ownerUserId, ownerUserId),

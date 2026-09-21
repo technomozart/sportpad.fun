@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { ArrowLeft, ArrowRight, BadgeCheck, BarChart3, ExternalLink, Flame, Goal, ShieldCheck, Trophy } from "lucide-react";
 
 import { ExampleBadge, LaunchCard, SafetyNotice, SectionHeading, TokenMark } from "@/components/sport-ui";
@@ -9,6 +10,35 @@ import { getPublicLaunch, getPublicLaunches } from "@/lib/server/public-launches
 
 function devnetExplorer(value: string, type: "address" | "tx") {
   return `https://explorer.solana.com/${type}/${encodeURIComponent(value)}?cluster=devnet`;
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const launch = getLaunch(slug) ?? await getPublicLaunch(slug).catch(() => undefined);
+  if (!launch) return { title: "Launch not found" };
+  const canonical = `/launches/${encodeURIComponent(launch.slug)}`;
+  const title = `${launch.name} ($${launch.ticker})`;
+  const description = launch.isExample
+    ? `${launch.name} is a clearly labeled SportPad product example.`
+    : `${launch.name} is a creator-submitted, operator-approved Solana devnet receipt with an official ${launch.rewardSymbol} Fan Token reward selection.`;
+  return {
+    title,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      type: "website",
+      url: canonical,
+      title,
+      description,
+      images: launch.imagePath ? [{ url: launch.imagePath }] : undefined,
+    },
+    twitter: {
+      card: launch.imagePath ? "summary_large_image" : "summary",
+      title,
+      description,
+      images: launch.imagePath ? [launch.imagePath] : undefined,
+    },
+  };
 }
 
 export default async function LaunchDetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -55,7 +85,11 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
             <div className="token-labels"><span>{launch.isExample ? "Product example" : "Public devnet receipt"}</span>{launch.isExample ? <ExampleBadge /> : <span className="route-ready">DEVNET ONLY</span>}</div>
             <div className="token-title"><TokenMark token={launch.ticker} color={launch.tone} imagePath={launch.imagePath} size="lg" /><div><h1>{launch.name}</h1><p>${launch.ticker} · {launch.sport} · {launch.isExample ? "not launched" : "verified Solana devnet"}</p></div></div>
             <p className="token-description">{launch.description}</p>
-            <div className="token-actions"><Link className="inline-flex items-center gap-2 rounded-full bg-[#9cff57] px-5 py-3 text-sm font-semibold text-[#071008]" href="/launch"><Goal /> Build your own draft</Link></div>
+            <div className="token-actions">
+              <Link className="inline-flex items-center gap-2 rounded-full bg-[#9cff57] px-5 py-3 text-sm font-semibold text-[#071008]" href="/launch"><Goal /> Build your own draft</Link>
+              {launch.website ? <a href={launch.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink /></a> : null}
+              {launch.social ? <a href={launch.social} target="_blank" rel="noopener noreferrer">Social <ExternalLink /></a> : null}
+            </div>
           </div>
 
           <div className="token-reward-card">
@@ -66,11 +100,11 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
           </div>
         </section>
 
-        <SafetyNotice>{launch.isExample ? "This is an example concept only. It has no deployed token, market, price, volume, holders, fees, reward position, or claim." : "This creator-published receipt proves a coin creation and fee configuration on Solana devnet only. It is not a mainnet launch, tradable market, funded reward position, or claim."}</SafetyNotice>
+        <SafetyNotice>{launch.isExample ? "This is an example concept only. It has no deployed token, market, price, volume, holders, fees, reward position, or claim." : "This creator-submitted, operator-approved receipt proves a coin creation and fee configuration on Solana devnet only. It is not a mainnet launch, tradable market, funded reward position, or claim."}</SafetyNotice>
 
         {launch.devnet ? (
           <section className="page-section">
-            <SectionHeading eyebrow="Verified Solana devnet evidence" title="Inspect every public launch receipt." copy="SportPad matched both finalized devnet transactions to the frozen draft before the creator explicitly published this page." />
+            <SectionHeading eyebrow="Verified Solana devnet evidence" title="Inspect every public launch receipt." copy="SportPad matched both finalized devnet transactions to the frozen draft before an operator approved this page for publication." />
             <div className="devnet-evidence">
               <div><small>Network</small><code>Solana devnet only</code><strong className="devnet-badge">NOT MAINNET</strong></div>
               <div><small>Community mint</small><code>{launch.devnet.mint}</code><a href={devnetExplorer(launch.devnet.mint, "address")} target="_blank" rel="noopener noreferrer">Open mint <ExternalLink /></a></div>
@@ -78,7 +112,7 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
               <div><small>80/20 fee lock · slot {launch.devnet.feeSlot}</small><code>{launch.devnet.feeSignature}</code><a href={devnetExplorer(launch.devnet.feeSignature, "tx")} target="_blank" rel="noopener noreferrer">View receipt <ExternalLink /></a></div>
               <div><small>Configured 80% recipient</small><code>{launch.devnet.rewardWallet}</code><a href={devnetExplorer(launch.devnet.rewardWallet, "address")} target="_blank" rel="noopener noreferrer">Open address <ExternalLink /></a></div>
               <div><small>Configured 20% recipient</small><code>{launch.devnet.burnWallet}</code><a href={devnetExplorer(launch.devnet.burnWallet, "address")} target="_blank" rel="noopener noreferrer">Open address <ExternalLink /></a></div>
-              <div><small>Creator publication</small><code>{launch.devnet.publishedAt}</code><span>Explicitly published</span></div>
+              <div><small>Publication approval</small><code>{launch.devnet.publishedAt}</code><span>Operator approved</span></div>
             </div>
           </section>
         ) : null}

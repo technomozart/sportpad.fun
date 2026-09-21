@@ -29,6 +29,8 @@ function toPublicLaunch(
     rewardName: reward?.name ?? row.rewardSymbol,
     tone: "#9cff57",
     description: row.description || "No description provided.",
+    website: row.website ?? undefined,
+    social: row.social ?? undefined,
     imagePath: row.imageKey ? `/api/public-launches/${row.id}/image` : undefined,
     isExample: false,
     devnet,
