@@ -25,6 +25,8 @@ import { readMainnetConfig } from "@/lib/server/mainnet-config";
 
 export default function Home() {
   const bar = fanAssets.find((asset) => asset.symbol === "BAR") ?? fanAssets[0];
+  const chilizCount = fanAssets.filter((asset) => asset.chain === "chiliz").length;
+  const solanaCount = fanAssets.filter((asset) => asset.chain === "solana").length;
   const mainnet = readMainnetConfig();
 
   return (
@@ -44,8 +46,8 @@ export default function Home() {
               </Button>
             </div>
             <div className="hero-proof-row">
-              <span><BadgeCheck /> {fanAssets.length} official Fan Tokens on Solana</span>
-              <span><WalletCards /> One Solana wallet</span>
+              <span><BadgeCheck /> {chilizCount} Chiliz routes + {solanaCount} Solana routes</span>
+              <span><WalletCards /> Solana holder wallet + optional MetaMask</span>
               <span><ShieldCheck /> Honest deployment states</span>
             </div>
           </div>
@@ -55,7 +57,7 @@ export default function Home() {
             <div className="scoreboard">
               <div><small>COMMUNITY TOKEN</small><TokenMark token="YOURS" color="#9cff57" size="lg" /><strong>Your coin</strong><span>Creator name and image</span></div>
               <div className="scoreboard-center"><span>EARNS<br />REWARDS</span><Goal /><small>After funding</small></div>
-              <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Available on Solana</span></div>
+              <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Claimed on Chiliz Chain</span></div>
             </div>
             <div className="fee-split-visual">
               <div className="split-source"><CircleDollarSign /><span>Community coin creator fees</span><strong>{mainnet.ready ? "Mainnet" : "Awaiting setup"}</strong></div>
@@ -68,8 +70,8 @@ export default function Home() {
 
         <section className="protocol-stats page-wrap" aria-label="Current protocol deployment status">
           <div><span>Mainnet launcher</span><strong>{mainnet.ready ? "Enabled" : "Setup required"}</strong><small>{mainnet.ready ? "Wallet-signed Pump launch and 80/20 fee lock" : mainnet.missing.join(", ")}</small></div>
-          <div><span>Official Fan Tokens on Solana</span><strong>{fanAssets.length}</strong><small>Exact token addresses registry-listed</small></div>
-          <div><span>Reward vaults and claims</span><strong>Not deployed</strong><small>No balances or positions</small></div>
+          <div><span>Routed official Fan Tokens</span><strong>{chilizCount} + {solanaCount}</strong><small>Chiliz via Kayen, Solana via Jupiter</small></div>
+          <div><span>Reward wallet flow</span><strong>Two networks</strong><small>Verified Solana holder wallet and Chiliz claim wallet</small></div>
           <div><span>SPORTPAD main token</span><strong>Not deployed</strong><small>No burns have occurred</small></div>
         </section>
 
@@ -87,8 +89,8 @@ export default function Home() {
             <div className="identity-card reward-card">
               <span className="identity-number">02</span><div className="identity-icon"><BadgeCheck /></div>
               <p className="section-eyebrow">What holders can earn</p><h2>Official Fan Token</h2>
-              <p>An official Fan Token issued for the named sports organization. Chiliz Chain is its core network, with an official Solana token address published for this omnichain asset.</p>
-              <ul><li>Official sports organization Fan Token</li><li>Official Solana token address shown publicly</li><li>Route and vault status checked separately</li></ul>
+              <p>An official Fan Token issued for the named sports organization. Most selectable rewards use live Kayen markets on Chiliz Chain, with AFC and ARG also routed on Solana.</p>
+              <ul><li>Official sports organization Fan Token</li><li>Exact network contract shown publicly</li><li>Route, inventory, and payout checked separately</li></ul>
             </div>
           </div>
         </section>
@@ -97,25 +99,25 @@ export default function Home() {
           <SectionHeading eyebrow="Community launch protocol" title="One community fee stream. Two visible outcomes." copy="Each community launch locks its own 80/20 Pump fee recipients on mainnet. SPORTPAD's creator fees stay outside this split and fund project development." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
           <div className="how-flow">
             {[
-              { icon: Coins, step: "01", title: "Fees are finalized", copy: "Eligible creator fee events would be indexed and credited only after Solana finality." },
-              { icon: Layers3, step: "02", title: "80 / 20 is reconciled", copy: "Reward and SPORTPAD legs would become separate, replay-safe settlement records." },
-              { icon: Trophy, step: "03", title: "Fan Token rewards are funded", copy: "The selected official Fan Token would be acquired or reserved in a deployed Solana vault." },
-              { icon: Flame, step: "04", title: "SPORTPAD burn is verified", copy: "The SPORTPAD output would be burned and checked against the main token's supply." },
+              { icon: Coins, step: "01", title: "Fees are finalized", copy: "Eligible creator fee events are indexed and credited only after Solana finality." },
+              { icon: Layers3, step: "02", title: "80 / 20 is reconciled", copy: "Reward and SPORTPAD legs become separate, replay-safe settlement records." },
+              { icon: Trophy, step: "03", title: "Fan Token rewards are funded", copy: "Kayen or Jupiter acquires the selected reward before an epoch can become claimable." },
+              { icon: Flame, step: "04", title: "SPORTPAD burn is verified", copy: "After the SPORTPAD CA is activated, the 20% output is bought, burned, and checked against supply." },
             ].map((item) => <article key={item.step} className="how-step"><span>{item.step}</span><item.icon /><h3>{item.title}</h3><p>{item.copy}</p></article>)}
           </div>
           <div className="formula-strip"><div><small>Proposed holder allocation</small><strong>Funded Fan Tokens × wallet token-seconds ÷ all eligible token-seconds</strong></div><Link href="/rewards">See the reward methodology <ArrowRight /></Link></div>
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Official reward registry" title={`${fanAssets.length} official Fan Tokens are published on Solana.`} copy="Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain model across Chiliz Chain, Solana, and Base. The official image, identity, and Solana token address come from FanTokens and Chiliz sources. Every selected asset is checked for a live Jupiter route before a mainnet launch can proceed." action={<Link href="/fan-tokens" className="text-link">Open all {fanAssets.length} assets <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Official reward routes" title={`${chilizCount} funded Chiliz markets and ${solanaCount} Solana routes.`} copy="Every option identifies its exact network and contract. Chiliz selections are checked against Kayen; Solana selections are checked against Jupiter. Published addresses without an executable route are not shown in the launch builder." action={<Link href="/fan-tokens" className="text-link">Open all reward routes <ArrowRight /></Link>} />
           <div className="asset-directory">
-            <div className="asset-directory-head"><span>Official Fan Token</span><span>Solana token address</span><span>Reward route</span><span>Vault</span></div>
+            <div className="asset-directory-head"><span>Official Fan Token</span><span>Token address</span><span>Network route</span><span>Check</span></div>
             {fanAssets.slice(0, 5).map((asset) => (
-              <div className="asset-row" key={asset.symbol}>
+              <div className="asset-row" key={asset.id}>
                 <div><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>{asset.category} · ${asset.symbol}</small></span></div>
                 <code>{asset.mint.slice(0, 7)}...{asset.mint.slice(-6)}</code>
-                <span>{asset.route}</span>
-                <span className="asset-status status-registry-listed">{asset.vault}</span>
+                <span>{asset.chain === "chiliz" ? "Chiliz / Kayen" : "Solana / Jupiter"}</span>
+                <span className="asset-status status-registry-listed">At launch</span>
               </div>
             ))}
           </div>
@@ -139,7 +141,7 @@ export default function Home() {
         <section className="page-section page-wrap">
           <SectionHeading eyebrow="Learn" title="Understand it before you sign it." copy="Plain-language guides explain the assets, accounting, wallets, inventory states, and risks behind the planned product." action={<Link href="/learn" className="text-link">Open learning hub <ArrowRight /></Link>} />
           <div className="learn-card-grid">
-            {[{icon:Goal,title:"Community coin and Fan Token",copy:"How a launch asset differs from the official reward asset.",href:"/learn#two-assets"},{icon:WalletCards,title:"One-wallet reward flow",copy:"How Solana-native claims can avoid an unnecessary MetaMask step.",href:"/learn#networks"},{icon:Layers3,title:"Epochs and token-seconds",copy:"How time-weighted balances can become funded allocations.",href:"/learn#rewards"},{icon:ShieldCheck,title:"Liquidity and protocol risk",copy:"What the future system must do if a route or inventory is unavailable.",href:"/learn#risk"}].map((item) => <Link href={item.href} key={item.title} className="learn-card"><item.icon /><h3>{item.title}</h3><p>{item.copy}</p><span>Read guide <ArrowRight /></span></Link>)}
+            {[{icon:Goal,title:"Community coin and Fan Token",copy:"How a launch asset differs from the official reward asset.",href:"/learn#two-assets"},{icon:WalletCards,title:"Two-network reward flow",copy:"How a Solana holder links a Chiliz claim wallet without granting spending access.",href:"/learn#networks"},{icon:Layers3,title:"Epochs and token-seconds",copy:"How time-weighted balances become funded allocations.",href:"/learn#rewards"},{icon:ShieldCheck,title:"Liquidity and protocol risk",copy:"What the system does if a route or inventory is unavailable.",href:"/learn#risk"}].map((item) => <Link href={item.href} key={item.title} className="learn-card"><item.icon /><h3>{item.title}</h3><p>{item.copy}</p><span>Read guide <ArrowRight /></span></Link>)}
           </div>
         </section>
 

@@ -233,7 +233,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="pointer-glow" aria-hidden="true" />
       <div className="pitch-grid" aria-hidden="true" />
-      <div className="ticker-rail" aria-label="Official Fan Tokens with registry-listed Solana token addresses">
+      <div className="ticker-rail" aria-label="Official Fan Tokens with routed Chiliz or Solana markets">
         <div className="ticker-track">
           {[...fanAssets.slice(0, 24), ...fanAssets.slice(0, 24)].map((asset, index) => (
             <span key={`${asset.symbol}-${index}`}><span className="ticker-dot" /> {asset.symbol} · OFFICIAL FAN TOKEN · SOLANA</span>
@@ -282,7 +282,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
           <div><h3>Learn</h3><Link href="/learn"><BookOpen /> Guides</Link><Link href="/learn#faq">FAQ</Link><Link href="/learn#glossary">Glossary</Link><Link href="/learn#risk">Risk disclosure</Link><Link href="/policy">Creator policy</Link><a href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer"><GitFork /> Source code</a></div>
         </div>
         <div className="footer-bottom">
-          <p>Official Fan Token names, images, and Solana token addresses come from published FanTokens and Chiliz sources. Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply model. SportPad community tokens remain separate creator-made assets.</p>
+          <p>Official Fan Token names, images, and network contracts come from published FanTokens, Chiliz, and Kayen sources. SportPad community tokens remain separate creator-made assets.</p>
           <p>Digital assets are volatile and may lose all value. Check the live system status before signing any mainnet transaction.</p>
         </div>
       </footer>

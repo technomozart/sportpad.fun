@@ -41,9 +41,9 @@ export default function PolicyPage() {
         >
           <div className="page-stat-card">
             <ShieldCheck className="text-[#9cff57]" />
-            <strong>Private</strong>
-            <span>prototype policy status</span>
-            <small>Mainnet submissions closed</small>
+            <strong>Review required</strong>
+            <span>policy status</span>
+            <small>Check live controls before signing</small>
           </div>
         </PageIntro>
 
@@ -109,7 +109,7 @@ export default function PolicyPage() {
           <SectionHeading
             eyebrow="Launch lifecycle"
             title="Saving a draft is the beginning, not an approval."
-            copy="The builder saves a private concept record. Wallet-approved Pump coin creation and the 80/20 creator-fee lock are available only on valueless devnet. Trading, automated fee processing, rewards, and mainnet settlement remain disabled."
+            copy="The builder first saves a private concept record. A mainnet launch is prepared only after policy checks, a live reward-route check, explicit risk acceptance, and separate wallet signatures for Pump creation and the 80/20 creator-fee lock."
           />
           <div className="process-timeline">
             {lifecycle.map((stage, index) => (
@@ -207,7 +207,7 @@ export default function PolicyPage() {
           <div>
             <p className="section-eyebrow">Build within the boundaries</p>
             <h2>Start with a private draft and honest disclosures.</h2>
-            <p>No mint is created and no transaction is signed from the current builder.</p>
+            <p>Saving a draft does not mint a token. Mainnet creation is a separate, clearly labeled, wallet-signed step.</p>
           </div>
           <div>
             <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 text-[#071008] hover:bg-[#adff7d]">

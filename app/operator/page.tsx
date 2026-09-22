@@ -7,6 +7,7 @@ import { ModerationConsole } from "./moderation-console";
 import { OperationsConsole } from "./operations-console";
 import { RewardConsole } from "./reward-console";
 import { SettlementConsole } from "./settlement-console";
+import { SportpadActivation } from "./sportpad-activation";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function OperatorPage() {
           <p>Inspect infrastructure readiness, run read-only treasury observations, and review stored launch content. Every state change is versioned and written to the audit log.</p>
         </div>
         <OperationsConsole />
+        <SportpadActivation />
         <SettlementConsole />
         <RewardConsole />
         <div className="operator-section-heading"><p className="section-eyebrow">Launch safety</p><h2>Moderation queue</h2></div>

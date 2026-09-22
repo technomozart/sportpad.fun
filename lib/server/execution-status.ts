@@ -33,6 +33,8 @@ type WorkerRunRow = {
   started_at: string;
   completed_at: string | null;
 };
+type AutomationHeartbeatRow = { key: string; value: string; updated_at: string };
+type ProtocolSettingRow = { value: string };
 type FeeLaunchRow = {
   id: string;
   name: string;
@@ -80,6 +82,8 @@ export async function getExecutionStatus() {
     env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'reward_swap_submitted'"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'buyback_swap_submitted'"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'sportpad_burn_submitted'"),
+    env.DB.prepare("SELECT key, value, updated_at FROM service_cursors WHERE key LIKE 'automation:%' ORDER BY updated_at DESC"),
+    env.DB.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint' LIMIT 1"),
   ]);
   const controls = controlsFromRow((results[0].results[0] as ControlRow | undefined) ?? null);
   const execution = readExecutionConfig(controls);
@@ -111,6 +115,19 @@ export async function getExecutionStatus() {
   }));
   const walletExecutionEnabled = !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused;
   const managedExecutionReady = Object.values(execution.readiness).every((lane) => lane.ready);
+  const heartbeats = results[13].results as AutomationHeartbeatRow[];
+  const activeCutoff = Date.now() - 2 * 60 * 1_000;
+  const automationWorkers = heartbeats.map((row) => {
+    const timestamp = Date.parse(`${row.updated_at.replace(" ", "T")}Z`);
+    return {
+      id: row.key.slice("automation:".length),
+      updatedAt: row.updated_at,
+      active: Number.isFinite(timestamp) && timestamp >= activeCutoff,
+    };
+  });
+  const chilizActive = automationWorkers.some((worker) => worker.active && worker.id.startsWith("chiliz:"));
+  const solanaActive = automationWorkers.some((worker) => worker.active && worker.id.startsWith("solana:"));
+  const sportpadSetting = results[14].results[0] as ProtocolSettingRow | undefined;
 
   return {
     version: 1,
@@ -124,7 +141,10 @@ export async function getExecutionStatus() {
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,
       walletExecutionEnabled,
+      unattendedAutomation: chilizActive || solanaActive,
     },
+    automation: { workers: automationWorkers, chilizActive, solanaActive },
+    protocolSettings: { sportpadMint: sportpadSetting?.value ?? execution.mainnet.sportpadMint },
     treasuries: {
       reward: execution.mainnet.rewardTreasury,
       buyback: execution.mainnet.buybackTreasury,

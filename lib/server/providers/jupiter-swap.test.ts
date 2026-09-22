@@ -52,6 +52,27 @@ test("accepts an exact unsigned Jupiter order", async () => {
   assert.equal(plan.transactionMessageHash.length, 64);
 });
 
+test("accepts the verified OKX router used by a live Fan Token route", async () => {
+  const fixture = orderFixture({ router: "okx" });
+  const plan = await prepareJupiterSwap({
+    apiKey: "test-key",
+    inputMint: fixture.inputMint,
+    outputMint: fixture.outputMint,
+    amountAtomic: fixture.inAmount,
+    taker: fixture.taker,
+    fetcher: async () => Response.json(fixture),
+  });
+  assert.equal(plan.router, "okx");
+  await assert.rejects(() => prepareJupiterSwap({
+    apiKey: "test-key",
+    inputMint: fixture.inputMint,
+    outputMint: fixture.outputMint,
+    amountAtomic: fixture.inAmount,
+    taker: fixture.taker,
+    fetcher: async () => Response.json(orderFixture({ router: "unapproved" })),
+  }), /routing policy/);
+});
+
 test("rejects changed amounts, payers, and excessive price impact", async () => {
   const fixture = orderFixture();
   await assert.rejects(() => prepareJupiterSwap({

@@ -23,5 +23,8 @@ declare namespace Cloudflare {
     SOLANA_REWARD_VAULT_KEY_REF?: string;
     SOLANA_BUYBACK_EXECUTOR_KEY_REF?: string;
     CHILIZ_REPLENISHER_KEY_REF?: string;
+    CHILIZ_RPC_URL?: string;
+    CHILIZ_TREASURY_ADDRESS?: string;
+    CHILIZ_AUTOMATION_ENABLED?: string;
   }
 }

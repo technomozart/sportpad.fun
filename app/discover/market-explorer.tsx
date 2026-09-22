@@ -74,7 +74,7 @@ export function MarketExplorer({ initialQuery = "" }: { initialQuery?: string })
           <table className="market-table">
             <thead><tr><th>Community token</th><th>Official Fan Token reward</th><th>Sport</th><th>State</th><th>Description</th></tr></thead>
             <tbody>{filtered.map((launch) => {
-              const reward = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol);
+              const reward = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol && asset.chain === launch.rewardChain);
               return <tr key={launch.slug}><td><Link href={`/launches/${launch.slug}`}><TokenMark token={launch.ticker} color={launch.tone} imagePath={launch.imagePath} /><span><strong>{launch.name}</strong><small>${launch.ticker} · {launch.isExample ? "example concept" : launch.mainnet ? "Solana mainnet" : "Solana devnet receipt"}</small></span></Link></td><td><span className="reward-cell"><TokenMark token={launch.rewardSymbol} color={reward?.color ?? launch.tone} imagePath={reward?.imagePath} size="sm" /><strong>{launch.rewardSymbol}</strong></span></td><td>{launch.sport}</td><td><span className={launch.isExample ? "route-research" : "route-ready"}>{launch.isExample ? "Not live" : launch.mainnet ? "LIVE" : "Verified devnet"}</span></td><td>{launch.narrative}</td></tr>;
             })}</tbody>
           </table>

@@ -174,8 +174,10 @@ export async function runFeeIndexer(trigger: FeeIndexerTrigger) {
         AND mainnet_buyback_treasury IS NOT NULL
       ORDER BY id
     `).all<LaunchRow>();
+    const sportpadSetting = await env.DB.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
+      .first<{ value: string }>();
     const communityLaunches = launches.results.filter((launch) =>
-      isCommunityLaunchFeeSource(launch.mainnet_mint, execution.mainnet.sportpadMint));
+      isCommunityLaunchFeeSource(launch.mainnet_mint, sportpadSetting?.value ?? execution.mainnet.sportpadMint));
     let itemsSeen = 0;
     let itemsChanged = 0;
     for (const launch of communityLaunches) {

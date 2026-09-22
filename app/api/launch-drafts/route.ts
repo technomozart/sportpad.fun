@@ -9,7 +9,7 @@ import {
   MAX_LAUNCH_IMAGE_BYTES,
   validateLaunchImage,
 } from "@/lib/protocol/launch-image";
-import { getRewardAsset } from "@/lib/protocol/reward-assets";
+import { getRewardOption } from "@/lib/protocol/reward-options";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
@@ -41,6 +41,7 @@ function serializeDraft(draft: typeof launchDrafts.$inferSelect) {
     website: draft.website,
     social: draft.social,
     rewardSymbol: draft.rewardSymbol,
+    rewardChain: draft.rewardChain,
     rightsAttested: draft.rightsAttested,
     unofficialAttested: draft.unofficialAttested,
     economicsAttested: draft.economicsAttested,
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
   }
 
   const payload = parsedPayload.data;
-  const rewardAsset = getRewardAsset(payload.rewardSymbol);
+  const rewardAsset = getRewardOption(payload.rewardChain, payload.rewardSymbol);
   if (!rewardAsset) {
     return privateJson({ error: "Choose a verified reward asset." }, 400);
   }
@@ -203,14 +204,16 @@ export async function POST(request: Request) {
         unofficialAttested: true,
         economicsAttested: true,
         rewardSymbol: rewardAsset.symbol,
-        rewardMint: rewardAsset.solanaMint,
+        rewardChain: rewardAsset.chain,
+        rewardMint: rewardAsset.tokenAddress,
+        rewardWrappedContract: rewardAsset.wrappedTokenAddress,
       })
       .returning();
 
     return privateJson(
       {
         draft: serializeDraft(draft),
-        executionStatus: rewardAsset.executionStatus,
+        executionStatus: "route_checked_at_launch",
         imageStored: true,
       },
       201,

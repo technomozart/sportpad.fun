@@ -1,4 +1,4 @@
-import { REWARD_ASSETS } from "@/lib/protocol/reward-assets";
+import { REWARD_OPTIONS, type RewardChain } from "@/lib/protocol/reward-options";
 import type { PublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
 import type { PublicMainnetReceipt } from "@/lib/protocol/public-mainnet-launch";
 
@@ -9,6 +9,7 @@ export type Launch = {
   sport: "Football" | "Combat" | "Motorsport" | "Basketball";
   narrative: string;
   rewardSymbol: string;
+  rewardChain: RewardChain;
   rewardName: string;
   tone: string;
   description: string;
@@ -33,6 +34,7 @@ export const exampleLaunches: Launch[] = [
     sport: "Football",
     narrative: "Matchday meme concept",
     rewardSymbol: "BAR",
+    rewardChain: "chiliz",
     rewardName: "FC Barcelona",
     tone: "#9cff57",
     description: "An example of a supporter-created football meme whose eligible holders could earn official BAR Fan Tokens after the reward system is deployed and funded.",
@@ -45,6 +47,7 @@ export const exampleLaunches: Launch[] = [
     sport: "Football",
     narrative: "Supporter culture concept",
     rewardSymbol: "PSG",
+    rewardChain: "chiliz",
     rewardName: "Paris Saint-Germain",
     tone: "#72a7ff",
     description: "An example community concept showing how an independent Solana token could reference official PSG Fan Token rewards.",
@@ -57,6 +60,7 @@ export const exampleLaunches: Launch[] = [
     sport: "Combat",
     narrative: "Fight week concept",
     rewardSymbol: "UFC",
+    rewardChain: "chiliz",
     rewardName: "UFC",
     tone: "#d9c7ff",
     description: "An example showing that the reward registry can support combat sports as well as football.",
@@ -69,14 +73,16 @@ export const exampleLaunches: Launch[] = [
 export const launches = exampleLaunches;
 
 export type FanAsset = {
+  id: string;
+  chain: RewardChain;
   symbol: string;
   name: string;
   category: string;
   mint: string;
-  imagePath: string;
-  status: "Registry listed";
-  route: "Checked at launch";
-  vault: "Not deployed";
+  imagePath?: string;
+  status: "Funded route";
+  route: "Kayen" | "Jupiter";
+  vault: "Created on funding";
   source: string;
   color: string;
 };
@@ -90,15 +96,17 @@ const assetColors: Record<string, string> = {
   UFC: "#d9c7ff",
 };
 
-export const fanAssets: FanAsset[] = REWARD_ASSETS.map((asset) => ({
+export const fanAssets: FanAsset[] = REWARD_OPTIONS.map((asset) => ({
+  id: asset.id,
+  chain: asset.chain,
   symbol: asset.symbol,
   name: asset.name,
   category: asset.category,
-  mint: asset.solanaMint,
+  mint: asset.tokenAddress,
   imagePath: asset.imagePath,
-  status: "Registry listed",
-  route: "Checked at launch",
-  vault: "Not deployed",
+  status: "Funded route",
+  route: asset.venue,
+  vault: "Created on funding",
   source: asset.source,
   color: assetColors[asset.symbol] ?? "#9cff57",
 }));
@@ -109,8 +117,8 @@ export const faqItems = [
     answer: "The reward registry contains official sports organization Fan Tokens published by Chiliz. They are rooted in the Chiliz ecosystem and can exist across Chiliz Chain, Solana, and Base through an omnichain supply model. A SportPad community coin is a separate asset created by its own creator.",
   },
   {
-    question: "Why can rewards use the same Solana wallet?",
-    answer: "The official registry publishes Solana token addresses for the listed Fan Tokens. Once SportPad deploys and funds its claim system, supported rewards can be sent to a holder's existing Solana address without requiring MetaMask.",
+    question: "Why do Chiliz rewards need MetaMask?",
+    answer: "The community token and holder tracking remain on Solana, but most liquid Fan Token markets are on Chiliz Chain. The dashboard verifies a 0x wallet with one message, adds Chiliz Chain when needed, and pays claims to that address without asking for spending permission.",
   },
   {
     question: "What happens to creator fees?",
@@ -118,23 +126,23 @@ export const faqItems = [
   },
   {
     question: "Are rewards instant?",
-    answer: "No. The planned system settles rewards in funded epochs after finality, acquisition, and allocation checks. No reward positions or claims exist while mainnet execution is disabled.",
+    answer: "No. The system settles rewards in funded epochs after finality, acquisition, holder indexing, and allocation checks. A claim is shown only after inventory has been acquired and reserved.",
   },
   {
     question: "How will holder rewards be calculated?",
-    answer: "The proposed method uses eligible token-seconds: a wallet's time-weighted balance divided by all eligible time-weighted balances, multiplied by the official Fan Tokens funded for that epoch.",
+    answer: "The method uses eligible token-seconds: a wallet's time-weighted balance divided by all eligible time-weighted balances, multiplied by the official Fan Tokens funded for that epoch.",
   },
   {
     question: "Can a creator choose any Fan Token?",
-    answer: "A creator can currently choose a registry-listed reward asset. A listing verifies identity only. Every route, vault, and payout path must still be deployed and checked before real rewards can begin.",
+    answer: "A creator can choose any of the 78 Fan Tokens with live Kayen routes on Chiliz Chain, plus AFC and ARG on Solana. SportPad checks the selected route again before mainnet preparation. A live market is not the same as inventory already held for claims.",
   },
   {
     question: "Does SportPad custody my launch tokens?",
-    answer: "The planned design keeps community tokens in the user's wallet. Reward inventory would be held in policy-controlled protocol vaults only after that infrastructure is deployed.",
+    answer: "Community tokens stay in the user's wallet. Acquired reward inventory is held in policy-controlled protocol vaults until allocated holders claim it.",
   },
   {
-    question: "What does not enabled mean?",
-    answer: "The official Fan Token's Solana address is known, but a launch can proceed only when SportPad finds a live Jupiter acquisition route. Reward vaults and holder claims still require separate deployed infrastructure.",
+    question: "Who pays the Chiliz claim gas?",
+    answer: "The automated SportPad treasury pays CHZ gas for the unwrap and payout transaction. The holder receives the allocated official Fan Token and does not need CHZ merely to claim.",
   },
 ];
 

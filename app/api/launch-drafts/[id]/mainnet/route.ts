@@ -6,12 +6,13 @@ import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
 import { normalizeTransactionSignature } from "@/lib/protocol/devnet-launch";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
-import { getRewardAsset } from "@/lib/protocol/reward-assets";
+import { getRewardOption, type RewardChain } from "@/lib/protocol/reward-options";
 import { normalizeSolanaAddress } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { uploadPumpMetadata } from "@/lib/server/pump-metadata";
 import { checkRewardRoute } from "@/lib/server/providers/jupiter-reward-route";
+import { checkChilizRewardRoute } from "@/lib/server/providers/chiliz-reward-route";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 import {
   isDevnetTransactionStateError,
@@ -139,14 +140,17 @@ export async function POST(request: Request, context: MainnetRouteContext) {
     if (!MAINNET_ELIGIBLE_STATES.has(draft.status)) {
       return privateJson({ error: "Content approval is required before a mainnet launch." }, 409);
     }
-    const rewardAsset = getRewardAsset(draft.rewardSymbol);
-    if (!rewardAsset || rewardAsset.solanaMint !== draft.rewardMint) {
-      return privateJson({ error: "The approved reward mint no longer matches the official registry." }, 409);
+    const rewardChain = draft.rewardChain as RewardChain;
+    const rewardAsset = getRewardOption(rewardChain, draft.rewardSymbol);
+    if (!rewardAsset || rewardAsset.tokenAddress.toLowerCase() !== draft.rewardMint?.toLowerCase()) {
+      return privateJson({ error: "The approved reward token no longer matches the verified registry." }, 409);
     }
     if (input.action === "prepare") {
-      const rewardRoute = await checkRewardRoute(rewardAsset.solanaMint);
+      const rewardRoute = rewardChain === "chiliz"
+        ? await checkChilizRewardRoute(rewardAsset.wrappedTokenAddress!)
+        : await checkRewardRoute(rewardAsset.tokenAddress);
       if (!rewardRoute.available) {
-        return privateJson({ error: `${rewardAsset.symbol} does not have a live SOL acquisition route on Jupiter right now.` }, 409);
+        return privateJson({ error: `${rewardAsset.symbol} does not have a live acquisition route on ${rewardAsset.venue} right now.` }, 409);
       }
       if (!env.BUCKET || !draft.imageKey || !draft.imageMime) {
         return privateJson({ error: "The approved token image is unavailable." }, 409);

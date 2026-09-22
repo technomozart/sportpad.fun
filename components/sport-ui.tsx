@@ -31,7 +31,7 @@ export function SectionHeading({ eyebrow, title, copy, action }: { eyebrow: stri
 }
 
 export function LaunchCard({ launch, compact = false }: { launch: Launch; compact?: boolean }) {
-  const reward = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol);
+  const reward = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol && asset.chain === launch.rewardChain);
   const isMainnet = Boolean(launch.mainnet);
   return (
     <Link href={`/launches/${launch.slug}`} className={`launch-card-v2 group ${compact ? "launch-card-compact" : ""}`}>

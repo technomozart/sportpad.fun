@@ -7,22 +7,17 @@ import { SiteChrome } from "@/components/site-chrome";
 import { fanAssets } from "@/lib/site-data";
 import { TokenAddressCell } from "./token-address-cell";
 
-const withoutSolana = [
-  ["ALPINE", "Alpine F1 Team"], ["BJK", "Besiktas"], ["BFT", "Brazil National Team"],
-  ["VATRENI", "Croatia Football Federation"], ["PORTO", "FC Porto"], ["FB", "Fenerbahce"],
-  ["KARATE", "Karate Combat"], ["NOV", "Novara Calcio"], ["LAZIO", "S.S. Lazio"],
-  ["SANTOS", "Santos FC"], ["VIT", "Team Vitality"], ["UDI", "Udinese Calcio"],
-  ["GUILD", "Blockchain Space"], ["chzinu", "ChilizInu"],
-] as const;
+const chilizAssets = fanAssets.filter((asset) => asset.chain === "chiliz");
+const solanaAssets = fanAssets.filter((asset) => asset.chain === "solana");
 
 export default function FanTokensPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Official Fan Token registry" title="Choose an official Fan Token available on Solana." copy={`Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply model across Chiliz Chain, Solana, and Base. This snapshot lists the ${fanAssets.length} Fan Tokens with official Solana token addresses in the Chiliz registry. A separate section identifies 14 additional FanTokens.com assets without a published Solana address in that registry.`}>
-          <div className="verification-seal"><BadgeCheck /><span><strong>{fanAssets.length}</strong> Chiliz-registry Solana addresses</span><small>Static snapshot reviewed September 18, 2026</small></div>
+        <PageIntro kicker="Official Fan Token routes" title="Choose from 78 live Chiliz markets and two Solana routes." copy="SportPad checks the actual acquisition network instead of treating a published address as proof of liquidity. Most rewards use Kayen on Chiliz Chain. AFC and ARG are also available through live Solana routes.">
+          <div className="verification-seal"><BadgeCheck /><span><strong>{chilizAssets.length} + {solanaAssets.length}</strong> routed reward options</span><small>Kayen and Jupiter checked at selection</small></div>
         </PageIntro>
-        <SafetyNotice>These are official Fan Tokens issued for the named sports organizations, not new SportPad copies. SportPad matches each Solana token address against the official Chiliz registry.</SafetyNotice>
+        <SafetyNotice>These are official Fan Tokens issued for the named sports organizations, not new SportPad copies. A Chiliz route pays the original Fan Token to the user&apos;s verified Chiliz wallet after Kayen&apos;s wrapped trading token is unwrapped.</SafetyNotice>
 
         <section className="page-section network-explainer">
           <div><p className="section-eyebrow">Fan Token primer</p><h2>A tradable digital asset built around supporter participation.</h2><p>Fan Tokens are issued for sports organizations and used across the Chiliz and Socios.com ecosystem for experiences such as polls, rewards, games, and community access. The exact utility is set by the issuer and can change; ownership is not club equity, a dividend, or a claim on revenue.</p><div className="source-links"><a href="https://www.fantokens.com/newsroom/fan-tokens-and-club-culture-strengthening-the-bond-between-fans-and-teams" target="_blank" rel="noreferrer">Official explainer <ExternalLink /></a><a href="https://www.socios.com/legal-hub/" target="_blank" rel="noreferrer">Token legal documents <ExternalLink /></a></div></div>
@@ -41,33 +36,28 @@ export default function FanTokensPage() {
         </section>
 
         <section className="content-section">
-          <div className="registry-stats"><div><strong>96</strong><span>assets across both source sets</span></div><div><strong>{fanAssets.length}</strong><span>Chiliz-registry Solana addresses</span></div><div><strong>{withoutSolana.length}</strong><span>FanTokens catalog only</span></div><div><strong>Not deployed</strong><span>SportPad reward execution</span></div></div>
+          <div className="registry-stats"><div><strong>{chilizAssets.length}</strong><span>live Kayen routes</span></div><div><strong>{solanaAssets.length}</strong><span>live Solana options</span></div><div><strong>88888</strong><span>Chiliz Chain ID</span></div><div><strong>Worker</strong><span>verified wallet claim queue</span></div></div>
           <div className="registry-table-wrap">
-            <table className="registry-table"><thead><tr><th>Official Fan Token</th><th>Sport</th><th>Solana token address</th><th>Identity</th><th>Route</th><th>Vault</th></tr></thead><tbody>
-              {fanAssets.map((asset) => <tr key={asset.symbol}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><TokenAddressCell mint={asset.mint} symbol={asset.symbol} /></td><td><span className="asset-status status-registry-listed">Registry listed</span></td><td>{asset.route}</td><td>{asset.vault}</td></tr>)}
+            <table className="registry-table"><thead><tr><th>Official Fan Token</th><th>Sport</th><th>Token address</th><th>Network</th><th>Route</th><th>Check</th></tr></thead><tbody>
+              {fanAssets.map((asset) => <tr key={asset.id}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><TokenAddressCell mint={asset.mint} symbol={asset.symbol} chain={asset.chain} /></td><td><span className="asset-status status-registry-listed">{asset.chain === "chiliz" ? "Chiliz" : "Solana"}</span></td><td>{asset.route}</td><td>At launch</td></tr>)}
             </tbody></table>
           </div>
         </section>
 
         <section className="page-section">
-          <SectionHeading eyebrow="Additional FanTokens catalog" title="14 catalog assets are not in the Chiliz Solana-address registry." copy="These assets appear in the FanTokens.com catalog, but the official Chiliz contract registry does not currently publish a Solana address for them. They cannot be selected for SportPad's planned Solana reward flow unless that registry publishes one." />
-          <div className="unsupported-token-grid">{withoutSolana.map(([symbol, name]) => <article key={`${symbol}-${name}`}><strong>{name}</strong><span>${symbol}</span><small>FanTokens.com catalog · no Chiliz-registry Solana address</small></article>)}</div>
-        </section>
-
-        <section className="page-section">
-          <SectionHeading eyebrow="Four checks" title="Official does not automatically mean executable." copy="SportPad would enable a reward only after identity, route quality, inventory, and claims all pass together." />
+          <SectionHeading eyebrow="Four checks" title="Official does not automatically mean executable." copy="SportPad enables a reward only when identity, route quality, inventory, and claims pass together." />
           <div className="four-checks">
             {[{icon:SearchCheck,title:"Identity",copy:"Exact network and token address match a first-party registry; ticker and image alone never count."},{icon:Waves,title:"Liquidity",copy:"A live quote must stay inside configured price-impact and slippage limits at the intended batch size."},{icon:Boxes,title:"Inventory",copy:"The reward vault must hold enough unreserved supply, with replenishment thresholds and caps."},{icon:ShieldAlert,title:"Payout",copy:"Decimals, token accounts, claim program, finality, and failure recovery must be tested end to end."}].map((item,index)=><article key={item.title}><span>0{index+1}</span><item.icon /><h3>{item.title}</h3><p>{item.copy}</p></article>)}
           </div>
         </section>
 
         <section className="page-section network-explainer">
-          <div><p className="section-eyebrow">Solana first</p><h2>The planned standard claim path would not need a second wallet.</h2><p>Current official Fan Tokens can exist across Solana, Chiliz Chain, and Base with one unified omnichain supply. SportPad’s planned default product would keep users on Solana; Chiliz or LayerZero activity would belong in background inventory replenishment, not in every claim.</p><Button asChild variant="outline" className="mt-6 rounded-full border-white/10 bg-transparent text-white hover:bg-white/8 hover:text-white"><Link href="/how-it-works">See the planned route <ArrowRight /></Link></Button></div>
-          <div className="network-compare"><div><span>SOLANA</span><strong>Planned standard flow</strong><ul><li>Base58 wallet address</li><li>SPL reward token</li><li>SOL network fee</li><li>Future launches and claims</li></ul></div><div><span>CHILIZ CHAIN</span><strong>Possible inventory source</strong><ul><li>0x wallet address</li><li>CAP-20 token</li><li>CHZ network fee</li><li>Optional replenishment</li></ul></div></div>
+          <div><p className="section-eyebrow">Two claim networks</p><h2>The dashboard sends each reward to the network where its route works.</h2><p>Solana rewards go to the verified Solana wallet. Chiliz rewards require a verified 0x address. The dashboard asks MetaMask to add or switch to Chiliz Chain, then the protocol pays the claim gas and unwraps the Kayen inventory into the original Fan Token.</p><Button asChild variant="outline" className="mt-6 rounded-full border-white/10 bg-transparent text-white hover:bg-white/8 hover:text-white"><Link href="/how-it-works">See the full route <ArrowRight /></Link></Button></div>
+          <div className="network-compare"><div><span>SOLANA</span><strong>Two routed options</strong><ul><li>Verified Base58 wallet</li><li>SPL Fan Token</li><li>Jupiter acquisition</li><li>Solana receipt</li></ul></div><div><span>CHILIZ CHAIN</span><strong>78 routed markets</strong><ul><li>Verified 0x wallet</li><li>Official Fan Token</li><li>Kayen acquisition</li><li>Sponsored CHZ gas</li></ul></div></div>
         </section>
 
-        <section className="source-panel"><div><BadgeCheck /><span><strong>Solana-address verification source</strong><small>Official Chiliz token-contract registry · static snapshot reviewed September 18, 2026</small></span></div><a href="https://docs.chiliz.com/quick-start/token-contract-addresses" target="_blank" rel="noreferrer">Open Chiliz registry <ExternalLink /></a></section>
-        <section className="source-panel"><div><BadgeCheck /><span><strong>Additional catalog source</strong><small>FanTokens.com catalog · used only for the 14-item catalog-only section</small></span></div><a href="https://www.fantokens.com/" target="_blank" rel="noreferrer">Open FanTokens.com <ExternalLink /></a></section>
+        <section className="source-panel"><div><BadgeCheck /><span><strong>Chiliz reward source</strong><small>Kayen Fan Token contracts and live market routes</small></span></div><a href="https://kayen-protocol.gitbook.io/documentation/contract/tokens-in-kayen" target="_blank" rel="noreferrer">Open Kayen registry <ExternalLink /></a></section>
+        <section className="source-panel"><div><BadgeCheck /><span><strong>Official token background</strong><small>FanTokens.com issuer and ecosystem information</small></span></div><a href="https://www.fantokens.com/" target="_blank" rel="noreferrer">Open FanTokens.com <ExternalLink /></a></section>
       </main>
     </SiteChrome>
   );

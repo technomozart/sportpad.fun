@@ -68,7 +68,7 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
     }
   }
   if (!launch) notFound();
-  const rewardAsset = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol);
+  const rewardAsset = fanAssets.find((asset) => asset.symbol === launch.rewardSymbol && asset.chain === launch.rewardChain);
   if (!rewardAsset) notFound();
   const rewardTokenAddress = launch.mainnet?.rewardTokenAddress ?? launch.devnet?.rewardTokenAddress ?? rewardAsset.mint;
   const isMainnet = Boolean(launch.mainnet);
@@ -101,9 +101,9 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
 
           <div className="token-reward-card">
             <div className="verified-label"><BadgeCheck /> {launch.isExample ? "Official Fan Token reward example" : "Selected official Fan Token"}</div>
-            <div><TokenMark token={rewardAsset.symbol} color={rewardAsset.color} imagePath={rewardAsset.imagePath} size="lg" /><span><strong>{rewardAsset.name}</strong><small>${rewardAsset.symbol} on Solana</small></span></div>
-            <p>The official {rewardAsset.symbol} Fan Token is the selected reward asset in this {launch.isExample ? "example" : isMainnet ? "mainnet launch" : "published devnet receipt"}. The selected reward is a separate Solana asset from the community coin.</p>
-            <dl><div><dt>Solana token address</dt><dd><code>{rewardTokenAddress}</code></dd></div><div><dt>Identity</dt><dd>{rewardAsset.status}</dd></div><div><dt>Reward route</dt><dd>{isMainnet ? "Jupiter route verified at launch" : rewardAsset.route}</dd></div><div><dt>Reward vault</dt><dd>{isMainnet ? "80% treasury published" : rewardAsset.vault}</dd></div></dl>
+            <div><TokenMark token={rewardAsset.symbol} color={rewardAsset.color} imagePath={rewardAsset.imagePath} size="lg" /><span><strong>{rewardAsset.name}</strong><small>${rewardAsset.symbol} on {rewardAsset.chain === "chiliz" ? "Chiliz Chain" : "Solana"}</small></span></div>
+            <p>The official {rewardAsset.symbol} Fan Token is the selected reward asset in this {launch.isExample ? "example" : isMainnet ? "mainnet launch" : "published devnet receipt"}. It is separate from the Solana community coin and pays on {rewardAsset.chain === "chiliz" ? "Chiliz Chain" : "Solana"}.</p>
+            <dl><div><dt>{rewardAsset.chain === "chiliz" ? "Chiliz contract" : "Solana token address"}</dt><dd><code>{rewardTokenAddress}</code></dd></div><div><dt>Identity</dt><dd>{rewardAsset.status}</dd></div><div><dt>Reward route</dt><dd>{isMainnet ? `${rewardAsset.route} route verified at launch` : rewardAsset.route}</dd></div><div><dt>Reward vault</dt><dd>{isMainnet ? "80% treasury published" : rewardAsset.vault}</dd></div></dl>
           </div>
         </section>
 
@@ -143,7 +143,7 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
           <SectionHeading eyebrow={launch.isExample ? "What this example demonstrates" : isMainnet ? "Verified mainnet configuration" : "Verified devnet configuration"} title="A community narrative can choose an official Fan Token reward." copy="The community token and the official Fan Token remain separate assets with separate identities and contracts." />
           <div className="four-checks">
             <article><span>01</span><Goal /><h3>Creator identity</h3><p>The creator supplies a name, ticker, image, links, and optional description for the community token.</p></article>
-            <article><span>02</span><BadgeCheck /><h3>Official reward</h3><p>The reward selection points to the official {rewardAsset.symbol} Fan Token address published for Solana.</p></article>
+            <article><span>02</span><BadgeCheck /><h3>Official reward</h3><p>The reward selection points to the official {rewardAsset.symbol} Fan Token contract on {rewardAsset.chain === "chiliz" ? "Chiliz Chain" : "Solana"}.</p></article>
             <article><span>03</span><Trophy /><h3>80% rewards</h3><p>{isMainnet ? "The immutable Pump fee configuration assigns 80% to the official Fan Token reward treasury." : "The proposed configuration assigns 80% to official Fan Token rewards."}</p></article>
             <article><span>04</span><Flame /><h3>20% buys and burns SPORTPAD</h3><p>{isMainnet ? "The community launch's immutable fee configuration assigns 20% to buying and burning SPORTPAD." : "The proposed community configuration assigns 20% to buying and burning SPORTPAD."}</p></article>
           </div>
@@ -156,8 +156,8 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
 
         <section className="page-section contract-grid">
           <div><p className="section-eyebrow">Community token</p><h3>${launch.ticker}{launch.isExample ? " example" : ""}</h3><dl><dt>Mint</dt><dd>{launch.isExample ? "Not deployed" : launch.mainnet?.mint ?? launch.devnet?.mint}</dd><dt>Network</dt><dd>{launch.isExample ? "None" : isMainnet ? "Solana mainnet" : "Solana devnet"}</dd><dt>Creator</dt><dd>{launch.isExample ? "Not assigned" : "Visible in the public transaction"}</dd><dt>Market</dt><dd>{launch.isExample ? "Not created" : isMainnet ? "Pump SOL market" : "No verified mainnet market"}</dd><dt>Status</dt><dd>{launch.isExample ? "Example only" : isMainnet ? "Live mainnet launch" : "Verified devnet receipt"}</dd></dl></div>
-          <div><p className="section-eyebrow">Official reward asset</p><h3>{rewardAsset.name}</h3><dl><dt>Symbol</dt><dd>{rewardAsset.symbol}</dd><dt>Network</dt><dd>Solana</dd><dt>Verification</dt><dd><BadgeCheck /> Official registry match</dd><dt>Route</dt><dd>{isMainnet ? "Jupiter route verified" : rewardAsset.route}</dd><dt>Vault</dt><dd>{isMainnet ? "80% treasury published" : rewardAsset.vault}</dd></dl></div>
-          <div className="contract-risk"><ShieldCheck /><h3>{isMainnet ? "Verified identity and fee routing." : "Verified identity, disabled execution."}</h3><p>{isMainnet ? "The official Fan Token address, live acquisition route, community mint, and 80/20 Pump fee recipients are public. Claims depend on funded and reconciled reward epochs." : "The official Fan Token address on Solana is known. Acquisition, custody, allocation, and claims are not enabled for this receipt."}</p></div>
+          <div><p className="section-eyebrow">Official reward asset</p><h3>{rewardAsset.name}</h3><dl><dt>Symbol</dt><dd>{rewardAsset.symbol}</dd><dt>Network</dt><dd>{rewardAsset.chain === "chiliz" ? "Chiliz Chain" : "Solana"}</dd><dt>Verification</dt><dd><BadgeCheck /> Official contract match</dd><dt>Route</dt><dd>{isMainnet ? `${rewardAsset.route} route verified` : rewardAsset.route}</dd><dt>Vault</dt><dd>{isMainnet ? "80% treasury published" : rewardAsset.vault}</dd></dl></div>
+          <div className="contract-risk"><ShieldCheck /><h3>{isMainnet ? "Verified identity and fee routing." : "Verified identity, disabled execution."}</h3><p>{isMainnet ? "The official Fan Token contract, live acquisition route, community mint, and 80/20 Pump fee recipients are public. Claims depend on funded and reconciled reward epochs." : "The official Fan Token contract is known. Acquisition, custody, allocation, and claims are not enabled for this receipt."}</p></div>
         </section>
 
         {related.length ? <section className="page-section"><SectionHeading eyebrow={launch.isExample ? "More product examples" : "More launches"} title="Explore other community and reward combinations." /><div className="market-card-grid">{related.map((item) => <LaunchCard key={item.slug} launch={item} compact />)}</div></section> : null}

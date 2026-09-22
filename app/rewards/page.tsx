@@ -8,10 +8,10 @@ export default function RewardsPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Wallet rewards" title="Accruing, funded, and paid are not the same thing." copy="Verify a Solana wallet to see its finalized holder positions, time-weighted epoch allocations, and official Fan Token payout receipts. Unattended treasury signing is not used.">
+        <PageIntro kicker="Wallet rewards" title="Earn on Solana. Claim on the Fan Token's network." copy="Verify the Solana wallet holding a SportPad launch token. For Chiliz rewards, link MetaMask with one message, let SportPad add Chiliz Chain, and claim the official Fan Token to that address.">
           <div className="reward-hero-formula"><Calculator /><span>Your reward</span><strong>funded pool × your token-seconds</strong><small>÷ all eligible token-seconds</small></div>
         </PageIntro>
-        <SafetyNotice>No wallet balances or reward amounts are simulated. Every displayed position comes from finalized holder indexing, and every paid reward links to its Solana receipt.</SafetyNotice>
+        <SafetyNotice>No balances are simulated. Every displayed position comes from finalized holder indexing, every allocation is limited by acquired inventory, and every payout links to its onchain receipt.</SafetyNotice>
         <section className="content-section"><RewardDashboard /></section>
         <section className="page-section">
           <SectionHeading eyebrow="Methodology" title="Time in the stands matters." copy="The target model uses time-weighted balances instead of one convenient end-of-epoch snapshot." />

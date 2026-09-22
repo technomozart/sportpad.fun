@@ -1,47 +1,45 @@
 import { env } from "cloudflare:workers";
+import { z } from "zod";
 
+import { getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type ClaimRow = {
-  id: string;
-  epoch_id: string;
-  amount_atomic: string;
-  claim_signature: string | null;
-  state: string;
-  launch_id: string;
-  launch_name: string;
-  launch_symbol: string;
-  community_mint: string;
-  reward_symbol: string;
-  reward_mint: string;
-  reward_decimals: number;
-  cutoff_slot: number | null;
+  id: string; epoch_id: string; amount_atomic: string; claim_fee_atomic: string;
+  claim_signature: string | null; state: string; destination_chain: string; destination_address: string | null;
+  launch_id: string; launch_name: string; launch_symbol: string; community_mint: string;
+  reward_symbol: string; reward_mint: string; reward_chain: string; reward_decimals: number; cutoff_slot: number | null;
 };
 type PositionRow = {
-  epoch_id: string;
-  launch_id: string;
-  launch_name: string;
-  launch_symbol: string;
-  community_mint: string;
-  reward_symbol: string;
-  token_seconds_atomic: string;
-  ending_balance_atomic: string;
-  last_observed_slot: number | null;
-  epoch_state: string;
+  epoch_id: string; launch_id: string; launch_name: string; launch_symbol: string; community_mint: string;
+  reward_symbol: string; reward_chain: string; token_seconds_atomic: string; ending_balance_atomic: string;
+  last_observed_slot: number | null; epoch_state: string;
 };
+type LinkRow = { evm_address: string; chain_id: number; verified_at: number };
+type ClaimRequestRow = {
+  id: string; amount_atomic: string; state: string; solana_wallet: string;
+  reward_symbol: string; reward_chain: string; reward_mint: string; reward_wrapped_contract: string | null;
+};
+
+const claimSchema = z.object({ claimId: z.string().uuid() }).strict();
 
 export const dynamic = "force-dynamic";
 
+function json(body: unknown, status = 200) {
+  return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
+}
+
 export async function GET(request: Request) {
-  if (!env.DB) return Response.json({ error: "Reward database is unavailable." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (!env.DB) return json({ error: "Reward database is unavailable." }, 503);
   const walletSession = await getVerifiedWalletSession(request);
-  if (!walletSession) return Response.json({ error: "Verify a Solana wallet to view reward positions." }, { status: 401, headers: { "Cache-Control": "private, no-store" } });
-  const [claims, positions] = await Promise.all([
+  if (!walletSession) return json({ error: "Verify a Solana wallet to view reward positions." }, 401);
+  const [claims, positions, evmLink] = await Promise.all([
     env.DB.prepare(`
-      SELECT c.id, c.epoch_id, c.amount_atomic, c.claim_signature, c.state,
+      SELECT c.id, c.epoch_id, c.amount_atomic, c.claim_fee_atomic, c.claim_signature, c.state,
+        c.destination_chain, c.destination_address,
         e.launch_id, e.reward_decimals, e.cutoff_slot,
         l.name AS launch_name, l.symbol AS launch_symbol, l.mainnet_mint AS community_mint,
-        l.reward_symbol, l.reward_mint
+        l.reward_symbol, l.reward_mint, l.reward_chain
       FROM reward_claims c
       JOIN reward_epochs e ON e.id = c.epoch_id
       JOIN launch_drafts l ON l.id = e.launch_id
@@ -53,7 +51,7 @@ export async function GET(request: Request) {
       SELECT p.epoch_id, p.launch_id, p.token_seconds_atomic, p.ending_balance_atomic,
         p.last_observed_slot, e.state AS epoch_state,
         l.name AS launch_name, l.symbol AS launch_symbol, l.mainnet_mint AS community_mint,
-        l.reward_symbol
+        l.reward_symbol, l.reward_chain
       FROM holder_epoch_positions p
       JOIN reward_epochs e ON e.id = p.epoch_id
       JOIN launch_drafts l ON l.id = p.launch_id
@@ -61,23 +59,95 @@ export async function GET(request: Request) {
         AND l.mainnet_mint IS NOT NULL
       ORDER BY e.created_at DESC
     `).bind(walletSession.walletAddress).all<PositionRow>(),
+    env.DB.prepare(`
+      SELECT evm_address, chain_id, verified_at FROM evm_wallet_links
+      WHERE owner_user_id = ?1 AND solana_wallet = ?2
+    `).bind(walletSession.ownerUserId, walletSession.walletAddress).first<LinkRow>(),
   ]);
-  return Response.json({
+  return json({
     wallet: walletSession.walletAddress,
+    evmWallet: evmLink ? { address: evmLink.evm_address, chainId: evmLink.chain_id, verifiedAt: evmLink.verified_at } : null,
+    gasPolicy: "protocol_sponsored",
     claims: claims.results.map((claim) => ({
       id: claim.id, epochId: claim.epoch_id, amountAtomic: claim.amount_atomic,
-      signature: claim.claim_signature, state: claim.state, launchId: claim.launch_id,
-      launchName: claim.launch_name, launchSymbol: claim.launch_symbol,
+      feeAtomic: claim.claim_fee_atomic, signature: claim.claim_signature, state: claim.state,
+      destinationChain: claim.destination_chain, destinationAddress: claim.destination_address,
+      launchId: claim.launch_id, launchName: claim.launch_name, launchSymbol: claim.launch_symbol,
       communityMint: claim.community_mint, rewardSymbol: claim.reward_symbol,
-      rewardMint: claim.reward_mint, rewardDecimals: claim.reward_decimals,
-      cutoffSlot: claim.cutoff_slot,
+      rewardMint: claim.reward_mint, rewardChain: claim.reward_chain,
+      rewardDecimals: claim.reward_decimals, cutoffSlot: claim.cutoff_slot,
     })),
     positions: positions.results.map((position) => ({
       epochId: position.epoch_id, launchId: position.launch_id, launchName: position.launch_name,
       launchSymbol: position.launch_symbol, communityMint: position.community_mint,
-      rewardSymbol: position.reward_symbol, tokenSecondsAtomic: position.token_seconds_atomic,
-      endingBalanceAtomic: position.ending_balance_atomic, lastObservedSlot: position.last_observed_slot,
-      epochState: position.epoch_state,
+      rewardSymbol: position.reward_symbol, rewardChain: position.reward_chain,
+      tokenSecondsAtomic: position.token_seconds_atomic, endingBalanceAtomic: position.ending_balance_atomic,
+      lastObservedSlot: position.last_observed_slot, epochState: position.epoch_state,
     })),
-  }, { headers: { "Cache-Control": "private, no-store" } });
+  });
+}
+
+export async function POST(request: Request) {
+  if (!env.DB) return json({ error: "Reward database is unavailable." }, 503);
+  if (request.headers.get("origin") !== new URL(request.url).origin) return json({ error: "Cross-origin claim requests are not allowed." }, 403);
+  const session = await getVerifiedWalletSession(request);
+  if (!session) return json({ error: "Verify your Solana wallet before claiming." }, 401);
+  let input: z.infer<typeof claimSchema>;
+  try { input = claimSchema.parse(await request.json()); }
+  catch { return json({ error: "Invalid reward claim." }, 400); }
+  const claim = await env.DB.prepare(`
+    SELECT c.id, c.amount_atomic, c.state, c.solana_wallet,
+      l.reward_symbol, l.reward_chain, l.reward_mint, l.reward_wrapped_contract
+    FROM reward_claims c
+    JOIN reward_epochs e ON e.id = c.epoch_id
+    JOIN launch_drafts l ON l.id = e.launch_id
+    WHERE c.id = ?1
+  `).bind(input.claimId).first<ClaimRequestRow>();
+  if (!claim || claim.solana_wallet !== session.walletAddress) return json({ error: "Reward claim not found." }, 404);
+  if (claim.state !== "claimable") return json({ error: "This reward is already queued or paid." }, 409);
+  let destinationAddress = session.walletAddress;
+  let jobType = "solana_claim_payout";
+  let payload: Record<string, string> = {
+    claimId: claim.id,
+    destinationAddress,
+    tokenAddress: claim.reward_mint,
+    amountAtomic: claim.amount_atomic,
+  };
+  if (claim.reward_chain === "chiliz") {
+    const link = await env.DB.prepare(`
+      SELECT evm_address FROM evm_wallet_links WHERE owner_user_id = ?1 AND solana_wallet = ?2
+    `).bind(session.ownerUserId, session.walletAddress).first<{ evm_address: string }>();
+    if (!link) return json({ error: "Connect and verify a Chiliz wallet before claiming this reward." }, 409);
+    const asset = getChilizRewardAsset(claim.reward_symbol);
+    if (!asset || asset.contract.toLowerCase() !== claim.reward_mint.toLowerCase() || !claim.reward_wrapped_contract) {
+      return json({ error: "The Chiliz reward contract could not be verified." }, 409);
+    }
+    destinationAddress = link.evm_address;
+    jobType = "chiliz_claim_unwrap";
+    payload = {
+      claimId: claim.id,
+      destinationAddress,
+      underlyingContract: asset.contract,
+      wrappedContract: asset.wrappedContract,
+      amountAtomic: claim.amount_atomic,
+    };
+  }
+  const jobId = crypto.randomUUID();
+  const now = Date.now();
+  const results = await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE reward_claims SET state = 'queued', destination_chain = ?2, destination_address = ?3,
+        claim_requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?1 AND state = 'claimable'
+    `).bind(claim.id, claim.reward_chain, destinationAddress),
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO automation_jobs
+        (id, job_type, entity_type, entity_id, chain, payload_json, state, available_at)
+      VALUES (?1, ?2, 'reward_claim', ?3, ?4, ?5, 'queued', ?6)
+    `).bind(jobId, jobType, claim.id, claim.reward_chain, JSON.stringify(payload), now),
+  ]);
+  if (results[0]?.meta.changes !== 1 || results[1]?.meta.changes !== 1) {
+    return json({ error: "This reward changed before it could be queued. Reload and retry." }, 409);
+  }
+  return json({ queued: true, claimId: claim.id, jobId, destinationChain: claim.reward_chain, destinationAddress }, 202);
 }

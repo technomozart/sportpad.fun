@@ -46,7 +46,9 @@ export const launchDrafts = sqliteTable(
     unofficialAttested: integer("unofficial_attested", { mode: "boolean" }).notNull().default(false),
     economicsAttested: integer("economics_attested", { mode: "boolean" }).notNull().default(false),
     rewardSymbol: text("reward_symbol").notNull(),
+    rewardChain: text("reward_chain").notNull().default("solana"),
     rewardMint: text("reward_mint"),
+    rewardWrappedContract: text("reward_wrapped_contract"),
     rewardBps: integer("reward_bps").notNull().default(8000),
     buybackBps: integer("buyback_bps").notNull().default(2000),
     status: text("status").notNull().default("draft"),
@@ -95,6 +97,40 @@ export const walletSessions = sqliteTable(
   (table) => [
     index("idx_wallet_sessions_owner_wallet").on(table.ownerUserId, table.walletAddress),
     index("idx_wallet_sessions_expires").on(table.expiresAt),
+  ],
+);
+
+export const evmWalletChallenges = sqliteTable(
+  "evm_wallet_challenges",
+  {
+    id: text("id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    solanaWallet: text("solana_wallet").notNull(),
+    evmAddress: text("evm_address").notNull(),
+    message: text("message").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    usedAt: integer("used_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_evm_challenges_owner_address").on(table.ownerUserId, table.evmAddress),
+    index("idx_evm_challenges_expires").on(table.expiresAt),
+  ],
+);
+
+export const evmWalletLinks = sqliteTable(
+  "evm_wallet_links",
+  {
+    ownerUserId: text("owner_user_id").primaryKey(),
+    solanaWallet: text("solana_wallet").notNull(),
+    evmAddress: text("evm_address").notNull(),
+    chainId: integer("chain_id").notNull().default(88888),
+    verifiedAt: integer("verified_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_evm_links_address").on(table.evmAddress),
+    index("idx_evm_links_solana_wallet").on(table.solanaWallet),
   ],
 );
 
@@ -203,6 +239,10 @@ export const rewardClaims = sqliteTable(
     epochId: text("epoch_id").notNull().references(() => rewardEpochs.id),
     solanaWallet: text("solana_wallet").notNull(),
     amountAtomic: text("amount_atomic").notNull(),
+    destinationChain: text("destination_chain").notNull().default("solana"),
+    destinationAddress: text("destination_address"),
+    claimFeeAtomic: text("claim_fee_atomic").notNull().default("0"),
+    claimRequestedAt: text("claim_requested_at"),
     claimSignature: text("claim_signature"),
     confirmedSlot: integer("confirmed_slot"),
     state: text("state").notNull().default("claimable"),
@@ -296,6 +336,7 @@ export const rewardVaults = sqliteTable(
     id: text("id").primaryKey(),
     launchId: text("launch_id").notNull().references(() => launchDrafts.id),
     rewardMint: text("reward_mint").notNull(),
+    chain: text("chain").notNull().default("solana"),
     ownerAddress: text("owner_address").notNull(),
     tokenAccount: text("token_account"),
     state: text("state").notNull().default("observed"),
@@ -311,6 +352,37 @@ export const rewardVaults = sqliteTable(
     index("idx_reward_vaults_state").on(table.state),
   ],
 );
+
+export const automationJobs = sqliteTable(
+  "automation_jobs",
+  {
+    id: text("id").primaryKey(),
+    jobType: text("job_type").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    chain: text("chain").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    state: text("state").notNull().default("queued"),
+    attempt: integer("attempt").notNull().default(0),
+    txHash: text("tx_hash"),
+    errorCode: text("error_code"),
+    availableAt: integer("available_at").notNull(),
+    leasedUntil: integer("leased_until"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_automation_job_entity_type").on(table.entityId, table.jobType),
+    index("idx_automation_jobs_state_available").on(table.state, table.availableAt),
+  ],
+);
+
+export const protocolSettings = sqliteTable("protocol_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedByUserId: text("updated_by_user_id"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const holderEpochPositions = sqliteTable(
   "holder_epoch_positions",

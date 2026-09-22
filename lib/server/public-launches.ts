@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { devnetSubmissions, launchDrafts } from "@/db/schema";
 import { buildPublicDevnetReceipt } from "@/lib/protocol/public-devnet-launch";
 import { buildPublicMainnetReceipt } from "@/lib/protocol/public-mainnet-launch";
-import { getRewardAsset } from "@/lib/protocol/reward-assets";
+import { getRewardOption, type RewardChain } from "@/lib/protocol/reward-options";
 import type { Launch } from "@/lib/site-data";
 
 function sportName(value: string): Launch["sport"] {
@@ -19,7 +19,8 @@ function toPublicLaunch(
   const mainnet = buildPublicMainnetReceipt(row);
   const devnet = buildPublicDevnetReceipt(row, submissions);
   if (!mainnet && !devnet) return null;
-  const reward = getRewardAsset(row.rewardSymbol);
+  const rewardChain = row.rewardChain as RewardChain;
+  const reward = getRewardOption(rewardChain, row.rewardSymbol);
   const sport = sportName(row.sport);
   return {
     slug: row.id,
@@ -28,6 +29,7 @@ function toPublicLaunch(
     sport,
     narrative: row.description || `${sport} community launch`,
     rewardSymbol: row.rewardSymbol,
+    rewardChain,
     rewardName: reward?.name ?? row.rewardSymbol,
     tone: "#9cff57",
     description: row.description || "No description provided.",

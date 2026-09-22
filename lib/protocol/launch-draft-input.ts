@@ -44,6 +44,7 @@ export const launchDraftPayloadSchema = z
     }),
     website: optionalHttpsUrl,
     social: optionalHttpsUrl,
+    rewardChain: z.enum(["chiliz", "solana"], { message: "Choose a supported reward network." }).default("chiliz"),
     rewardSymbol: z.string().trim().min(1, "Choose a verified reward asset.").max(32),
     attestations: attestationsSchema,
   })

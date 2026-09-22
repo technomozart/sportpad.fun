@@ -17,6 +17,7 @@ export default async function TransparencyPage() {
   const rewardSwaps = protocol?.counts.rewardSwaps ?? 0;
   const buybackSwaps = protocol?.counts.buybackSwaps ?? 0;
   const sportpadBurns = protocol?.counts.sportpadBurns ?? 0;
+  const sportpadMint = protocol?.protocolSettings.sportpadMint ?? mainnet.sportpadMint;
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
@@ -27,7 +28,7 @@ export default async function TransparencyPage() {
         >
           <div className="transparency-fresh">
             <Radio />
-            <span><strong>{feeEvents ? `${feeEvents} fee events observed` : "No fee events yet"}</strong><small>{protocol?.capabilities.walletExecutionEnabled ? "Wallet-confirmed treasury execution enabled" : "Treasury execution is paused"}</small></span>
+            <span><strong>{feeEvents ? `${feeEvents} fee events observed` : "No fee events yet"}</strong><small>{protocol?.capabilities.unattendedAutomation ? "Automatic treasury worker active" : "Treasury automation is paused"}</small></span>
           </div>
         </PageIntro>
 
@@ -35,13 +36,13 @@ export default async function TransparencyPage() {
           <div><span>Fee events</span><strong>{feeEvents ?? "Unavailable"}</strong><small>Finalized fee records in the ledger</small></div>
           <div><span>Protocol events</span><strong>{protocolEvents ?? "Unavailable"}</strong><small>Auditable control and observation records</small></div>
           <div><span>Reward vaults</span><strong>{rewardVaults ?? "Unavailable"}</strong><small>Verified official Fan Token inventory accounts</small></div>
-          <div><span>SPORTPAD mint</span><strong>{mainnet.sportpadMint ? "Configured" : "Not configured"}</strong><small>{mainnet.sportpadMint ? "Buyback asset address is registered" : "Buyback and burn lane stays locked"}</small></div>
+          <div><span>SPORTPAD mint</span><strong>{sportpadMint ? "Configured" : "Not configured"}</strong><small>{sportpadMint ? "Buyback asset address is registered" : "Buyback and burn lane stays locked"}</small></div>
         </section>
 
         <section className="page-section">
           <SectionHeading
             eyebrow="Deployed capital flow"
-            title="One verified source and two wallet-confirmed outcomes."
+            title="One verified source and two on-chain outcomes."
             copy="Counts remain at zero until real finalized transactions are recorded. Nothing below is simulated."
           />
           <div className="capital-flow">
@@ -52,7 +53,7 @@ export default async function TransparencyPage() {
             <div className="flow-split"><span>80 / 20</span><strong>Immutable onchain split</strong></div>
             <div className="flow-branches">
               <div><Trophy /><span>OFFICIAL FAN TOKEN REWARDS · 80%</span><strong>{rewardSwaps ? `${rewardSwaps} swaps submitted` : "No swaps submitted"}</strong><ArrowDown /><small>{rewardVaults ? `${rewardVaults} inventory records` : "No verified inventory yet"}</small><ArrowDown /><b>{protocol?.counts.rewardEpochs ? `${protocol.counts.rewardEpochs} reward epochs` : "No epochs yet"}</b></div>
-              <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{mainnet.sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
+              <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
             </div>
           </div>
         </section>

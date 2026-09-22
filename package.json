@@ -23,13 +23,16 @@
     "test:providers": "node --experimental-strip-types --test lib/server/providers/*.test.ts",
     "test:wallets": "node --experimental-strip-types --test components/solana-wallet-providers.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "worker:automation": "node scripts/automation-worker.mjs",
+    "worker:solana": "node scripts/solana-automation-worker.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.7.1",
     "@noble/curves": "^1.9.7",
     "@shadcn/react": "^0.3.0",
+    "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
     "bs58": "^6.0.0",
     "buffer": "^6.0.3",
@@ -53,6 +56,7 @@
     "sonner": "^2.0.8",
     "tailwind-merge": "3.6.0",
     "vaul": "^1.1.2",
+    "viem": "^2.56.8",
     "zod": "^3.25.76"
   },
   "devDependencies": {

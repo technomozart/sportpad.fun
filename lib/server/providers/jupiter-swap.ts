@@ -5,6 +5,7 @@ const JUPITER_ORDER_ENDPOINT = "https://api.jup.ag/swap/v2/order";
 const JUPITER_EXECUTE_ENDPOINT = "https://api.jup.ag/swap/v2/execute";
 const MAX_PRICE_IMPACT_PERCENT = 5;
 const SLIPPAGE_BPS = 100;
+const APPROVED_ROUTERS = new Set(["metis", "okx"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -90,7 +91,7 @@ export async function prepareJupiterSwap({
   endpoint.searchParams.set("amount", amountAtomic);
   endpoint.searchParams.set("taker", taker);
   endpoint.searchParams.set("slippageBps", String(SLIPPAGE_BPS));
-  endpoint.searchParams.set("excludeRouters", "jupiterz,dflow,okx");
+  endpoint.searchParams.set("excludeRouters", "jupiterz,dflow");
   const response = await fetcher(endpoint, {
     headers: { Accept: "application/json", "x-api-key": apiKey },
     cache: "no-store",
@@ -114,7 +115,7 @@ export async function prepareJupiterSwap({
   if (!Number.isFinite(priceImpact) || Math.abs(priceImpact) > MAX_PRICE_IMPACT_PERCENT) {
     throw new Error("Jupiter route price impact exceeds the SportPad safety limit.");
   }
-  if (payload.swapMode !== "ExactIn" || Number(payload.slippageBps) > SLIPPAGE_BPS || payload.router !== "metis") {
+  if (payload.swapMode !== "ExactIn" || Number(payload.slippageBps) > SLIPPAGE_BPS || typeof payload.router !== "string" || !APPROVED_ROUTERS.has(payload.router)) {
     throw new Error("Jupiter changed the approved exact-in routing policy.");
   }
   if (payload.gasless !== false || payload.signatureFeePayer !== taker) {
