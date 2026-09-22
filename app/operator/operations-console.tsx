@@ -1,9 +1,11 @@
 "use client";
 
-import { Activity, CirclePause, RefreshCw, ServerCog, ShieldCheck, Wallet } from "lucide-react";
+import { Activity, CirclePause, ExternalLink, RefreshCw, ServerCog, ShieldCheck, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useSolanaWalletSession } from "@/components/solana-wallet-session";
+import { collectAndSplitPumpMainnetFees } from "@/lib/client/pump-mainnet";
 
 type Lane = { ready: boolean; missing: string[] };
 type OperationsStatus = {
@@ -46,6 +48,15 @@ type OperationsStatus = {
     startedAt: string;
     completedAt: string | null;
   }>;
+  feeLaunches: Array<{
+    id: string;
+    name: string;
+    symbol: string;
+    mint: string;
+    rewardSymbol: string;
+    rewardTreasury: string;
+    buybackTreasury: string;
+  }>;
 };
 
 function sol(lamports: string) {
@@ -60,6 +71,7 @@ function shortAddress(address: string | null) {
 }
 
 export function OperationsConsole() {
+  const walletSession = useSolanaWalletSession();
   const [status, setStatus] = useState<OperationsStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -85,7 +97,8 @@ export function OperationsConsole() {
     return () => window.clearTimeout(request);
   }, [load]);
 
-  async function act(action: "observe_treasuries" | "index_fees" | "pause_all") {
+  async function act(action: "observe_treasuries" | "index_fees" | "pause_all" | "enable_wallet_execution") {
+    if (action === "enable_wallet_execution" && !window.confirm("Enable wallet-confirmed reward swaps and SPORTPAD buybacks? Every transaction will still require the matching treasury wallet to review and sign.")) return;
     setBusy(action);
     setError("");
     try {
@@ -104,15 +117,42 @@ export function OperationsConsole() {
     }
   }
 
+  async function collectFees(launch: OperationsStatus["feeLaunches"][number]) {
+    if (!walletSession.wallet) {
+      await walletSession.connectAndVerify();
+      return;
+    }
+    if (!window.confirm(`Collect finalized Pump creator fees for $${launch.symbol} and distribute them 80% to the ${launch.rewardSymbol} reward treasury and 20% to the SPORTPAD buyback treasury? Your connected wallet pays only the Solana network fee.`)) return;
+    setBusy(`collect:${launch.id}`);
+    setError("");
+    try {
+      const result = await collectAndSplitPumpMainnetFees({
+        walletAddress: walletSession.wallet,
+        mintAddress: launch.mint,
+        rewardTreasury: launch.rewardTreasury,
+        buybackTreasury: launch.buybackTreasury,
+        signTransaction: walletSession.signTransaction,
+        onSubmitted: () => undefined,
+      });
+      await act("index_fees");
+      window.open(`https://solscan.io/tx/${encodeURIComponent(result.signature)}`, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Fee collection failed safely.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   const lanes = status ? Object.entries(status.readiness) as Array<[string, Lane]> : [];
   return (
     <section className="operations-console">
       <div className="operations-heading">
-        <div><p className="section-eyebrow">Execution control plane</p><h2>Infrastructure operations</h2><p>Observe real treasury state and inspect every safety gate. No button on this screen can sign a swap, claim, or burn transaction.</p></div>
+        <div><p className="section-eyebrow">Execution control plane</p><h2>Infrastructure operations</h2><p>Observe real treasury state and inspect every safety gate. The app never holds a seed phrase, and treasury spends require the matching wallet to review and sign.</p></div>
         <div className="operations-actions">
           <Button variant="outline" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw /> Refresh</Button>
           <Button variant="outline" onClick={() => void act("observe_treasuries")} disabled={!status?.capabilities.treasuryObserver || Boolean(busy)}><Activity /> Observe treasuries</Button>
           <Button variant="outline" onClick={() => void act("index_fees")} disabled={!status?.capabilities.finalizedPumpFeeIndexer || Boolean(busy)}><RefreshCw /> Index finalized fees</Button>
+          {status?.controls.settlementPaused ? <Button onClick={() => void act("enable_wallet_execution")} disabled={Boolean(busy)}><ShieldCheck /> Enable wallet execution</Button> : null}
           <Button variant="outline" onClick={() => void act("pause_all")} disabled={Boolean(busy)}><CirclePause /> Pause all</Button>
         </div>
       </div>
@@ -132,6 +172,20 @@ export function OperationsConsole() {
           <div className="operations-runs">
             <div><strong>Recent worker runs</strong><small>Treasury observation and fee indexing are read-only. Transaction workers remain locked.</small></div>
             {status.workerRuns.length ? status.workerRuns.map((run) => <div key={`${run.worker}:${run.startedAt}`}><code>{run.worker}</code><span>{run.state}</span><small>{run.startedAt}{run.errorCode ? `, ${run.errorCode}` : ""}</small></div>) : <p>No worker runs recorded yet.</p>}
+          </div>
+          <div className="operations-settlements">
+            <div className="operations-settlements-head">
+              <span><strong>Published fee routes</strong><small>Permissionless Pump collection verifies the immutable onchain 80/20 route before your wallet can sign.</small></span>
+              {!walletSession.wallet ? <Button variant="outline" onClick={() => void walletSession.connectAndVerify()} disabled={walletSession.busy}><Wallet /> Connect operator wallet</Button> : <code>{shortAddress(walletSession.wallet)}</code>}
+            </div>
+            {status.feeLaunches.length ? status.feeLaunches.map((launch) => (
+              <article key={launch.id} className="operations-settlement-row">
+                <span><strong>${launch.symbol}</strong><small>{launch.name} · rewards in ${launch.rewardSymbol}</small></span>
+                <code>{shortAddress(launch.mint)}</code>
+                <Button onClick={() => void collectFees(launch)} disabled={Boolean(busy)}><Activity /> Collect and split</Button>
+                <a href={`https://solscan.io/token/${encodeURIComponent(launch.mint)}`} target="_blank" rel="noopener noreferrer" aria-label={`Open ${launch.symbol} on Solscan`}><ExternalLink /></a>
+              </article>
+            )) : <p>No verified mainnet launches are published yet. The first published launch will appear here automatically.</p>}
           </div>
         </>
       ) : null}

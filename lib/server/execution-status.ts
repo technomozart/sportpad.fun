@@ -33,6 +33,15 @@ type WorkerRunRow = {
   started_at: string;
   completed_at: string | null;
 };
+type FeeLaunchRow = {
+  id: string;
+  name: string;
+  symbol: string;
+  mainnet_mint: string;
+  reward_symbol: string;
+  mainnet_reward_treasury: string;
+  mainnet_buyback_treasury: string;
+};
 
 function controlsFromRow(row: ControlRow | null): ProtocolControls {
   if (!row) return DEFAULT_PROTOCOL_CONTROLS;
@@ -58,6 +67,19 @@ export async function getExecutionStatus() {
     env.DB.prepare("SELECT COUNT(*) AS count FROM reward_vaults"),
     env.DB.prepare("SELECT purpose, address, balance_lamports, slot, observed_at FROM treasury_observations WHERE id IN (SELECT id FROM treasury_observations AS latest WHERE latest.purpose = treasury_observations.purpose ORDER BY latest.slot DESC LIMIT 1) ORDER BY purpose"),
     env.DB.prepare("SELECT worker, state, items_seen, items_changed, error_code, started_at, completed_at FROM worker_runs ORDER BY started_at DESC LIMIT 10"),
+    env.DB.prepare(`
+      SELECT id, name, symbol, mainnet_mint, reward_symbol, mainnet_reward_treasury, mainnet_buyback_treasury
+      FROM launch_drafts
+      WHERE status = 'mainnet_published'
+        AND mainnet_mint IS NOT NULL
+        AND mainnet_reward_treasury IS NOT NULL
+        AND mainnet_buyback_treasury IS NOT NULL
+      ORDER BY mainnet_verified_at DESC
+      LIMIT 50
+    `),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'reward_swap_submitted'"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'buyback_swap_submitted'"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM protocol_events WHERE event_type = 'sportpad_burn_submitted'"),
   ]);
   const controls = controlsFromRow((results[0].results[0] as ControlRow | undefined) ?? null);
   const execution = readExecutionConfig(controls);
@@ -78,6 +100,15 @@ export async function getExecutionStatus() {
     startedAt: row.started_at,
     completedAt: row.completed_at,
   }));
+  const feeLaunches = (results[9].results as FeeLaunchRow[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    symbol: row.symbol,
+    mint: row.mainnet_mint,
+    rewardSymbol: row.reward_symbol,
+    rewardTreasury: row.mainnet_reward_treasury,
+    buybackTreasury: row.mainnet_buyback_treasury,
+  }));
 
   return {
     version: 1,
@@ -90,6 +121,7 @@ export async function getExecutionStatus() {
       holderIndexerEnabled: execution.flags.holderIndexerEnabled,
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,
+      walletExecutionEnabled: !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused,
     },
     treasuries: {
       reward: execution.mainnet.rewardTreasury,
@@ -103,7 +135,11 @@ export async function getExecutionStatus() {
       confirmedClaims: count(4),
       protocolEvents: count(5),
       rewardVaults: count(6),
+      rewardSwaps: count(10),
+      buybackSwaps: count(11),
+      sportpadBurns: count(12),
     },
     workerRuns,
+    feeLaunches,
   };
 }

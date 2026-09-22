@@ -118,6 +118,7 @@ export function decodePumpBondingCurve(data: Uint8Array) {
   requireDiscriminator(data, PUMP_BONDING_CURVE_DISCRIMINATOR, "Pump bonding curve");
   if (data.length < 83) throw new Error("The Pump bonding curve account is incomplete.");
   return {
+    complete: data[48] === 1,
     creator: new PublicKey(data.slice(49, 81)),
     isMayhemMode: data[81] === 1,
     isCashbackCoin: data[82] === 1,

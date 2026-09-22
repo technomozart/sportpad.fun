@@ -19,7 +19,7 @@ export default function HowItWorksPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="How SportPad is designed" title="From creator fees to holder rewards, with every state exposed." copy="The planned system links Solana community coins to official Fan Token rewards. Pump devnet coin creation and the one-time 80/20 creator-fee lock are available now. Fee indexing, swaps, reward vaults, epochs, and claims are not deployed yet.">
+        <PageIntro kicker="How SportPad works" title="From creator fees to official Fan Token rewards, with every state exposed." copy="Mainnet Pump launches, the immutable 80/20 fee route, finalized fee indexing, wallet-confirmed Fan Token swaps, and SPORTPAD buyback and burn controls are deployed. Holder allocation epochs and claims remain locked until verified reward inventory exists.">
           <div className="route-mini"><span>TRADE</span><ArrowRight /><strong>80 / 20</strong><ArrowRight /><span>REWARD + BURN</span></div>
         </PageIntro>
         <SafetyNotice>Linked does not mean paired. A community coin usually trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token.</SafetyNotice>
@@ -42,7 +42,7 @@ export default function HowItWorksPage() {
           <div className="route-safety"><ShieldCheck /><h3>Safe failure beats a bad execution.</h3><p>The planned executor would pause acquisition when quotes disappear, price impact rises, inventory runs low, or RPC or bridge health degrades. Any previously funded claims would remain reserved.</p></div>
         </section>
 
-        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">Planned SPORTPAD buyback + burn</p><h2>A wallet transfer would not count as a burn.</h2><p>After the main SPORTPAD token and execution system are deployed, the 20% leg is designed to purchase SPORTPAD, call SPL Token BurnChecked, wait for finality, and verify the expected supply reduction.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
+        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">SPORTPAD buyback + burn</p><h2>A wallet transfer does not count as a burn.</h2><p>After the 20% treasury buys SPORTPAD through a bounded Jupiter order, the operator console prepares an exact SPL Token burn for the purchased amount. The matching buyback wallet must review and sign both transactions.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
       </main>
     </SiteChrome>
   );

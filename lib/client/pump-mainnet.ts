@@ -13,8 +13,17 @@ import { REWARD_FEE_BPS, SPORTPAD_FEE_BPS } from "@/lib/protocol/devnet-launch";
 import {
   buildPumpCreateFeeConfigInstruction,
   buildPumpCreateV2Instruction,
+  buildPumpAmmTransferCreatorFeesToPumpV2Instruction,
+  buildPumpDistributeCreatorFeesV2Instruction,
   buildPumpUpdateFeeSharesV2Instruction,
 } from "@/lib/protocol/pump-devnet-instructions";
+import {
+  NATIVE_MINT,
+  bondingCurvePda,
+  decodePumpBondingCurve,
+  decodePumpSharingConfig,
+  feeSharingConfigPda,
+} from "@/lib/protocol/pump-devnet-verification";
 
 const MAINNET_RPC_URL = "https://api.mainnet-beta.solana.com";
 
@@ -161,4 +170,68 @@ export async function configurePumpMainnetFeeSplit({
   await simulateOrThrow(rpc, transaction);
   const signature = await signSendAndFinalize({ rpc, transaction, signTransaction, onSubmitted, ...latest });
   return { signature };
+}
+
+export async function collectAndSplitPumpMainnetFees({
+  walletAddress,
+  mintAddress,
+  rewardTreasury,
+  buybackTreasury,
+  signTransaction,
+  onSubmitted,
+}: {
+  walletAddress: string;
+  mintAddress: string;
+  rewardTreasury: string;
+  buybackTreasury: string;
+  signTransaction: TransactionSigner;
+  onSubmitted: (submission: MainnetSubmission) => void | Promise<void>;
+}) {
+  const rpc = connection();
+  const payer = new PublicKey(walletAddress);
+  const mint = new PublicKey(mintAddress);
+  const reward = new PublicKey(rewardTreasury);
+  const buyback = new PublicKey(buybackTreasury);
+  if (reward.equals(buyback)) throw new Error("The 80% and 20% treasuries must be different wallets.");
+
+  const curveAddress = bondingCurvePda(mint);
+  const sharingAddress = feeSharingConfigPda(mint);
+  const [curveAccount, sharingAccount] = await rpc.getMultipleAccountsInfo([curveAddress, sharingAddress], "confirmed");
+  if (!curveAccount || !sharingAccount) throw new Error("The verified Pump fee-sharing accounts were not found on mainnet.");
+  const curve = decodePumpBondingCurve(curveAccount.data);
+  const sharing = decodePumpSharingConfig(sharingAccount.data);
+  if (!curve.creator.equals(sharingAddress) || !sharing.mint.equals(mint)) {
+    throw new Error("The Pump bonding curve is not controlled by this fee-sharing configuration.");
+  }
+  if (sharing.status !== 1 || !sharing.adminRevoked) {
+    throw new Error("The Pump fee-sharing configuration is not active and immutable.");
+  }
+  if (!curve.quoteMint.equals(NATIVE_MINT)) {
+    throw new Error("SportPad currently supports fee collection only for SOL-paired Pump launches.");
+  }
+  const expectedShares = [
+    { address: reward, shareBps: REWARD_FEE_BPS },
+    { address: buyback, shareBps: SPORTPAD_FEE_BPS },
+  ];
+  if (sharing.shareholders.length !== expectedShares.length || sharing.shareholders.some((shareholder, index) => (
+    !shareholder.address.equals(expectedShares[index].address) || shareholder.shareBps !== expectedShares[index].shareBps
+  ))) {
+    throw new Error("The onchain Pump fee-sharing order does not match SportPad's immutable 80/20 route.");
+  }
+
+  const latest = await rpc.getLatestBlockhash("confirmed");
+  const transaction = new Transaction({ feePayer: payer, recentBlockhash: latest.blockhash }).add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+  );
+  if (curve.complete) {
+    transaction.add(buildPumpAmmTransferCreatorFeesToPumpV2Instruction({ payer, mint }));
+  }
+  transaction.add(buildPumpDistributeCreatorFeesV2Instruction({
+    payer,
+    mint,
+    shareholders: [reward, buyback],
+  }));
+  await simulateOrThrow(rpc, transaction);
+  const signature = await signSendAndFinalize({ rpc, transaction, signTransaction, onSubmitted, ...latest });
+  return { signature, sweptAmm: curve.complete };
 }

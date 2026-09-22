@@ -3,6 +3,7 @@ import { Buffer } from "buffer";
 
 import {
   PUMP_CREATE_FEE_CONFIG_DISCRIMINATOR,
+  PUMP_DISTRIBUTE_CREATOR_FEES_V2_DISCRIMINATOR,
   PUMP_FEE_PROGRAM_ID,
   PUMP_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -17,6 +18,7 @@ import {
 
 export const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
 export const MAYHEM_PROGRAM_ID = new PublicKey("MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e");
+export const PUMP_AMM_TRANSFER_CREATOR_FEES_V2_DISCRIMINATOR = Uint8Array.from([1, 33, 78, 185, 33, 67, 44, 92]);
 
 function pda(programId: PublicKey, ...seeds: Uint8Array[]) {
   return PublicKey.findProgramAddressSync(seeds, programId)[0];
@@ -37,6 +39,10 @@ function associatedTokenAddress(mint: PublicKey, owner: PublicKey, tokenProgram:
     tokenProgram.toBytes(),
     mint.toBytes(),
   );
+}
+
+export function pumpAmmCreatorVaultPda(creator: PublicKey) {
+  return pda(PUMP_AMM_PROGRAM_ID, constantSeed("creator_vault"), creator.toBytes());
 }
 
 function meta(pubkey: PublicKey, isSigner = false, isWritable = false): AccountMeta {
@@ -151,5 +157,70 @@ export function buildPumpUpdateFeeSharesV2Instruction({
       { address: rewardWallet, shareBps: rewardShareBps },
       { address: burnWallet, shareBps: burnShareBps },
     ])),
+  });
+}
+
+export function buildPumpAmmTransferCreatorFeesToPumpV2Instruction({
+  payer,
+  mint,
+}: {
+  payer: PublicKey;
+  mint: PublicKey;
+}) {
+  const sharingConfig = feeSharingConfigPda(mint);
+  const ammCreatorVault = pumpAmmCreatorVaultPda(sharingConfig);
+  const pumpCreatorVault = pda(PUMP_PROGRAM_ID, constantSeed("creator-vault"), sharingConfig.toBytes());
+  return new TransactionInstruction({
+    programId: PUMP_AMM_PROGRAM_ID,
+    keys: [
+      meta(payer, true, true),
+      meta(NATIVE_MINT),
+      meta(TOKEN_PROGRAM_ID),
+      meta(SystemProgram.programId),
+      meta(ASSOCIATED_TOKEN_PROGRAM_ID),
+      meta(sharingConfig),
+      meta(ammCreatorVault, false, true),
+      meta(associatedTokenAddress(NATIVE_MINT, ammCreatorVault, TOKEN_PROGRAM_ID), false, true),
+      meta(pumpCreatorVault, false, true),
+      meta(associatedTokenAddress(NATIVE_MINT, pumpCreatorVault, TOKEN_PROGRAM_ID), false, true),
+      meta(eventAuthority(PUMP_AMM_PROGRAM_ID)),
+      meta(PUMP_AMM_PROGRAM_ID),
+    ],
+    data: Buffer.from(PUMP_AMM_TRANSFER_CREATOR_FEES_V2_DISCRIMINATOR),
+  });
+}
+
+export function buildPumpDistributeCreatorFeesV2Instruction({
+  payer,
+  mint,
+  shareholders,
+}: {
+  payer: PublicKey;
+  mint: PublicKey;
+  shareholders: PublicKey[];
+}) {
+  if (shareholders.length === 0 || shareholders.length > 10) {
+    throw new Error("Pump fee distribution requires between one and ten shareholders.");
+  }
+  const sharingConfig = feeSharingConfigPda(mint);
+  const pumpCreatorVault = pda(PUMP_PROGRAM_ID, constantSeed("creator-vault"), sharingConfig.toBytes());
+  return new TransactionInstruction({
+    programId: PUMP_PROGRAM_ID,
+    keys: [
+      meta(payer, true, true),
+      meta(mint),
+      meta(bondingCurvePda(mint)),
+      meta(sharingConfig),
+      meta(pumpCreatorVault, false, true),
+      meta(SystemProgram.programId),
+      meta(eventAuthority(PUMP_PROGRAM_ID)),
+      meta(PUMP_PROGRAM_ID),
+      meta(associatedTokenAddress(NATIVE_MINT, pumpCreatorVault, TOKEN_PROGRAM_ID), false, true),
+      meta(NATIVE_MINT),
+      meta(TOKEN_PROGRAM_ID),
+      meta(ASSOCIATED_TOKEN_PROGRAM_ID),
+      ...shareholders.map((shareholder) => meta(shareholder, false, true)),
+    ],
+    data: Buffer.from([...PUMP_DISTRIBUTE_CREATOR_FEES_V2_DISCRIMINATOR, 0]),
   });
 }

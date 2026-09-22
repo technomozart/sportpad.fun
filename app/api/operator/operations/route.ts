@@ -44,6 +44,29 @@ async function pauseAll(operatorUserId: string) {
   ]);
 }
 
+async function enableWalletExecution(operatorUserId: string) {
+  if (!env.DB) throw new Error("D1 binding `DB` is unavailable.");
+  const eventId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO protocol_controls (key, settlement_paused, rewards_paused, buyback_paused, pause_reason, revision, updated_by_user_id, updated_at)
+      VALUES ('global', 0, 0, 0, 'wallet_confirmed_execution', 1, ?1, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET
+        settlement_paused = 0,
+        rewards_paused = 0,
+        buyback_paused = 0,
+        pause_reason = 'wallet_confirmed_execution',
+        revision = protocol_controls.revision + 1,
+        updated_by_user_id = excluded.updated_by_user_id,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(operatorUserId),
+    env.DB.prepare(`
+      INSERT INTO protocol_events (id, category, entity_type, entity_id, event_type, idempotency_key, state)
+      VALUES (?1, 'control', 'protocol', 'global', 'wallet_execution_enabled', ?1, 'verified')
+    `).bind(eventId),
+  ]);
+}
+
 export async function GET(request: Request) {
   if (!isOperatorRequest(request)) return privateJson({ error: "Operator access is required." }, 403);
   try {
@@ -85,6 +108,10 @@ export async function POST(request: Request) {
     }
     if (body.action === "pause_all") {
       await pauseAll(operatorUserId);
+      return privateJson({ ok: true, status: await getExecutionStatus() });
+    }
+    if (body.action === "enable_wallet_execution") {
+      await enableWalletExecution(operatorUserId);
       return privateJson({ ok: true, status: await getExecutionStatus() });
     }
     return privateJson({ error: "Unknown operations action." }, 400);
