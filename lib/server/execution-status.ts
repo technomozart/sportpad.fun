@@ -114,7 +114,6 @@ export async function getExecutionStatus() {
     buybackTreasury: row.mainnet_buyback_treasury,
   }));
   const walletExecutionEnabled = !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused;
-  const managedExecutionReady = Object.values(execution.readiness).every((lane) => lane.ready);
   const heartbeats = results[13].results as AutomationHeartbeatRow[];
   const activeCutoff = Date.now() - 2 * 60 * 1_000;
   const automationWorkers = heartbeats.map((row) => {
@@ -128,12 +127,32 @@ export async function getExecutionStatus() {
   const chilizActive = automationWorkers.some((worker) => worker.active && worker.id.startsWith("chiliz:"));
   const solanaActive = automationWorkers.some((worker) => worker.active && worker.id.startsWith("solana:"));
   const sportpadSetting = results[14].results[0] as ProtocolSettingRow | undefined;
+  const without = (lane: { ready: boolean; missing: string[] }, removable: string[]) => {
+    const missing = lane.missing.filter((item) => !removable.includes(item));
+    return { ready: missing.length === 0, missing };
+  };
+  const automatedRewardWorkersActive = chilizActive && solanaActive;
+  const readiness = {
+    settlement: (chilizActive || solanaActive)
+      ? without(execution.readiness.settlement, ["fee collector signer"])
+      : execution.readiness.settlement,
+    rewards: automatedRewardWorkersActive
+      ? without(execution.readiness.rewards, ["reward vault signer"])
+      : execution.readiness.rewards,
+    claims: automatedRewardWorkersActive
+      ? without(execution.readiness.claims, ["reward vault signer"])
+      : execution.readiness.claims,
+    buyback: solanaActive
+      ? without(execution.readiness.buyback, ["buyback signer", ...(sportpadSetting?.value ? ["SPORTPAD mint"] : [])])
+      : execution.readiness.buyback,
+  };
+  const managedExecutionReady = Object.values(readiness).every((lane) => lane.ready);
 
   return {
     version: 1,
     mode: managedExecutionReady ? "execution_ready" : walletExecutionEnabled ? "wallet_confirmed" : "execution_locked",
     controls,
-    readiness: execution.readiness,
+    readiness,
     capabilities: {
       treasuryObserver: Boolean(execution.mainnet.rewardTreasury && execution.mainnet.buybackTreasury),
       finalizedPumpFeeIndexer: execution.flags.feeIndexerEnabled,
