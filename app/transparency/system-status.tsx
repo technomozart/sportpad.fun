@@ -18,7 +18,7 @@ type HealthResponse = {
 };
 
 type ProtocolResponse = {
-  mode: "execution_ready" | "execution_locked";
+  mode: "execution_ready" | "wallet_confirmed" | "execution_locked";
   readiness: Record<"settlement" | "rewards" | "buyback" | "claims", { ready: boolean; missing: string[] }>;
   capabilities: { treasuryObserver: boolean; finalizedPumpFeeIndexer: boolean; holderIndexerEnabled: boolean; signerProviderConfigured: boolean; workerAuthenticationConfigured: boolean; walletExecutionEnabled: boolean };
   counts: { feeEvents: number; settlements: number; rewardEpochs: number; confirmedClaims: number; protocolEvents: number; rewardVaults: number; rewardSwaps: number; buybackSwaps: number; sportpadBurns: number };

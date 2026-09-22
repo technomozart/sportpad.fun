@@ -9,7 +9,7 @@ import { collectAndSplitPumpMainnetFees } from "@/lib/client/pump-mainnet";
 
 type Lane = { ready: boolean; missing: string[] };
 type OperationsStatus = {
-  mode: "execution_ready" | "execution_locked";
+  mode: "execution_ready" | "wallet_confirmed" | "execution_locked";
   controls: {
     settlementPaused: boolean;
     rewardsPaused: boolean;
@@ -161,7 +161,7 @@ export function OperationsConsole() {
       {status ? (
         <>
           <div className="operations-summary">
-            <div><ShieldCheck /><span>Execution mode</span><strong>{status.mode === "execution_ready" ? "Ready" : "Locked"}</strong><small>Revision {status.controls.revision}, {status.controls.pauseReason.replaceAll("_", " ")}</small></div>
+            <div><ShieldCheck /><span>Execution mode</span><strong>{status.mode === "execution_ready" ? "Automated" : status.mode === "wallet_confirmed" ? "Wallet confirmed" : "Locked"}</strong><small>Revision {status.controls.revision}, {status.controls.pauseReason.replaceAll("_", " ")}</small></div>
             <div><Wallet /><span>Reward treasury</span><strong>{shortAddress(status.treasuries.reward)}</strong><small>{status.treasuries.observations.find((item) => item.purpose === "reward") ? sol(status.treasuries.observations.find((item) => item.purpose === "reward")!.balanceLamports) : "Not observed yet"}</small></div>
             <div><Wallet /><span>Buyback treasury</span><strong>{shortAddress(status.treasuries.buyback)}</strong><small>{status.treasuries.observations.find((item) => item.purpose === "buyback") ? sol(status.treasuries.observations.find((item) => item.purpose === "buyback")!.balanceLamports) : "Not observed yet"}</small></div>
             <div><ServerCog /><span>Protocol records</span><strong>{status.counts.protocolEvents}</strong><small>{status.counts.feeEvents} verified fee events, indexer {status.capabilities.finalizedPumpFeeIndexer ? "enabled" : "locked"}</small></div>

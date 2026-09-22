@@ -109,10 +109,12 @@ export async function getExecutionStatus() {
     rewardTreasury: row.mainnet_reward_treasury,
     buybackTreasury: row.mainnet_buyback_treasury,
   }));
+  const walletExecutionEnabled = !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused;
+  const managedExecutionReady = Object.values(execution.readiness).every((lane) => lane.ready);
 
   return {
     version: 1,
-    mode: Object.values(execution.readiness).every((lane) => lane.ready) ? "execution_ready" : "execution_locked",
+    mode: managedExecutionReady ? "execution_ready" : walletExecutionEnabled ? "wallet_confirmed" : "execution_locked",
     controls,
     readiness: execution.readiness,
     capabilities: {
@@ -121,7 +123,7 @@ export async function getExecutionStatus() {
       holderIndexerEnabled: execution.flags.holderIndexerEnabled,
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,
-      walletExecutionEnabled: !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused,
+      walletExecutionEnabled,
     },
     treasuries: {
       reward: execution.mainnet.rewardTreasury,
