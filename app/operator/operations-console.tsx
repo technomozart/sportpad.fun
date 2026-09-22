@@ -19,6 +19,7 @@ type OperationsStatus = {
   readiness: { settlement: Lane; rewards: Lane; buyback: Lane; claims: Lane };
   capabilities: {
     treasuryObserver: boolean;
+    finalizedPumpFeeIndexer: boolean;
     holderIndexerEnabled: boolean;
     signerProviderConfigured: boolean;
     workerAuthenticationConfigured: boolean;
@@ -84,7 +85,7 @@ export function OperationsConsole() {
     return () => window.clearTimeout(request);
   }, [load]);
 
-  async function act(action: "observe_treasuries" | "pause_all") {
+  async function act(action: "observe_treasuries" | "index_fees" | "pause_all") {
     setBusy(action);
     setError("");
     try {
@@ -111,6 +112,7 @@ export function OperationsConsole() {
         <div className="operations-actions">
           <Button variant="outline" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw /> Refresh</Button>
           <Button variant="outline" onClick={() => void act("observe_treasuries")} disabled={!status?.capabilities.treasuryObserver || Boolean(busy)}><Activity /> Observe treasuries</Button>
+          <Button variant="outline" onClick={() => void act("index_fees")} disabled={!status?.capabilities.finalizedPumpFeeIndexer || Boolean(busy)}><RefreshCw /> Index finalized fees</Button>
           <Button variant="outline" onClick={() => void act("pause_all")} disabled={Boolean(busy)}><CirclePause /> Pause all</Button>
         </div>
       </div>
@@ -122,13 +124,13 @@ export function OperationsConsole() {
             <div><ShieldCheck /><span>Execution mode</span><strong>{status.mode === "execution_ready" ? "Ready" : "Locked"}</strong><small>Revision {status.controls.revision}, {status.controls.pauseReason.replaceAll("_", " ")}</small></div>
             <div><Wallet /><span>Reward treasury</span><strong>{shortAddress(status.treasuries.reward)}</strong><small>{status.treasuries.observations.find((item) => item.purpose === "reward") ? sol(status.treasuries.observations.find((item) => item.purpose === "reward")!.balanceLamports) : "Not observed yet"}</small></div>
             <div><Wallet /><span>Buyback treasury</span><strong>{shortAddress(status.treasuries.buyback)}</strong><small>{status.treasuries.observations.find((item) => item.purpose === "buyback") ? sol(status.treasuries.observations.find((item) => item.purpose === "buyback")!.balanceLamports) : "Not observed yet"}</small></div>
-            <div><ServerCog /><span>Protocol records</span><strong>{status.counts.protocolEvents}</strong><small>{status.counts.feeEvents} fee events, {status.counts.settlements} settlements</small></div>
+            <div><ServerCog /><span>Protocol records</span><strong>{status.counts.protocolEvents}</strong><small>{status.counts.feeEvents} verified fee events, indexer {status.capabilities.finalizedPumpFeeIndexer ? "enabled" : "locked"}</small></div>
           </div>
           <div className="operations-lanes">
             {lanes.map(([name, lane]) => <article key={name} className={lane.ready ? "ready" : "locked"}><span>{name}</span><strong>{lane.ready ? "Ready" : "Locked"}</strong><small>{lane.ready ? "All required gates are satisfied" : lane.missing.join(", ")}</small></article>)}
           </div>
           <div className="operations-runs">
-            <div><strong>Recent worker runs</strong><small>The observer is read-only. Future transaction workers remain locked.</small></div>
+            <div><strong>Recent worker runs</strong><small>Treasury observation and fee indexing are read-only. Transaction workers remain locked.</small></div>
             {status.workerRuns.length ? status.workerRuns.map((run) => <div key={`${run.worker}:${run.startedAt}`}><code>{run.worker}</code><span>{run.state}</span><small>{run.startedAt}{run.errorCode ? `, ${run.errorCode}` : ""}</small></div>) : <p>No worker runs recorded yet.</p>}
           </div>
         </>

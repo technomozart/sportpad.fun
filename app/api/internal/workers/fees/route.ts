@@ -1,6 +1,6 @@
 import { readWorkerToken } from "@/lib/server/execution-config";
 import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth";
-import { observeTreasuries } from "@/lib/server/workers/treasury-observer";
+import { runFeeIndexer } from "@/lib/server/workers/fee-indexer";
 
 export async function POST(request: Request) {
   const configuredToken = readWorkerToken();
@@ -11,9 +11,9 @@ export async function POST(request: Request) {
   const suppliedToken = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
   if (!suppliedToken || !(await secureTokenEqual(configuredToken, suppliedToken))) return workerUnauthorized();
   try {
-    return Response.json({ ok: true, result: await observeTreasuries("internal") }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ ok: true, result: await runFeeIndexer("internal") }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    console.error("treasury_worker_failed", error instanceof Error ? error.message : "unknown");
-    return Response.json({ error: "Treasury observation failed." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    console.error("fee_indexer_failed", error instanceof Error ? error.message : "unknown");
+    return Response.json({ error: "Finalized Pump fee indexing failed." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

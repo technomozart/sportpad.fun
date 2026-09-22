@@ -38,6 +38,7 @@ export const DEFAULT_PROTOCOL_CONTROLS: ProtocolControls = {
 export function readExecutionConfig(controls: ProtocolControls = DEFAULT_PROTOCOL_CONTROLS) {
   const mainnet = readMainnetConfig();
   const flags = {
+    feeIndexerEnabled: enabled("SPORTPAD_FEE_INDEXER_ENABLED"),
     settlementEnabled: enabled("SPORTPAD_SETTLEMENT_ENABLED"),
     rewardsEnabled: enabled("SPORTPAD_REWARDS_ENABLED"),
     holderIndexerEnabled: enabled("SPORTPAD_HOLDER_INDEXER_ENABLED"),

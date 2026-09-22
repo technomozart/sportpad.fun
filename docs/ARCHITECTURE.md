@@ -4,9 +4,9 @@ Status: product interface, private draft storage, wallet authentication, legacy
 devnet testing, and a configuration-gated Pump mainnet launch path are
 implemented. Mainnet remains fail closed until two distinct public treasury
 addresses and the explicit execution flag are configured. The public addresses
-are configured, and a read-only treasury observer plus durable execution
-control plane are implemented. Automated fee collection, swaps, funded reward
-accounting, claims, and burns remain locked.
+are configured, and a read-only treasury observer, finalized Pump fee indexer,
+and durable execution control plane are implemented. Automated fee sweeping,
+swaps, funded reward accounting, claims, and burns remain locked.
 
 ## Implemented application path
 
@@ -154,6 +154,8 @@ not prove a funded reward vault or claim system.
   Migration `0010` adds pause controls, worker runs and leases, idempotent
   settlement steps, reward vaults, holder epoch positions, treasury
   observations, and a protocol event ledger.
+  Migration `0011` adds durable transaction-policy intents for the future
+  managed signer boundary.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
@@ -173,6 +175,14 @@ a server-only bearer token and performs finalized Helius balance reads for the
 two public treasuries. It writes observations, worker runs, and protocol events,
 but it cannot create or sign a transaction. The operator console can trigger
 the same read-only observation and can force all lanes into a paused state.
+
+`POST /api/internal/workers/fees` is an authenticated, leased, read-only
+indexer. It scans finalized activity for each published launch's exact Pump
+sharing-config PDA. It records a fee event and reconciled settlement only when
+the Pump program, instruction discriminator, mint, bonding curve, creator
+vault, SOL quote mint, ordered treasury recipients, and observed 80/20 lamport
+deltas all match. The cursor advances atomically with replay-safe records. A
+scan backlog or ambiguous transaction fails closed.
 
 Future transaction workers must record an idempotent `settlement_steps` row
 before submission, verify finality through an independent read path, and write
@@ -242,8 +252,8 @@ create a claim, buy SPORTPAD, or burn supply. Those are separate systems.
   completes. Example cards remain explicitly labeled and disappear only after
   the first approved receipt.
 - Mainnet launch construction, exact receipt verification, operations state,
-  pause controls, audit records, and read-only treasury observation are
-  implemented. Fee ingestion, custody, swaps, funded rewards, claims, SPORTPAD
+  pause controls, audit records, treasury observation, and finalized Pump fee
+  ingestion are implemented. Custody, swaps, funded rewards, claims, SPORTPAD
   mint and burn, external security review, and legal approval remain separate
   work.
 
@@ -275,13 +285,13 @@ authorities must be read from chain state.
 
 ## Remaining mainnet execution components
 
-The launch coordinator is implemented but configuration-gated. The remaining
-economic workers are not deployed today:
+The launch coordinator is implemented but configuration-gated. The finalized
+fee indexer is implemented as a read-only worker. The remaining transaction
+workers are not deployed today:
 
-1. **Fee indexer and settlement keeper**
-   - Observes pre-graduation and post-graduation creator-fee paths.
-   - Waits for Solana finalization and deduplicates by transaction signature and
-     instruction position.
+1. **Settlement keeper**
+   - Permissionlessly sweeps post-graduation Pump AMM creator fees and triggers
+     Pump's distribution instruction under a capped managed payer.
    - Uses Jupiter only after quote age, depth, slippage, price-impact, mint
      allowlist, and daily-limit checks pass.
 

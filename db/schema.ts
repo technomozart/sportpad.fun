@@ -362,6 +362,31 @@ export const treasuryObservations = sqliteTable(
   ],
 );
 
+export const transactionIntents = sqliteTable(
+  "transaction_intents",
+  {
+    id: text("id").primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    signerRole: text("signer_role").notNull(),
+    action: text("action").notNull(),
+    state: text("state").notNull().default("planned"),
+    expectedProgramsJson: text("expected_programs_json").notNull(),
+    expectedMintsJson: text("expected_mints_json").notNull(),
+    maximumSpendLamports: text("maximum_spend_lamports").notNull(),
+    providerRequestId: text("provider_request_id"),
+    txSignature: text("tx_signature"),
+    expiresAt: text("expires_at").notNull(),
+    errorCode: text("error_code"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_transaction_intents_idempotency").on(table.idempotencyKey),
+    uniqueIndex("idx_transaction_intents_signature").on(table.txSignature),
+    index("idx_transaction_intents_state_created").on(table.state, table.createdAt),
+  ],
+);
+
 export const launchModerationEvents = sqliteTable(
   "launch_moderation_events",
   {

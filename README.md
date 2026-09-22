@@ -66,6 +66,9 @@ Live site: [sportpad.fun](https://sportpad.fun)
   buyback addresses. It records real SOL balances and slots without possessing
   or using a signing key. The authenticated operator screen exposes the live
   gates, records, observations, and an emergency pause action.
+- A finalized Pump fee indexer that accepts only exact immutable 80/20
+  distributions for published launches and deduplicates them by signature and
+  instruction position. It cannot sign or move funds.
 
 The interface does not display fabricated market caps, trading volume, holder
 counts, reward balances, settlement events, or match results.
@@ -80,15 +83,15 @@ counts, reward balances, settlement events, or match results.
 | Pump mainnet launch | Implemented behind content approval, route validation, treasury configuration, and two explicit wallet approvals |
 | Public mainnet receipts | Independently verified onchain before publication; operator suspension supported |
 | Production activation | Public treasuries configured; explicit execution approval and capped mainnet canary still required |
-| Control plane and treasury observation | Implemented, read-only, and public-status visible |
-| Fee collection, swaps, rewards, claims, burns | Durable schemas and safety gates implemented; transaction workers remain locked |
+| Control plane, treasury observation, and fee ingestion | Implemented, read-only, and public-status visible |
+| Fee sweeping, swaps, rewards, claims, burns | Durable schemas and safety gates implemented; transaction workers remain locked |
 
 ## Still not deployed
 
-Automated fee collection, Jupiter swap execution, Fan Token vault custody,
+Automated fee sweeping, Jupiter swap execution, Fan Token vault custody,
 holder snapshots, claims, cross-chain replenishment, and SPORTPAD burns are not
 enabled. The control plane, worker authentication boundary, state machine,
-pause controls, and read-only treasury observer are deployed. A verified launch
+pause controls, treasury observer, and finalized fee indexer are deployed. A verified launch
 still proves only the Pump coin and immutable 80/20 fee destination; it does not
 create a reward balance or claim.
 
@@ -166,6 +169,8 @@ mainnet mint, transaction receipts, slots, frozen treasury addresses, and
 verification timestamp. Migration `0010_slimy_hercules.sql` adds protocol pause
 controls, worker runs and leases, idempotent settlement steps, reward vaults,
 holder epoch positions, treasury observations, and the protocol event ledger.
+Migration `0011_lumpy_mockingbird.sql` adds durable transaction-policy intents
+for the future managed signer boundary.
 
 ## Verification
 

@@ -10,6 +10,7 @@ export const NATIVE_MINT = new PublicKey("So111111111111111111111111111111111111
 export const PUMP_CREATE_V2_DISCRIMINATOR = Uint8Array.from([214, 144, 76, 236, 95, 139, 49, 180]);
 export const PUMP_CREATE_FEE_CONFIG_DISCRIMINATOR = Uint8Array.from([195, 78, 86, 76, 111, 52, 251, 213]);
 export const PUMP_UPDATE_FEE_SHARES_V2_DISCRIMINATOR = Uint8Array.from([111, 251, 49, 6, 78, 78, 106, 18]);
+export const PUMP_DISTRIBUTE_CREATOR_FEES_V2_DISCRIMINATOR = Uint8Array.from([255, 203, 19, 79, 244, 68, 8, 159]);
 export const PUMP_BONDING_CURVE_DISCRIMINATOR = Uint8Array.from([23, 183, 248, 55, 96, 216, 172, 96]);
 export const PUMP_SHARING_CONFIG_DISCRIMINATOR = Uint8Array.from([216, 74, 9, 0, 56, 140, 93, 75]);
 
@@ -90,6 +91,20 @@ export function feeSharingConfigPda(mint: PublicKey) {
   return PublicKey.findProgramAddressSync(
     [textEncoder.encode("sharing-config"), mint.toBytes()],
     PUMP_FEE_PROGRAM_ID,
+  )[0];
+}
+
+export function creatorVaultPda(creator: PublicKey) {
+  return PublicKey.findProgramAddressSync(
+    [textEncoder.encode("creator-vault"), creator.toBytes()],
+    PUMP_PROGRAM_ID,
+  )[0];
+}
+
+export function pumpEventAuthorityPda() {
+  return PublicKey.findProgramAddressSync(
+    [textEncoder.encode("__event_authority")],
+    PUMP_PROGRAM_ID,
   )[0];
 }
 

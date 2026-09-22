@@ -4,6 +4,7 @@ import { getExecutionStatus } from "@/lib/server/execution-status";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 import { isOperatorRequest } from "@/lib/server/publication-policy";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
+import { runFeeIndexer } from "@/lib/server/workers/fee-indexer";
 import { observeTreasuries } from "@/lib/server/workers/treasury-observer";
 
 function privateJson(body: unknown, status = 200) {
@@ -76,6 +77,10 @@ export async function POST(request: Request) {
   try {
     if (body.action === "observe_treasuries") {
       const result = await observeTreasuries("operator");
+      return privateJson({ ok: true, result, status: await getExecutionStatus() });
+    }
+    if (body.action === "index_fees") {
+      const result = await runFeeIndexer("operator");
       return privateJson({ ok: true, result, status: await getExecutionStatus() });
     }
     if (body.action === "pause_all") {

@@ -4,9 +4,9 @@ Mainnet launch execution is configuration-gated. Current integrations support
 private draft storage, signed Solana wallet sessions, wallet-approved Pump
 mainnet launches, exact finalized onchain verification, public launch receipts,
 official asset identity, and live read-only provider and reward-route checks.
-The durable execution control plane and read-only treasury observer are also
-implemented. Fee sweeping, swaps, vault custody, holder accounting workers,
-claims, and burns remain locked.
+The durable execution control plane, read-only treasury observer, and finalized
+Pump fee indexer are also implemented. Fee sweeping, swaps, vault custody,
+holder accounting workers, claims, and burns remain locked.
 
 ## Implemented infrastructure
 
@@ -24,6 +24,8 @@ claims, and burns remain locked.
   unique onchain identity constraints. `0010_slimy_hercules.sql` adds the
   execution control plane, worker records, settlement steps, reward accounting
   foundations, and treasury observations.
+  `0011_lumpy_mockingbird.sql` adds durable transaction-policy intents for the
+  future managed signer boundary.
 
 ### Execution workers and signer policy
 
@@ -34,6 +36,8 @@ claims, and burns remain locked.
   `SOLANA_REWARD_VAULT_KEY_REF`, and
   `SOLANA_BUYBACK_EXECUTOR_KEY_REF` are opaque provider references. They must
   never contain raw private keys or seed phrases.
+- `SPORTPAD_FEE_INDEXER_ENABLED` gates the read-only finalized Pump fee indexer.
+  It does not authorize signing or moving funds.
 - `SPORTPAD_SETTLEMENT_ENABLED`, `SPORTPAD_REWARDS_ENABLED`,
   `SPORTPAD_HOLDER_INDEXER_ENABLED`, `SPORTPAD_CLAIMS_ENABLED`, and
   `SPORTPAD_BUYBACK_ENABLED` independently gate each lane and default false.
@@ -42,6 +46,11 @@ claims, and burns remain locked.
   pause state all pass.
 - The treasury observer uses Helius only for finalized reads and writes real
   slots and lamport balances to D1. It has no signing capability.
+- The Pump fee indexer scans each published launch's immutable sharing-config
+  PDA. It accepts only finalized successful Pump distributions whose mint,
+  PDAs, account order, frozen treasury recipients, and lamport deltas prove the
+  exact 80/20 allocation. Signature plus instruction position makes ingestion
+  replay-safe. Ambiguous activity stops the cursor.
 
 ### Cloudflare R2
 
@@ -182,11 +191,12 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
   wallet sessions, Pump transaction construction, local pre-broadcast evidence,
   finalized mainnet verification, content moderation, public receipt filtering,
   operator suspension, read-only Helius and Jupiter checks, execution controls,
-  worker authentication, and read-only treasury observations.
+  worker authentication, treasury observations, and finalized Pump fee
+  ingestion.
 - Activation still requires an explicit deployment approval, managed signer
   integration, and a capped mainnet canary. The two public receive addresses are
   configured but are not automated signers.
-- Locked: fee sweeping or ingestion, treasury swap automation, funded reward
+- Locked: fee sweeping, treasury swap automation, funded reward
   vaults, holder accounting workers, claims, SPORTPAD mint or burns, and
   cross-chain replenishment.
 

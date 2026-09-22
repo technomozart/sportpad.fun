@@ -86,6 +86,7 @@ export async function getExecutionStatus() {
     readiness: execution.readiness,
     capabilities: {
       treasuryObserver: Boolean(execution.mainnet.rewardTreasury && execution.mainnet.buybackTreasury),
+      finalizedPumpFeeIndexer: execution.flags.feeIndexerEnabled,
       holderIndexerEnabled: execution.flags.holderIndexerEnabled,
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,

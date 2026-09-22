@@ -20,7 +20,7 @@ type HealthResponse = {
 type ProtocolResponse = {
   mode: "execution_ready" | "execution_locked";
   readiness: Record<"settlement" | "rewards" | "buyback" | "claims", { ready: boolean; missing: string[] }>;
-  capabilities: { treasuryObserver: boolean; holderIndexerEnabled: boolean; signerProviderConfigured: boolean; workerAuthenticationConfigured: boolean };
+  capabilities: { treasuryObserver: boolean; finalizedPumpFeeIndexer: boolean; holderIndexerEnabled: boolean; signerProviderConfigured: boolean; workerAuthenticationConfigured: boolean };
   counts: { feeEvents: number; settlements: number; rewardEpochs: number; confirmedClaims: number; protocolEvents: number; rewardVaults: number };
 };
 
@@ -85,6 +85,7 @@ export function SystemStatus() {
       <div><span className={protocol?.readiness.rewards.ready ? "healthy" : "warning"} /><strong>Reward inventory</strong><small>{protocol ? `${protocol.counts.rewardVaults} verified reward vaults` : "Loading inventory state"}</small><code>{protocol?.readiness.rewards.ready ? "READY" : "LOCKED"}</code></div>
       <div><span className={protocol?.readiness.claims.ready ? "healthy" : "warning"} /><strong>Claims</strong><small>{protocol ? `${protocol.counts.confirmedClaims} confirmed claims` : "Loading claim state"}</small><code>{protocol?.readiness.claims.ready ? "READY" : "LOCKED"}</code></div>
       <div><span className={protocol?.capabilities.treasuryObserver ? "healthy" : "neutral"} /><strong>Treasury observer</strong><small>{protocol?.capabilities.treasuryObserver ? "Finalized read-only balance checks available" : "Treasury addresses required"}</small><code>{protocol?.capabilities.treasuryObserver ? "AVAILABLE" : "LOCKED"}</code></div>
+      <div><span className={protocol?.capabilities.finalizedPumpFeeIndexer ? "healthy" : "neutral"} /><strong>Pump fee indexer</strong><small>{protocol?.capabilities.finalizedPumpFeeIndexer ? "Finalized exact 80/20 distributions are indexed" : "Read-only worker is disabled"}</small><code>{protocol?.capabilities.finalizedPumpFeeIndexer ? "ENABLED" : "LOCKED"}</code></div>
       <div><span className="neutral" /><strong>Cross-chain</strong><small>No replenishment route is enabled</small><code>NOT ENABLED</code></div>
     </div>
   );
