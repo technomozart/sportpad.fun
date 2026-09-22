@@ -5,6 +5,7 @@ import { SiteChrome } from "@/components/site-chrome";
 import { isOperatorUserId } from "@/lib/server/publication-policy";
 import { ModerationConsole } from "./moderation-console";
 import { OperationsConsole } from "./operations-console";
+import { RewardConsole } from "./reward-console";
 import { SettlementConsole } from "./settlement-console";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function OperatorPage() {
         </div>
         <OperationsConsole />
         <SettlementConsole />
+        <RewardConsole />
         <div className="operator-section-heading"><p className="section-eyebrow">Launch safety</p><h2>Moderation queue</h2></div>
         <ModerationConsole />
       </main>

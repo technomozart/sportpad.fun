@@ -170,7 +170,7 @@ export function OperationsConsole() {
             {lanes.map(([name, lane]) => <article key={name} className={lane.ready ? "ready" : "locked"}><span>{name}</span><strong>{lane.ready ? "Ready" : "Locked"}</strong><small>{lane.ready ? "All required gates are satisfied" : lane.missing.join(", ")}</small></article>)}
           </div>
           <div className="operations-runs">
-            <div><strong>Recent worker runs</strong><small>Treasury observation and fee indexing are read-only. Transaction workers remain locked.</small></div>
+            <div><strong>Recent worker runs</strong><small>Treasury observation, fee indexing, and holder indexing are read-only. Treasury transactions remain wallet-confirmed.</small></div>
             {status.workerRuns.length ? status.workerRuns.map((run) => <div key={`${run.worker}:${run.startedAt}`}><code>{run.worker}</code><span>{run.state}</span><small>{run.startedAt}{run.errorCode ? `, ${run.errorCode}` : ""}</small></div>) : <p>No worker runs recorded yet.</p>}
           </div>
           <div className="operations-settlements">

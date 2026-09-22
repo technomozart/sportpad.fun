@@ -1,12 +1,11 @@
 # SPORTPAD architecture
 
-Status: product interface, private draft storage, wallet authentication, legacy
-devnet testing, and a configuration-gated Pump mainnet launch path are
-implemented. Mainnet remains fail closed until two distinct public treasury
-addresses and the explicit execution flag are configured. The public addresses
-are configured, and a read-only treasury observer, finalized Pump fee indexer,
-and durable execution control plane are implemented. Automated fee sweeping,
-swaps, funded reward accounting, claims, and burns remain locked.
+Status: product interface, private draft storage, wallet authentication, Pump
+mainnet launch, immutable 80/20 routing, finalized fee indexing, exact Jupiter
+swaps, holder indexing, time-weighted allocations, Fan Token payouts, and
+SPORTPAD burn transactions are implemented. Every treasury transaction is
+wallet-confirmed. Unattended signing remains locked, and SPORTPAD buyback waits
+for the public SPORTPAD mint address.
 
 ## Implemented application path
 
@@ -283,15 +282,14 @@ For a funded reward epoch `F` and wallet token-seconds `t_i`:
 All onchain quantities must remain atomic-unit integer strings. Decimals and
 authorities must be read from chain state.
 
-## Remaining mainnet execution components
+## Mainnet execution components
 
-The launch coordinator is implemented but configuration-gated. The finalized
-fee indexer is implemented as a read-only worker. The remaining transaction
-workers are not deployed today:
+The following components are deployed behind the operator allowlist, database
+pause controls, exact transaction intents, and matching treasury wallets:
 
 1. **Settlement keeper**
    - Permissionlessly sweeps post-graduation Pump AMM creator fees and triggers
-     Pump's distribution instruction under a capped managed payer.
+     Pump's distribution instruction after the operator wallet approves it.
    - Uses Jupiter only after quote age, depth, slippage, price-impact, mint
      allowlist, and daily-limit checks pass.
 
@@ -303,8 +301,8 @@ workers are not deployed today:
 
 3. **SPORTPAD burn executor**
    - Buys the deployed SPORTPAD mint from the 20% share.
-   - Calls SPL `BurnChecked`, waits for finalization, and verifies the supply
-     reduction.
+   - Calls an exact SPL burn after the buyback wallet approves it.
+   - Remains inactive until `SPORTPAD_MINT_ADDRESS` identifies the deployed token.
 
 4. **Optional cross-chain replenishment**
    - Remains a treasury inventory operation, not a user claim dependency.

@@ -19,7 +19,7 @@ export default function HowItWorksPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="How SportPad works" title="From creator fees to official Fan Token rewards, with every state exposed." copy="Mainnet Pump launches, the immutable 80/20 fee route, finalized fee indexing, wallet-confirmed Fan Token swaps, and SPORTPAD buyback and burn controls are deployed. Holder allocation epochs and claims remain locked until verified reward inventory exists.">
+        <PageIntro kicker="How SportPad works" title="From creator fees to official Fan Token rewards, with every state exposed." copy="Mainnet Pump launches, the immutable 80/20 fee route, finalized fee indexing, wallet-confirmed swaps, time-weighted holder epochs, Fan Token payouts, and SPORTPAD burn controls are deployed. Every treasury spend still requires the matching wallet to review and sign.">
           <div className="route-mini"><span>TRADE</span><ArrowRight /><strong>80 / 20</strong><ArrowRight /><span>REWARD + BURN</span></div>
         </PageIntro>
         <SafetyNotice>Linked does not mean paired. A community coin usually trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token.</SafetyNotice>

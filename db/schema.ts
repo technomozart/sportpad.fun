@@ -178,12 +178,22 @@ export const rewardEpochs = sqliteTable(
     endsAt: text("ends_at").notNull(),
     cutoffSlot: integer("cutoff_slot"),
     fundedAmountAtomic: text("funded_amount_atomic").notNull().default("0"),
+    allocatedAmountAtomic: text("allocated_amount_atomic").notNull().default("0"),
+    dustAmountAtomic: text("dust_amount_atomic").notNull().default("0"),
+    rewardDecimals: integer("reward_decimals"),
     merkleRoot: text("merkle_root"),
     allocationHash: text("allocation_hash"),
     state: text("state").notNull().default("accruing"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    closedAt: text("closed_at"),
   },
-  (table) => [index("idx_reward_epochs_launch_state").on(table.launchId, table.state)],
+  (table) => [
+    index("idx_reward_epochs_launch_state").on(table.launchId, table.state),
+    uniqueIndex("idx_reward_epochs_one_active")
+      .on(table.launchId)
+      .where(sql`${table.state} IN ('accruing', 'allocating')`),
+  ],
 );
 
 export const rewardClaims = sqliteTable(
@@ -194,6 +204,7 @@ export const rewardClaims = sqliteTable(
     solanaWallet: text("solana_wallet").notNull(),
     amountAtomic: text("amount_atomic").notNull(),
     claimSignature: text("claim_signature"),
+    confirmedSlot: integer("confirmed_slot"),
     state: text("state").notNull().default("claimable"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -311,6 +322,7 @@ export const holderEpochPositions = sqliteTable(
     tokenSecondsAtomic: text("token_seconds_atomic").notNull().default("0"),
     endingBalanceAtomic: text("ending_balance_atomic").notNull().default("0"),
     lastObservedSlot: integer("last_observed_slot"),
+    lastObservedAt: integer("last_observed_at"),
     excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
     exclusionReason: text("exclusion_reason"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -368,6 +380,7 @@ export const transactionIntents = sqliteTable(
     id: text("id").primaryKey(),
     idempotencyKey: text("idempotency_key").notNull(),
     settlementId: text("settlement_id").references(() => settlements.id),
+    claimId: text("claim_id").references(() => rewardClaims.id),
     signerRole: text("signer_role").notNull(),
     signerAddress: text("signer_address"),
     action: text("action").notNull(),
@@ -394,6 +407,7 @@ export const transactionIntents = sqliteTable(
     uniqueIndex("idx_transaction_intents_signature").on(table.txSignature),
     index("idx_transaction_intents_state_created").on(table.state, table.createdAt),
     index("idx_transaction_intents_settlement_action").on(table.settlementId, table.action),
+    index("idx_transaction_intents_claim_action").on(table.claimId, table.action),
   ],
 );
 

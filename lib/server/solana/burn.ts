@@ -6,7 +6,9 @@ import { associatedTokenAddress, buildSplBurnInstruction } from "@/lib/protocol/
 import { getMainnetConnection } from "@/lib/server/solana/devnet";
 
 async function sha256Hex(bytes: Uint8Array) {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -39,7 +41,7 @@ export async function prepareSportpadBurn({
     ComputeBudgetProgram.setComputeUnitLimit({ units: 60_000 }),
     buildSplBurnInstruction({ mint, owner, amountAtomic: BigInt(amountAtomic), tokenProgram }),
   );
-  const transactionBase64 = transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64");
+  const transactionBase64 = Buffer.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })).toString("base64");
   return {
     transactionBase64,
     transactionMessageHash: await sha256Hex(transaction.serializeMessage()),

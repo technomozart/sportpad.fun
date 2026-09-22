@@ -4,9 +4,10 @@ Mainnet launch execution is configuration-gated. Current integrations support
 private draft storage, signed Solana wallet sessions, wallet-approved Pump
 mainnet launches, exact finalized onchain verification, public launch receipts,
 official asset identity, and live read-only provider and reward-route checks.
-The durable execution control plane, read-only treasury observer, and finalized
-Pump fee indexer are also implemented. Fee sweeping, swaps, vault custody,
-holder accounting workers, claims, and burns remain locked.
+The durable execution control plane, treasury observer, finalized Pump fee
+indexer, wallet-confirmed fee distribution and swaps, holder accounting,
+inventory-backed allocations, Fan Token payouts, and SPORTPAD burn builder are
+implemented. Unattended signing remains locked.
 
 ## Implemented infrastructure
 
@@ -25,7 +26,10 @@ holder accounting workers, claims, and burns remain locked.
   execution control plane, worker records, settlement steps, reward accounting
   foundations, and treasury observations.
   `0011_lumpy_mockingbird.sql` adds durable transaction-policy intents for the
-  future managed signer boundary.
+  managed signer boundary. `0012_exotic_peter_parker.sql` adds exact settlement
+  transaction evidence. `0013_bright_molten_man.sql` adds finalized holder
+  observation time, allocation totals, payout intents, and confirmed payout
+  slots.
 
 ### Execution workers and signer policy
 
@@ -51,6 +55,14 @@ holder accounting workers, claims, and burns remain locked.
   PDAs, account order, frozen treasury recipients, and lamport deltas prove the
   exact 80/20 allocation. Signature plus instruction position makes ingestion
   replay-safe. Ambiguous activity stops the cursor.
+- The holder indexer aggregates finalized Helius token accounts by on-curve
+  owner, excludes creator and protocol-controlled wallets, accrues the previous
+  balance over each measured interval, and records a deterministic snapshot hash.
+- Reward epochs can allocate only verified Jupiter output not already funded to
+  another epoch and not reserved for an unpaid allocation.
+- Fan Token payouts are exact `TransferChecked` transactions. The server binds
+  the mint, treasury, recipient, amount, token program, blockhash, and message
+  hash before the treasury wallet may sign.
 
 ### Cloudflare R2
 

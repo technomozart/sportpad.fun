@@ -88,14 +88,14 @@ function settlementQuery(suffix = "") {
 }
 
 async function controls() {
-  return env.DB.prepare(`
+  return env.DB!.prepare(`
     SELECT settlement_paused, rewards_paused, buyback_paused, pause_reason
     FROM protocol_controls WHERE key = 'global' LIMIT 1
   `).first<ControlRow>();
 }
 
 async function settlementById(id: string) {
-  return env.DB.prepare(settlementQuery("AND s.id = ?1 LIMIT 1")).bind(id).first<SettlementRow>();
+  return env.DB!.prepare(settlementQuery("AND s.id = ?1 LIMIT 1")).bind(id).first<SettlementRow>();
 }
 
 function requireManualLane(control: ControlRow | null, leg: "reward" | "buyback") {

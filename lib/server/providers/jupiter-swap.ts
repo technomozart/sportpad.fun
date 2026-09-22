@@ -43,7 +43,9 @@ function decodeUnsignedTransaction(value: unknown, taker: string) {
 }
 
 async function sha256Hex(bytes: Uint8Array) {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

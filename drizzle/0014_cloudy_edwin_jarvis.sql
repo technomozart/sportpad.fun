@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `idx_reward_epochs_one_active` ON `reward_epochs` (`launch_id`) WHERE "reward_epochs"."state" IN ('accruing', 'allocating');

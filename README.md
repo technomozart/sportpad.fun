@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml/badge.svg)](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml)
 [![Live site](https://img.shields.io/badge/live-sportpad.fun-9cff57)](https://sportpad.fun)
-![Mainnet gated](https://img.shields.io/badge/mainnet-config_gated-ffd166)
+![Mainnet live](https://img.shields.io/badge/mainnet-wallet_confirmed-9cff57)
 
 SPORTPAD is a sports-native Solana launchpad. Creators can save a private
 community-token draft, choose an official Fan Token reward, pass content review,
@@ -69,6 +69,21 @@ Live site: [sportpad.fun](https://sportpad.fun)
 - A finalized Pump fee indexer that accepts only exact immutable 80/20
   distributions for published launches and deduplicates them by signature and
   instruction position. It cannot sign or move funds.
+- Exact wallet-confirmed Pump fee collection and immutable 80/20 distribution.
+  The app verifies the active sharing configuration and revoked admin before the
+  operator wallet can sign.
+- Exact Jupiter Swap V2 intents for buying the selected official Fan Token with
+  the 80% treasury and SPORTPAD with the 20% treasury. Orders are exact-in,
+  capped at 1% slippage and 5% price impact, message-hash bound, and submitted
+  only after the matching treasury wallet signs.
+- A finalized Helius holder indexer for active reward epochs. It aggregates all
+  token accounts by on-curve wallet, excludes protocol and treasury accounts,
+  accrues time-weighted token-seconds, and records a hash for every snapshot.
+- Deterministic Fan Token allocations backed by acquired inventory, plus exact
+  wallet-confirmed SPL Token payouts with idempotent recipient token-account
+  creation and confirmed Solana receipts.
+- Exact SPORTPAD burns for bought output once the public SPORTPAD mint address
+  is configured. The buyback wallet reviews and signs each permanent burn.
 
 The interface does not display fabricated market caps, trading volume, holder
 counts, reward balances, settlement events, or match results.
@@ -82,21 +97,24 @@ counts, reward balances, settlement events, or match results.
 | Wallet authentication | Implemented for Solana mainnet wallets |
 | Pump mainnet launch | Implemented behind content approval, route validation, treasury configuration, and two explicit wallet approvals |
 | Public mainnet receipts | Independently verified onchain before publication; operator suspension supported |
-| Production activation | Public treasuries configured; explicit execution approval and capped mainnet canary still required |
-| Control plane, treasury observation, and fee ingestion | Implemented, read-only, and public-status visible |
-| Fee sweeping, swaps, rewards, claims, burns | Durable schemas and safety gates implemented; transaction workers remain locked |
+| Production activation | Mainnet enabled; public treasuries, Helius, Jupiter, moderation, and worker authentication configured |
+| Control plane, treasury observation, and fee ingestion | Implemented and public-status visible |
+| Fee sweeping and swaps | Wallet-confirmed execution deployed |
+| Holder rewards and payouts | Finalized indexing, time-weighted allocation, wallet dashboard, and wallet-confirmed Fan Token payouts deployed |
+| SPORTPAD buyback and burn | Execution deployed; waiting only for the public SPORTPAD mint address |
 
-## Still not deployed
+## Remaining external setup
 
-Automated fee sweeping, Jupiter swap execution, Fan Token vault custody,
-holder snapshots, claims, cross-chain replenishment, and SPORTPAD burns are not
-enabled. The control plane, worker authentication boundary, state machine,
-pause controls, treasury observer, and finalized fee indexer are deployed. A verified launch
-still proves only the Pump coin and immutable 80/20 fee destination; it does not
-create a reward balance or claim.
+Unattended treasury signing is intentionally not enabled. Collection, swaps,
+Fan Token payouts, and burns require the matching treasury wallet to review and
+sign the exact transaction. This keeps seed phrases and raw private keys out of
+the application.
 
-Those later capabilities must remain locked until signer isolation, dependency
-review, legal and commercial review, monitoring, capped canaries, and an
+The 20% buyback can start as soon as the public SPORTPAD mint address is added to
+the production environment. Cross-chain inventory replenishment is not required
+for Fan Tokens with executable Solana liquidity, and remains a later option for
+catalog assets without a Solana route. Unattended execution should remain locked
+until signer isolation, legal review, monitoring, capped canaries, and an
 external security audit are complete.
 
 Raw private keys and seed phrases do not belong in this repository, chat, or
@@ -112,7 +130,7 @@ HSM, or MPC references.
 | `/launches/[slug]` | Public mainnet receipt, legacy devnet receipt, or clearly marked example detail |
 | `/launch` | Private four-step draft builder, moderation status, route validation, image upload, and gated Pump mainnet launcher |
 | `/operator` | Authenticated infrastructure console and moderation queue; unavailable to users outside the exact allowlist |
-| `/rewards` | Empty reward state until the reward system is deployed |
+| `/rewards` | Wallet-specific indexed positions, finalized allocations, and payout receipts |
 | `/fan-tokens` | Official Fan Token catalog and Solana token-address registry |
 | `/matchday` | Empty matchday state until a real data source is connected |
 | `/how-it-works` | Planned accounting and acquisition mechanics |
@@ -170,7 +188,12 @@ verification timestamp. Migration `0010_slimy_hercules.sql` adds protocol pause
 controls, worker runs and leases, idempotent settlement steps, reward vaults,
 holder epoch positions, treasury observations, and the protocol event ledger.
 Migration `0011_lumpy_mockingbird.sql` adds durable transaction-policy intents
-for the future managed signer boundary.
+for the managed signer boundary. Migration `0012_exotic_peter_parker.sql` binds
+exact Jupiter and burn transactions to settlement intents. Migration
+`0013_bright_molten_man.sql` adds holder observation timestamps, finalized
+allocation fields, reward-payout intents, confirmed payout slots, and enables
+wallet-confirmed execution after deployment. Migration
+`0014_cloudy_edwin_jarvis.sql` prevents concurrent active epochs for one launch.
 
 ## Verification
 

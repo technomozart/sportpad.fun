@@ -66,7 +66,7 @@ export default function SportTokenPage() {
           <div><span>Mint</span><strong>Not deployed</strong><small>No official address</small></div>
           <div><span>Total supply</span><strong>Not defined</strong><small>Tokenomics pending review</small></div>
           <div><span>Official Fan Token rewards</span><strong>80% planned</strong><small>No reward vaults deployed</small></div>
-          <div><span>SPORTPAD buyback + burn</span><strong>20% planned</strong><small>Execution not deployed</small></div>
+          <div><span>SPORTPAD buyback + burn</span><strong>20% route deployed</strong><small>Buyback activates when the SPORTPAD mint is configured</small></div>
         </section>
 
         <section className="page-section">
