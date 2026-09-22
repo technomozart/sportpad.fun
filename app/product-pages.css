@@ -1337,13 +1337,59 @@
 .operator-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .operator-actions button { flex: 1; }
 .operator-last-note { display: block; margin-top: 12px; color: rgba(255,255,255,.48); font-size: .72rem; }
+.operations-console { display: grid; gap: 18px; margin-bottom: 68px; }
+.operations-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.operations-heading > div:first-child { max-width: 720px; }
+.operations-heading h2,
+.operator-section-heading h2 { margin-top: 8px; font-size: clamp(1.8rem,3vw,2.8rem); letter-spacing: -.045em; }
+.operations-heading p:last-child { margin-top: 10px; color: rgba(255,255,255,.56); font-size: 1rem; line-height: 1.65; }
+.operations-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.operations-actions button { min-height: 42px; font-size: .88rem; }
+.operations-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); overflow: hidden; border: 1px solid rgba(255,255,255,.085); border-radius: 20px; background: rgba(255,255,255,.02); }
+.operations-summary > div { display: grid; grid-template-columns: 26px 1fr; gap: 5px 9px; min-width: 0; padding: 20px; border-right: 1px solid rgba(255,255,255,.07); }
+.operations-summary > div:last-child { border-right: 0; }
+.operations-summary svg { grid-row: 1 / 4; width: 20px; color: #9cff57; }
+.operations-summary span,
+.operations-summary small { color: rgba(255,255,255,.5); font-size: .82rem; }
+.operations-summary strong { overflow: hidden; font-size: 1.05rem; text-overflow: ellipsis; white-space: nowrap; }
+.operations-lanes { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.operations-lanes article { display: grid; gap: 7px; min-height: 135px; align-content: start; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 17px; background: rgba(255,255,255,.02); }
+.operations-lanes article.ready { border-color: rgba(156,255,87,.28); background: rgba(156,255,87,.045); }
+.operations-lanes span { color: #9cff57; font-size: .78rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.operations-lanes strong { font-size: 1.05rem; }
+.operations-lanes small { color: rgba(255,255,255,.48); font-size: .82rem; line-height: 1.55; }
+.operations-runs { overflow: hidden; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; background: rgba(255,255,255,.018); }
+.operations-runs > div { display: grid; grid-template-columns: minmax(180px,1fr) 120px minmax(220px,1fr); align-items: center; gap: 16px; padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.operations-runs > div:first-child { grid-template-columns: 1fr; gap: 4px; background: rgba(255,255,255,.025); }
+.operations-runs > div:last-child { border-bottom: 0; }
+.operations-runs code,
+.operations-runs span,
+.operations-runs small,
+.operations-runs p { font-size: .82rem; }
+.operations-runs span { color: #9cff57; text-transform: uppercase; }
+.operations-runs small,
+.operations-runs p { color: rgba(255,255,255,.48); }
+.operations-runs p { padding: 18px; }
+.operator-section-heading { margin-bottom: 18px; }
 
 @media (max-width: 850px) {
   .operator-grid { grid-template-columns: 1fr; }
+  .operations-heading { align-items: stretch; flex-direction: column; }
+  .operations-actions { justify-content: flex-start; }
+  .operations-summary,
+  .operations-lanes { grid-template-columns: 1fr 1fr; }
+  .operations-summary > div:nth-child(2) { border-right: 0; }
+  .operations-summary > div:nth-child(-n+2) { border-bottom: 1px solid rgba(255,255,255,.07); }
 }
 
 @media (max-width: 560px) {
   .operator-reason { grid-template-columns: 1fr; }
   .operator-card dl > div { grid-template-columns: 1fr; gap: 4px; }
   .operator-card dd { text-align: left; }
+  .operations-actions { display: grid; grid-template-columns: 1fr; }
+  .operations-summary,
+  .operations-lanes { grid-template-columns: 1fr; }
+  .operations-summary > div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .operations-summary > div:last-child { border-bottom: 0; }
+  .operations-runs > div { grid-template-columns: 1fr; gap: 5px; }
 }

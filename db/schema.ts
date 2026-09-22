@@ -210,6 +210,158 @@ export const serviceCursors = sqliteTable("service_cursors", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const protocolControls = sqliteTable("protocol_controls", {
+  key: text("key").primaryKey(),
+  settlementPaused: integer("settlement_paused", { mode: "boolean" }).notNull().default(true),
+  rewardsPaused: integer("rewards_paused", { mode: "boolean" }).notNull().default(true),
+  buybackPaused: integer("buyback_paused", { mode: "boolean" }).notNull().default(true),
+  pauseReason: text("pause_reason").notNull().default("signer_not_configured"),
+  revision: integer("revision").notNull().default(0),
+  updatedByUserId: text("updated_by_user_id"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const workerRuns = sqliteTable(
+  "worker_runs",
+  {
+    id: text("id").primaryKey(),
+    worker: text("worker").notNull(),
+    trigger: text("trigger").notNull(),
+    state: text("state").notNull().default("running"),
+    itemsSeen: integer("items_seen").notNull().default(0),
+    itemsChanged: integer("items_changed").notNull().default(0),
+    cursorBefore: text("cursor_before"),
+    cursorAfter: text("cursor_after"),
+    errorCode: text("error_code"),
+    startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    index("idx_worker_runs_worker_started").on(table.worker, table.startedAt),
+    index("idx_worker_runs_state_started").on(table.state, table.startedAt),
+  ],
+);
+
+export const workerLeases = sqliteTable("worker_leases", {
+  key: text("key").primaryKey(),
+  owner: text("owner").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  acquiredAt: integer("acquired_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const settlementSteps = sqliteTable(
+  "settlement_steps",
+  {
+    id: text("id").primaryKey(),
+    settlementId: text("settlement_id").notNull().references(() => settlements.id),
+    stage: text("stage").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    state: text("state").notNull().default("planned"),
+    inputMint: text("input_mint"),
+    outputMint: text("output_mint"),
+    inputAmountAtomic: text("input_amount_atomic"),
+    outputAmountAtomic: text("output_amount_atomic"),
+    minimumOutputAtomic: text("minimum_output_atomic"),
+    providerRequestId: text("provider_request_id"),
+    txSignature: text("tx_signature"),
+    verifiedSlot: integer("verified_slot"),
+    attempt: integer("attempt").notNull().default(0),
+    errorCode: text("error_code"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_settlement_steps_idempotency").on(table.idempotencyKey),
+    uniqueIndex("idx_settlement_steps_signature").on(table.txSignature),
+    index("idx_settlement_steps_settlement_stage").on(table.settlementId, table.stage),
+    index("idx_settlement_steps_state").on(table.state),
+  ],
+);
+
+export const rewardVaults = sqliteTable(
+  "reward_vaults",
+  {
+    id: text("id").primaryKey(),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    rewardMint: text("reward_mint").notNull(),
+    ownerAddress: text("owner_address").notNull(),
+    tokenAccount: text("token_account"),
+    state: text("state").notNull().default("observed"),
+    inventoryAtomic: text("inventory_atomic").notNull().default("0"),
+    reservedAtomic: text("reserved_atomic").notNull().default("0"),
+    allocatedAtomic: text("allocated_atomic").notNull().default("0"),
+    claimedAtomic: text("claimed_atomic").notNull().default("0"),
+    lastObservedSlot: integer("last_observed_slot"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_reward_vaults_launch_mint").on(table.launchId, table.rewardMint),
+    index("idx_reward_vaults_state").on(table.state),
+  ],
+);
+
+export const holderEpochPositions = sqliteTable(
+  "holder_epoch_positions",
+  {
+    id: text("id").primaryKey(),
+    epochId: text("epoch_id").notNull().references(() => rewardEpochs.id),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    wallet: text("wallet").notNull(),
+    tokenSecondsAtomic: text("token_seconds_atomic").notNull().default("0"),
+    endingBalanceAtomic: text("ending_balance_atomic").notNull().default("0"),
+    lastObservedSlot: integer("last_observed_slot"),
+    excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
+    exclusionReason: text("exclusion_reason"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_holder_positions_epoch_wallet").on(table.epochId, table.wallet),
+    index("idx_holder_positions_launch_wallet").on(table.launchId, table.wallet),
+  ],
+);
+
+export const protocolEvents = sqliteTable(
+  "protocol_events",
+  {
+    id: text("id").primaryKey(),
+    category: text("category").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    eventType: text("event_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    state: text("state").notNull(),
+    signature: text("signature"),
+    slot: integer("slot"),
+    amountAtomic: text("amount_atomic"),
+    mint: text("mint"),
+    evidenceHash: text("evidence_hash"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_protocol_events_idempotency").on(table.idempotencyKey),
+    index("idx_protocol_events_category_created").on(table.category, table.createdAt),
+    index("idx_protocol_events_entity").on(table.entityType, table.entityId),
+  ],
+);
+
+export const treasuryObservations = sqliteTable(
+  "treasury_observations",
+  {
+    id: text("id").primaryKey(),
+    purpose: text("purpose").notNull(),
+    address: text("address").notNull(),
+    balanceLamports: text("balance_lamports").notNull(),
+    slot: integer("slot").notNull(),
+    observedAt: text("observed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_treasury_observations_purpose_slot").on(table.purpose, table.slot),
+    index("idx_treasury_observations_observed").on(table.observedAt),
+  ],
+);
+
 export const launchModerationEvents = sqliteTable(
   "launch_moderation_events",
   {

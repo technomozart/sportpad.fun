@@ -58,6 +58,14 @@ Live site: [sportpad.fun](https://sportpad.fun)
   output, and cached health responses.
 - Integer-safe accounting helpers and versioned D1 schemas for later fee,
   settlement, epoch, and claim processing.
+- A durable execution control plane with independently paused settlement,
+  rewards, claims, and buyback lanes; idempotent settlement steps; worker-run
+  history; reward-vault accounting; holder epoch positions; and a protocol
+  event ledger.
+- A finalized, read-only treasury observer for the configured reward and
+  buyback addresses. It records real SOL balances and slots without possessing
+  or using a signing key. The authenticated operator screen exposes the live
+  gates, records, observations, and an emergency pause action.
 
 The interface does not display fabricated market caps, trading volume, holder
 counts, reward balances, settlement events, or match results.
@@ -71,15 +79,18 @@ counts, reward balances, settlement events, or match results.
 | Wallet authentication | Implemented for Solana mainnet wallets |
 | Pump mainnet launch | Implemented behind content approval, route validation, treasury configuration, and two explicit wallet approvals |
 | Public mainnet receipts | Independently verified onchain before publication; operator suspension supported |
-| Production activation | Waiting for two distinct public Solana treasury addresses and `MAINNET_EXECUTION_ENABLED=true` |
-| Fee collection, swaps, rewards, claims, burns | Not deployed |
+| Production activation | Public treasuries configured; explicit execution approval and capped mainnet canary still required |
+| Control plane and treasury observation | Implemented, read-only, and public-status visible |
+| Fee collection, swaps, rewards, claims, burns | Durable schemas and safety gates implemented; transaction workers remain locked |
 
 ## Still not deployed
 
 Automated fee collection, Jupiter swap execution, Fan Token vault custody,
-holder snapshots, reward epochs, claims, cross-chain replenishment, and
-SPORTPAD burns are not deployed. A verified launch proves the Pump coin and
-immutable 80/20 fee destination; it does not create a reward balance or claim.
+holder snapshots, claims, cross-chain replenishment, and SPORTPAD burns are not
+enabled. The control plane, worker authentication boundary, state machine,
+pause controls, and read-only treasury observer are deployed. A verified launch
+still proves only the Pump coin and immutable 80/20 fee destination; it does not
+create a reward balance or claim.
 
 Those later capabilities must remain locked until signer isolation, dependency
 review, legal and commercial review, monitoring, capped canaries, and an
@@ -97,7 +108,7 @@ HSM, or MPC references.
 | `/discover` | Search verified launches, with examples only when the feed is empty |
 | `/launches/[slug]` | Public mainnet receipt, legacy devnet receipt, or clearly marked example detail |
 | `/launch` | Private four-step draft builder, moderation status, route validation, image upload, and gated Pump mainnet launcher |
-| `/operator` | Authenticated operator moderation queue; unavailable to users outside the exact allowlist |
+| `/operator` | Authenticated infrastructure console and moderation queue; unavailable to users outside the exact allowlist |
 | `/rewards` | Empty reward state until the reward system is deployed |
 | `/fan-tokens` | Official Fan Token catalog and Solana token-address registry |
 | `/matchday` | Empty matchday state until a real data source is connected |
@@ -152,7 +163,9 @@ metadata, the immutable moderation-event audit trail, fixed-window rate-limit
 storage, and the database trigger that records each versioned moderation
 transition atomically. Migration `0009_confused_ender_wiggin.sql` adds the
 mainnet mint, transaction receipts, slots, frozen treasury addresses, and
-verification timestamp.
+verification timestamp. Migration `0010_slimy_hercules.sql` adds protocol pause
+controls, worker runs and leases, idempotent settlement steps, reward vaults,
+holder epoch positions, treasury observations, and the protocol event ledger.
 
 ## Verification
 

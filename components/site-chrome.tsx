@@ -164,7 +164,7 @@ function AccountButton({ pathname }: { pathname: string }) {
         <Button asChild variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
           <a href={signOutPath}><LogOut className="size-4" /> Sign out</a>
         </Button>
-        {operator ? <Button asChild className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]"><Link href="/operator">Open moderation console</Link></Button> : null}
+        {operator ? <Button asChild className="h-11 bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d]"><Link href="/operator">Open operator console</Link></Button> : null}
       </DialogContent>
     </Dialog>
   );

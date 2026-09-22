@@ -8,7 +8,7 @@ export default function RewardsPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Wallet rewards" title="Accruing, funded, and claimable are not the same thing." copy="The planned dashboard will separate estimates from finalized allocations. No reward indexer, vault, epoch, or claim program is deployed today.">
+        <PageIntro kicker="Wallet rewards" title="Accruing, funded, and claimable are not the same thing." copy="The dashboard separates protocol readiness from finalized allocations. The durable reward ledger is deployed, while holder indexing, funded vaults, and claims remain locked until their production gates are satisfied.">
           <div className="reward-hero-formula"><Calculator /><span>Your reward</span><strong>funded pool × your token-seconds</strong><small>÷ all eligible token-seconds</small></div>
         </PageIntro>
         <SafetyNotice>No wallet balances or reward amounts are simulated. Real positions will appear only after wallet ownership is verified and finalized protocol data exists.</SafetyNotice>

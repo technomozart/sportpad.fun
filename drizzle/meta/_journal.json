@@ -71,6 +71,13 @@
       "when": 1790025153494,
       "tag": "0009_confused_ender_wiggin",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790070986756,
+      "tag": "0010_slimy_hercules",
+      "breakpoints": true
     }
   ]
 }

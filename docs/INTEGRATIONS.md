@@ -4,8 +4,9 @@ Mainnet launch execution is configuration-gated. Current integrations support
 private draft storage, signed Solana wallet sessions, wallet-approved Pump
 mainnet launches, exact finalized onchain verification, public launch receipts,
 official asset identity, and live read-only provider and reward-route checks.
-Fee sweeping, swaps, vault custody, holder accounting, claims, and burns remain
-undeployed.
+The durable execution control plane and read-only treasury observer are also
+implemented. Fee sweeping, swaps, vault custody, holder accounting workers,
+claims, and burns remain locked.
 
 ## Implemented infrastructure
 
@@ -20,7 +21,27 @@ undeployed.
   to each environment before deploying matching application code. Migration
   `0008_whole_franklin_richards.sql` is required for the moderation and abuse
   controls. `0009_confused_ender_wiggin.sql` adds mainnet receipt evidence and
-  unique onchain identity constraints.
+  unique onchain identity constraints. `0010_slimy_hercules.sql` adds the
+  execution control plane, worker records, settlement steps, reward accounting
+  foundations, and treasury observations.
+
+### Execution workers and signer policy
+
+- `SPORTPAD_WORKER_TOKEN` authenticates internal scheduler calls. It is a
+  server secret, not a wallet key.
+- `SPORTPAD_SIGNER_PROVIDER` identifies the KMS, HSM, MPC, or transaction-policy
+  service. `SOLANA_FEE_COLLECTOR_KEY_REF`,
+  `SOLANA_REWARD_VAULT_KEY_REF`, and
+  `SOLANA_BUYBACK_EXECUTOR_KEY_REF` are opaque provider references. They must
+  never contain raw private keys or seed phrases.
+- `SPORTPAD_SETTLEMENT_ENABLED`, `SPORTPAD_REWARDS_ENABLED`,
+  `SPORTPAD_HOLDER_INDEXER_ENABLED`, `SPORTPAD_CLAIMS_ENABLED`, and
+  `SPORTPAD_BUYBACK_ENABLED` independently gate each lane and default false.
+- Database pause controls default true. A lane becomes ready only when its
+  deployment flag, managed signer requirements, worker authentication, and
+  pause state all pass.
+- The treasury observer uses Helius only for finalized reads and writes real
+  slots and lamport balances to D1. It has no signing capability.
 
 ### Cloudflare R2
 
@@ -160,12 +181,14 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
 - Implemented: private drafts, image validation and storage, Solana mainnet
   wallet sessions, Pump transaction construction, local pre-broadcast evidence,
   finalized mainnet verification, content moderation, public receipt filtering,
-  operator suspension, and read-only Helius and Jupiter checks.
-- Activation still requires two policy-controlled public treasury addresses,
-  an explicit deployment flag, and a capped mainnet canary.
-- Not deployed: fee sweeping or ingestion, treasury swap automation, reward
-  vaults, holder accounting, claims, SPORTPAD mint or burns, and cross-chain
-  replenishment.
+  operator suspension, read-only Helius and Jupiter checks, execution controls,
+  worker authentication, and read-only treasury observations.
+- Activation still requires an explicit deployment approval, managed signer
+  integration, and a capped mainnet canary. The two public receive addresses are
+  configured but are not automated signers.
+- Locked: fee sweeping or ingestion, treasury swap automation, funded reward
+  vaults, holder accounting workers, claims, SPORTPAD mint or burns, and
+  cross-chain replenishment.
 
 ## Remaining mainnet transaction stages
 

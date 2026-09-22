@@ -3,8 +3,10 @@
 Status: product interface, private draft storage, wallet authentication, legacy
 devnet testing, and a configuration-gated Pump mainnet launch path are
 implemented. Mainnet remains fail closed until two distinct public treasury
-addresses and the explicit execution flag are configured. Automated fee
-collection, swaps, reward accounting, claims, and burns are not deployed.
+addresses and the explicit execution flag are configured. The public addresses
+are configured, and a read-only treasury observer plus durable execution
+control plane are implemented. Automated fee collection, swaps, funded reward
+accounting, claims, and burns remain locked.
 
 ## Implemented application path
 
@@ -149,11 +151,32 @@ not prove a funded reward vault or claim system.
   rate-limit windows, and the trigger that records each versioned moderation
   transition atomically. Migration `0009` adds frozen mainnet launch evidence,
   finalized slots, treasury addresses, and unique mint and signature indexes.
+  Migration `0010` adds pause controls, worker runs and leases, idempotent
+  settlement steps, reward vaults, holder epoch positions, treasury
+  observations, and a protocol event ledger.
 - Cloudflare bindings are named `DB` and `BUCKET`; credentials and signing keys
   are never stored in database rows.
 
-The fee, settlement, epoch, and claim tables are forward-looking schemas. Their
-presence does not mean those workers or economic actions are live.
+The economic tables and control plane are durable production foundations. Their
+presence does not mean that any transaction-signing worker is enabled.
+
+## Execution control plane
+
+Every economic lane defaults paused and also requires its own deployment flag,
+worker authentication token, managed signer provider, lane-specific signer
+reference, and other prerequisites such as the SPORTPAD mint. Missing any one
+gate keeps that lane locked. A database row cannot override a missing deployment
+flag or signer policy.
+
+`POST /api/internal/workers/treasury` is the first worker boundary. It requires
+a server-only bearer token and performs finalized Helius balance reads for the
+two public treasuries. It writes observations, worker runs, and protocol events,
+but it cannot create or sign a transaction. The operator console can trigger
+the same read-only observation and can force all lanes into a paused state.
+
+Future transaction workers must record an idempotent `settlement_steps` row
+before submission, verify finality through an independent read path, and write
+the final signature and slot before advancing the settlement state machine.
 
 ## Implemented devnet coordinator
 
@@ -218,9 +241,11 @@ create a claim, buy SPORTPAD, or burn supply. Those are separate systems.
 - The production public feed contains no approved receipt until that process
   completes. Example cards remain explicitly labeled and disappear only after
   the first approved receipt.
-- Mainnet launch construction and exact receipt verification are implemented.
-  Fee ingestion, custody, swaps, rewards, claims, SPORTPAD mint and burn,
-  operations, audit, and legal approval remain separate work.
+- Mainnet launch construction, exact receipt verification, operations state,
+  pause controls, audit records, and read-only treasury observation are
+  implemented. Fee ingestion, custody, swaps, funded rewards, claims, SPORTPAD
+  mint and burn, external security review, and legal approval remain separate
+  work.
 
 ## Proposed economic model
 
