@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     default: "SportPad | Sports coins with Fan Token rewards",
     template: "%s · SportPad",
   },
-  description: "Explore SportPad's private Solana launch builder and the planned route from creator fees to official Fan Token rewards and SPORTPAD buyback + burn.",
+  description: "Launch Solana community coins whose fees fund official Fan Token rewards and SPORTPAD buyback and burn, while SPORTPAD's own fees fund project development.",
   openGraph: {
     type: "website",
     url: "/",

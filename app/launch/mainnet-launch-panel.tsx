@@ -229,7 +229,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
     <section className="devnet-launch-panel" aria-labelledby="mainnet-launch-title">
       <div className="devnet-launch-head">
         <span><Rocket /></span>
-        <div><p className="section-eyebrow">Solana mainnet</p><h3 id="mainnet-launch-title">Launch the real Pump coin and lock its reward route.</h3><p>The coin trades against SOL. Its creator fees are locked 80% to the selected official Fan Token reward treasury and 20% to the SPORTPAD buyback treasury.</p></div>
+        <div><p className="section-eyebrow">Solana mainnet community launch</p><h3 id="mainnet-launch-title">Launch the real Pump coin and lock its reward route.</h3><p>This community coin trades against SOL. Its creator fees are locked 80% to official Fan Token rewards and 20% to buying and burning SPORTPAD. SPORTPAD&apos;s own creator fees remain with the project for development.</p></div>
         <strong className="devnet-badge">REAL SOL</strong>
       </div>
 
@@ -243,7 +243,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
 
       <div className="devnet-recipient-grid">
         <label>80% reward treasury<code>{mainnet.rewardTreasury || "Not configured"}</code><small>Creator fees allocated for official Fan Token acquisition and holder epochs.</small></label>
-        <label>20% SPORTPAD buyback treasury<code>{mainnet.buybackTreasury || "Not configured"}</code><small>Accumulates buyback funds until the SPORTPAD mint and burn executor are active.</small></label>
+        <label>20% community-funded SPORTPAD burn<code>{mainnet.buybackTreasury || "Not configured"}</code><small>Uses this launch&apos;s fees to buy SPORTPAD, then burns the purchased tokens.</small></label>
       </div>
 
       {!mainnet.metadataUri ? <label className="devnet-consent"><input type="checkbox" checked={publicationAccepted} onChange={(event) => setPublicationAccepted(event.target.checked)} /><span><strong>Publish the approved image and metadata to IPFS</strong><small>This content becomes public and may be permanent.</small></span></label> : null}

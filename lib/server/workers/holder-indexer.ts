@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { PublicKey } from "@solana/web3.js";
 
 import { accrueHolderPosition } from "@/lib/protocol/holder-rewards";
+import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { bondingCurvePda, feeSharingConfigPda } from "@/lib/protocol/pump-devnet-verification";
 import { readExecutionConfig } from "@/lib/server/execution-config";
 import { fetchFinalizedTokenHolders } from "@/lib/server/providers/helius-holders";
@@ -142,7 +143,8 @@ async function activeEpochs(database: D1Database, epochId?: string) {
 
 export async function runHolderIndexer(trigger: HolderIndexerTrigger, epochId?: string) {
   if (!env.DB) throw new Error("D1 binding `DB` is unavailable.");
-  if (!readExecutionConfig().flags.holderIndexerEnabled && trigger !== "operator") {
+  const execution = readExecutionConfig();
+  if (!execution.flags.holderIndexerEnabled && trigger !== "operator") {
     throw new Error("Holder indexer is disabled.");
   }
   const owner = crypto.randomUUID();
@@ -154,10 +156,12 @@ export async function runHolderIndexer(trigger: HolderIndexerTrigger, epochId?: 
     .bind(runId, WORKER, trigger).run();
   try {
     const epochs = await activeEpochs(env.DB, epochId);
+    const communityEpochs = epochs.results.filter((epoch) =>
+      isCommunityLaunchFeeSource(epoch.mainnet_mint, execution.mainnet.sportpadMint));
     let itemsSeen = 0;
     let itemsChanged = 0;
     const results = [];
-    for (const epoch of epochs.results) {
+    for (const epoch of communityEpochs) {
       const result = await indexEpoch(env.DB, epoch);
       itemsSeen += result.accountsSeen;
       itemsChanged += result.changed;

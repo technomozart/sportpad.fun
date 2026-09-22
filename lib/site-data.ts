@@ -114,7 +114,7 @@ export const faqItems = [
   },
   {
     question: "What happens to creator fees?",
-    answer: "Each verified mainnet launch locks its Pump creator-fee configuration to send 80% to the selected official Fan Token reward treasury and 20% to the SPORTPAD buyback treasury. Automated fee collection, reward purchases, holder accounting, claims, and burns remain separate deployment stages.",
+    answer: "Each verified community launch locks its Pump creator-fee configuration to send 80% to the selected official Fan Token reward treasury and 20% to buy and burn SPORTPAD. SPORTPAD's own creator fees are excluded from that route and retained for project development.",
   },
   {
     question: "Are rewards instant?",

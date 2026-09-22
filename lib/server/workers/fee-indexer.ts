@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { PublicKey } from "@solana/web3.js";
 
 import { feeEventId } from "@/lib/protocol/accounting";
+import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { verifyPumpFeeDistributions, type FinalizedSolanaTransaction } from "@/lib/protocol/pump-fee-distribution";
 import { feeSharingConfigPda } from "@/lib/protocol/pump-devnet-verification";
 import { readExecutionConfig } from "@/lib/server/execution-config";
@@ -150,7 +151,8 @@ async function indexLaunch(database: D1Database, apiKey: string, launch: LaunchR
 
 export async function runFeeIndexer(trigger: FeeIndexerTrigger) {
   if (!env.DB) throw new Error("D1 binding `DB` is unavailable.");
-  if (!readExecutionConfig().flags.feeIndexerEnabled) throw new Error("Pump fee indexer is disabled.");
+  const execution = readExecutionConfig();
+  if (!execution.flags.feeIndexerEnabled) throw new Error("Pump fee indexer is disabled.");
   const apiKey = readProviderCredentials().heliusApiKey;
   if (!apiKey) throw new Error("Helius is not configured.");
   const owner = crypto.randomUUID();
@@ -172,9 +174,11 @@ export async function runFeeIndexer(trigger: FeeIndexerTrigger) {
         AND mainnet_buyback_treasury IS NOT NULL
       ORDER BY id
     `).all<LaunchRow>();
+    const communityLaunches = launches.results.filter((launch) =>
+      isCommunityLaunchFeeSource(launch.mainnet_mint, execution.mainnet.sportpadMint));
     let itemsSeen = 0;
     let itemsChanged = 0;
-    for (const launch of launches.results) {
+    for (const launch of communityLaunches) {
       const result = await indexLaunch(env.DB, apiKey, launch);
       itemsSeen += result.seen;
       itemsChanged += result.changed;
@@ -183,7 +187,7 @@ export async function runFeeIndexer(trigger: FeeIndexerTrigger) {
       UPDATE worker_runs SET state = 'succeeded', items_seen = ?2, items_changed = ?3, completed_at = CURRENT_TIMESTAMP
       WHERE id = ?1
     `).bind(runId, itemsSeen, itemsChanged).run();
-    return { skipped: false, runId, launches: launches.results.length, itemsSeen, itemsChanged };
+    return { skipped: false, runId, launches: communityLaunches.length, itemsSeen, itemsChanged };
   } catch (error) {
     await env.DB.prepare("UPDATE worker_runs SET state = 'failed', error_code = ?2, completed_at = CURRENT_TIMESTAMP WHERE id = ?1")
       .bind(runId, workerErrorCode(error)).run();

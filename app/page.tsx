@@ -34,7 +34,7 @@ export default function Home() {
           <div className="home-hero-copy">
             <div className="hero-kicker"><span className="live-pulse" /> Solana sports launches · official Fan Token rewards</div>
             <h1>Launch the culture.<br /><span>Route the rewards.</span></h1>
-            <p>Create a Pump coin on Solana, select a routed official Fan Token reward, and lock creator fees 80% to rewards and 20% to SPORTPAD buyback.</p>
+            <p>Create a community coin on Solana, select an official Fan Token reward, and lock that coin&apos;s creator fees 80% to rewards and 20% to SPORTPAD buyback and burn. SPORTPAD&apos;s own creator fees remain with the project for development.</p>
             <div className="hero-actions">
               <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 font-semibold text-[#071008] hover:bg-[#adff7d]">
                 <Link href="/launch"><Sparkles className="size-4" /> Start a launch draft</Link>
@@ -58,11 +58,11 @@ export default function Home() {
               <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Available on Solana</span></div>
             </div>
             <div className="fee-split-visual">
-              <div className="split-source"><CircleDollarSign /><span>Pump creator fees</span><strong>{mainnet.ready ? "Mainnet" : "Awaiting setup"}</strong></div>
+              <div className="split-source"><CircleDollarSign /><span>Community coin creator fees</span><strong>{mainnet.ready ? "Mainnet" : "Awaiting setup"}</strong></div>
               <div className="split-line"><span style={{ width: "80%" }} /><span style={{ width: "20%" }} /></div>
               <div className="split-destinations"><div><Trophy /><span>80% official Fan Token rewards</span><strong>{mainnet.rewardTreasury ? "Treasury set" : "Address required"}</strong></div><div><Flame /><span>20% SPORTPAD buyback + burn</span><strong>{mainnet.buybackTreasury ? "Treasury set" : "Address required"}</strong></div></div>
             </div>
-            <p className="match-console-note">Pump coins trade against SOL. The selected official Fan Token is the reward asset purchased from the 80% creator-fee treasury, not the market pair.</p>
+            <p className="match-console-note">Community coins trade against SOL. The selected official Fan Token is purchased from that launch&apos;s 80% fee share, not used as its market pair. SPORTPAD&apos;s own fees are reserved for project development.</p>
           </div>
         </section>
 
@@ -94,7 +94,7 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Protocol" title="One fee stream. Two visible outcomes." copy="The launch transaction can lock the 80/20 Pump fee recipients on mainnet. Collection, reward acquisition, holder accounting, claims, and SPORTPAD burns require their own deployed and verified workers." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Community launch protocol" title="One community fee stream. Two visible outcomes." copy="Each community launch locks its own 80/20 Pump fee recipients on mainnet. SPORTPAD's creator fees stay outside this split and fund project development." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
           <div className="how-flow">
             {[
               { icon: Coins, step: "01", title: "Fees are finalized", copy: "Eligible creator fee events would be indexed and credited only after Solana finality." },

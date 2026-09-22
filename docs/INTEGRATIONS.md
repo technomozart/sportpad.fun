@@ -151,9 +151,10 @@ implemented. Unattended signing remains locked.
   discoverable from the linked public Solana transaction.
 - Signed evidence is persisted in D1 before broadcast. Unique mint and signature
   indexes plus compare-and-set final writes prevent duplicate or racing launches.
-- Pump creator fees accrue in program vaults and still require later sweeping
-  and distribution. The 80/20 configuration does not itself buy Fan Tokens or
-  burn SPORTPAD.
+- Community-launch Pump creator fees accrue in program vaults and still require
+  later sweeping and distribution. The 80/20 configuration does not itself buy
+  Fan Tokens or burn SPORTPAD. The configured SPORTPAD mint is excluded from
+  this flow, so its own creator fees remain with the project for development.
 
 ### Official Fan Token data
 

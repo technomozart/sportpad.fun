@@ -5,6 +5,7 @@ import bs58 from "bs58";
 import { Buffer } from "buffer";
 
 import { NATIVE_MINT } from "@/lib/protocol/pump-devnet-verification";
+import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { executeJupiterSwap, prepareJupiterSwap, transactionMessageHash } from "@/lib/server/providers/jupiter-swap";
 import { readProviderCredentials } from "@/lib/server/providers/runtime-config";
@@ -25,6 +26,7 @@ type SettlementRow = {
   launch_id: string;
   launch_name: string;
   launch_symbol: string;
+  launch_mint: string;
   reward_symbol: string;
   reward_mint: string;
   reward_treasury: string;
@@ -72,6 +74,7 @@ function settlementQuery(suffix = "") {
       s.reward_swap_signature, s.buyback_swap_signature, s.burn_signature,
       (SELECT output_amount_atomic FROM settlement_steps ss WHERE ss.settlement_id = s.id AND ss.stage = 'buyback_swap' LIMIT 1) AS buyback_output_atomic,
       l.id AS launch_id, l.name AS launch_name, l.symbol AS launch_symbol,
+      l.mainnet_mint AS launch_mint,
       l.reward_symbol, l.reward_mint,
       l.mainnet_reward_treasury AS reward_treasury,
       l.mainnet_buyback_treasury AS buyback_treasury
@@ -96,6 +99,12 @@ async function controls() {
 
 async function settlementById(id: string) {
   return env.DB!.prepare(settlementQuery("AND s.id = ?1 LIMIT 1")).bind(id).first<SettlementRow>();
+}
+
+function requireCommunityLaunchSettlement(settlement: SettlementRow) {
+  if (!isCommunityLaunchFeeSource(settlement.launch_mint, readMainnetConfig().sportpadMint)) {
+    throw new Error("SPORTPAD's own creator fees are reserved for project development and cannot enter community reward or burn settlements.");
+  }
 }
 
 function requireManualLane(control: ControlRow | null, leg: "reward" | "buyback") {
@@ -127,7 +136,9 @@ export async function GET(request: Request) {
       pauseReason: control.pause_reason,
     } : null,
     sportpadMint: readMainnetConfig().sportpadMint,
-    items: result.results.map((row) => ({
+    items: result.results
+      .filter((row) => isCommunityLaunchFeeSource(row.launch_mint, readMainnetConfig().sportpadMint))
+      .map((row) => ({
       settlementId: row.settlement_id,
       state: row.settlement_state,
       launchId: row.launch_id,
@@ -143,7 +154,7 @@ export async function GET(request: Request) {
       buybackSwapSignature: row.buyback_swap_signature,
       burnSignature: row.burn_signature,
       buybackOutputAtomic: row.buyback_output_atomic,
-    })),
+      })),
   });
 }
 
@@ -174,6 +185,7 @@ export async function POST(request: Request) {
       const leg = body.leg;
       const [control, settlement] = await Promise.all([controls(), settlementById(body.settlementId)]);
       if (!settlement) return privateJson({ error: "Settlement not found." }, 404);
+      requireCommunityLaunchSettlement(settlement);
       requireManualLane(control, leg);
       if ((leg === "reward" && settlement.reward_swap_signature) || (leg === "buyback" && settlement.buyback_swap_signature)) {
         return privateJson({ error: "That settlement leg already has a transaction receipt." }, 409);
@@ -249,6 +261,9 @@ export async function POST(request: Request) {
         FROM transaction_intents WHERE id = ?1 LIMIT 1
       `).bind(body.intentId).first<IntentRow>();
       if (!intent || intent.state !== "planned") return privateJson({ error: "That transaction intent is no longer signable." }, 409);
+      const intentSettlement = await settlementById(intent.settlement_id);
+      if (!intentSettlement) return privateJson({ error: "Settlement not found." }, 404);
+      requireCommunityLaunchSettlement(intentSettlement);
       if (Date.parse(intent.expires_at) <= Date.now()) return privateJson({ error: "That Jupiter order expired. Prepare a new order." }, 409);
       if (walletSession.walletAddress !== intent.signer_address) return privateJson({ error: "The signed wallet does not match this treasury intent." }, 403);
       let signed: VersionedTransaction;
@@ -335,6 +350,7 @@ export async function POST(request: Request) {
       if (!validSettlementId(body.settlementId)) return privateJson({ error: "A valid settlement is required." }, 400);
       const [control, settlement] = await Promise.all([controls(), settlementById(body.settlementId)]);
       if (!settlement) return privateJson({ error: "Settlement not found." }, 404);
+      requireCommunityLaunchSettlement(settlement);
       requireManualLane(control, "buyback");
       if (!settlement.buyback_swap_signature) return privateJson({ error: "The SPORTPAD buyback must be completed before burning." }, 409);
       if (settlement.burn_signature) return privateJson({ error: "That settlement already has a burn receipt." }, 409);
@@ -397,6 +413,9 @@ export async function POST(request: Request) {
       if (!intent || intent.action !== "sportpad_burn" || intent.state !== "planned") {
         return privateJson({ error: "That burn intent is no longer signable." }, 409);
       }
+      const burnSettlement = await settlementById(intent.settlement_id);
+      if (!burnSettlement) return privateJson({ error: "Settlement not found." }, 404);
+      requireCommunityLaunchSettlement(burnSettlement);
       if (Date.parse(intent.expires_at) <= Date.now()) return privateJson({ error: "That burn transaction expired. Prepare a new burn." }, 409);
       if (walletSession.walletAddress !== intent.signer_address) return privateJson({ error: "The signed wallet does not match this burn intent." }, 403);
       let signed: Transaction;

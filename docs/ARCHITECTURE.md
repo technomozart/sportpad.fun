@@ -258,18 +258,22 @@ create a claim, buy SPORTPAD, or burn supply. Those are separate systems.
 
 ## Proposed economic model
 
-The implemented launch configuration assigns qualifying Pump creator fees to
-this split:
+The implemented community-launch configuration assigns qualifying Pump creator
+fees to this split:
 
 - 80% funds acquisition and holder distribution of the launch's selected
   official Fan Token.
 - 20% funds SPORTPAD buyback + burn after the SPORTPAD token exists and the
   burn path has been independently verified.
 
+The configured SPORTPAD mint is not a community fee source. Its own creator fees
+are retained for project development and are rejected by the fee indexer,
+settlement console, reward-epoch worker, and burn preparation path.
+
 The community token and its official Fan Token reward are separate assets. The
 model does not create a literal AMM pair between them.
 
-For a finalized creator-fee amount `G`:
+For a finalized community-launch creator-fee amount `G`:
 
 - rewards: `floor(G * 8000 / 10000)`
 - SPORTPAD buyback + burn: `G - rewards`

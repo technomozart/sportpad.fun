@@ -23,6 +23,7 @@ test("draft schema accepts an omitted or empty description and enforces its maxi
   assert.equal(launchDraftPayloadSchema.parse(validPayload).description, "");
   assert.equal(launchDraftPayloadSchema.parse({ ...validPayload, description: "" }).description, "");
   assert.equal(launchDraftPayloadSchema.parse(validPayload).symbol, "PLAYER");
+  assert.equal(launchDraftPayloadSchema.safeParse({ ...validPayload, symbol: "SPORTPAD" }).success, false);
   assert.equal(
     launchDraftPayloadSchema.safeParse({ ...validPayload, description: "x".repeat(281) }).success,
     false,

@@ -274,7 +274,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
         <div className="footer-grid">
           <div className="footer-intro">
             <Link href="/" className="brand"><span className="brand-mark"><Goal /></span><span>SPORT<span>PAD</span></span></Link>
-            <p>Build private community-token drafts and inspect the planned route from creator fees into official Fan Token rewards and SPORTPAD buyback + burn.</p>
+            <p>Launch community tokens whose fees fund official Fan Token rewards and SPORTPAD buyback and burn. SPORTPAD&apos;s own fees fund project development.</p>
             <div className="footer-badges"><span><CircleGauge /> Solana-native</span><span><ShieldCheck /> Planned routes shown</span></div>
           </div>
           <div><h3>Product</h3><Link href="/discover">Discover</Link><Link href="/launch">Draft builder</Link><Link href="/rewards">Rewards</Link><Link href="/matchday">Matchday</Link></div>

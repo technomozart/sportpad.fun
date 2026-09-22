@@ -8,9 +8,9 @@ import { FeeCalculator } from "./fee-calculator";
 
 const stages = [
   { icon: BadgeCheck, title: "Select an official reward", copy: "The creator chooses an official Fan Token whose registry-listed Solana token address is visible." },
-  { icon: CircleDollarSign, title: "Creator fees finalize", copy: "The planned system accepts only qualifying creator fees actually received after Solana finality." },
+  { icon: CircleDollarSign, title: "Community fees finalize", copy: "The system accepts only qualifying creator fees from community launches after Solana finality. SPORTPAD's own fees are excluded." },
   { icon: Radio, title: "Reconcile each event", copy: "The planned indexer deduplicates events and matches them against treasury balance changes before economic action." },
-  { icon: Layers3, title: "Apply the fee split", copy: "80% becomes an official Fan Token reward intent; 20% becomes a SPORTPAD buyback + burn intent." },
+  { icon: Layers3, title: "Apply the community split", copy: "80% of a community coin's fees becomes a Fan Token reward intent; 20% becomes a SPORTPAD buyback and burn intent." },
   { icon: Boxes, title: "Fund the reward epoch", copy: "The planned system acquires or reserves Fan Tokens. A calculation cannot become payable before the vault is funded." },
   { icon: WalletCards, title: "Open Solana claims", copy: "Eligible time-weighted balances can receive pro-rata allocations only after a distribution proof is published." },
 ];
@@ -19,10 +19,10 @@ export default function HowItWorksPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="How SportPad works" title="From creator fees to official Fan Token rewards, with every state exposed." copy="Mainnet Pump launches, the immutable 80/20 fee route, finalized fee indexing, wallet-confirmed swaps, time-weighted holder epochs, Fan Token payouts, and SPORTPAD burn controls are deployed. Every treasury spend still requires the matching wallet to review and sign.">
+        <PageIntro kicker="How SportPad works" title="Community launch fees fund rewards and SPORTPAD burns." copy="Every community launch uses the immutable 80/20 fee route. SPORTPAD's own creator fees are kept for project development and never enter that split. Every treasury spend still requires the matching wallet to review and sign.">
           <div className="route-mini"><span>TRADE</span><ArrowRight /><strong>80 / 20</strong><ArrowRight /><span>REWARD + BURN</span></div>
         </PageIntro>
-        <SafetyNotice>Linked does not mean paired. A community coin usually trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token.</SafetyNotice>
+        <SafetyNotice>Linked does not mean paired. A community coin trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token. SPORTPAD&apos;s own fee stream is reserved for development.</SafetyNotice>
 
         <section className="content-section process-timeline">
           {stages.map((stage, index) => <article key={stage.title}><span className="process-number">0{index + 1}</span><div className="process-icon"><stage.icon /></div><div><h2>{stage.title}</h2><p>{stage.copy}</p></div>{index < stages.length - 1 ? <span className="process-line" /> : null}</article>)}
@@ -42,7 +42,7 @@ export default function HowItWorksPage() {
           <div className="route-safety"><ShieldCheck /><h3>Safe failure beats a bad execution.</h3><p>The planned executor would pause acquisition when quotes disappear, price impact rises, inventory runs low, or RPC or bridge health degrades. Any previously funded claims would remain reserved.</p></div>
         </section>
 
-        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">SPORTPAD buyback + burn</p><h2>A wallet transfer does not count as a burn.</h2><p>After the 20% treasury buys SPORTPAD through a bounded Jupiter order, the operator console prepares an exact SPL Token burn for the purchased amount. The matching buyback wallet must review and sign both transactions.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
+        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">Community-funded SPORTPAD burn</p><h2>Only the 20% share from other launches is burned.</h2><p>The 20% treasury uses community launch fees to buy SPORTPAD through Jupiter, then prepares an exact SPL Token burn for the purchased amount. SPORTPAD&apos;s own creator fees remain with the project for development.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
       </main>
     </SiteChrome>
   );

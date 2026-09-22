@@ -78,7 +78,7 @@ export default function MatchdayPage() {
           <div>
             <p className="section-eyebrow">Build around a moment</p>
             <h2>Prepare a private community draft.</h2>
-            <p>Choose a registry-listed official Fan Token reward asset and review the planned 80% reward and 20% SPORTPAD buyback and burn route.</p>
+            <p>Choose an official Fan Token reward asset and review the community coin&apos;s 80% reward and 20% SPORTPAD buyback and burn route.</p>
           </div>
           <div>
             <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 text-[#071008] hover:bg-[#adff7d]">

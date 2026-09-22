@@ -107,7 +107,7 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
           </div>
         </section>
 
-        <SafetyNotice>{launch.isExample ? "This is an example concept only. It has no deployed token, market, price, volume, holders, fees, reward position, or claim." : isMainnet ? "This page proves the Pump coin creation and immutable 80/20 creator-fee split on Solana mainnet. Reward balances and claim epochs appear only after creator fees are collected, swapped, reconciled, and allocated." : "This creator-submitted, operator-approved receipt proves a coin creation and fee configuration on Solana devnet only. It is not a mainnet launch."}</SafetyNotice>
+        <SafetyNotice>{launch.isExample ? "This is an example concept only. It has no deployed token, market, price, volume, holders, fees, reward position, or claim." : isMainnet ? "This page proves a community coin creation and immutable 80/20 creator-fee split on Solana mainnet. SPORTPAD's own creator fees are excluded and retained for project development." : "This creator-submitted, operator-approved receipt proves a coin creation and fee configuration on Solana devnet only. It is not a mainnet launch."}</SafetyNotice>
 
         {launch.mainnet ? (
           <section className="page-section">
@@ -145,12 +145,12 @@ export default async function LaunchDetailPage({ params }: { params: Promise<{ s
             <article><span>01</span><Goal /><h3>Creator identity</h3><p>The creator supplies a name, ticker, image, links, and optional description for the community token.</p></article>
             <article><span>02</span><BadgeCheck /><h3>Official reward</h3><p>The reward selection points to the official {rewardAsset.symbol} Fan Token address published for Solana.</p></article>
             <article><span>03</span><Trophy /><h3>80% rewards</h3><p>{isMainnet ? "The immutable Pump fee configuration assigns 80% to the official Fan Token reward treasury." : "The proposed configuration assigns 80% to official Fan Token rewards."}</p></article>
-            <article><span>04</span><Flame /><h3>20% SPORTPAD burn</h3><p>{isMainnet ? "The immutable Pump fee configuration assigns 20% to the SPORTPAD buyback treasury." : "The proposed configuration assigns 20% to SPORTPAD buyback and burn."}</p></article>
+            <article><span>04</span><Flame /><h3>20% buys and burns SPORTPAD</h3><p>{isMainnet ? "The community launch's immutable fee configuration assigns 20% to buying and burning SPORTPAD." : "The proposed community configuration assigns 20% to buying and burning SPORTPAD."}</p></article>
           </div>
         </section>
 
         <section className="page-section">
-          <SectionHeading eyebrow={isMainnet ? "Mainnet fee flow" : "Planned fee flow"} title={isMainnet ? "The creator-fee split is live and verifiable." : "No disabled step is represented as live."} copy={isMainnet ? "Pump distributes creator fees 80/20 to the published treasuries. Reward acquisition, allocation, and claims are recorded separately as they settle." : "Execution stays disabled until the required vaults, quotes, signers, and claims are ready."} />
+          <SectionHeading eyebrow={isMainnet ? "Community launch fee flow" : "Planned fee flow"} title={isMainnet ? "This coin's creator-fee split is live and verifiable." : "No disabled step is represented as live."} copy={isMainnet ? "Pump distributes this community coin's creator fees 80/20 to the published treasuries. SPORTPAD's own fees stay outside this route and fund project development." : "Execution stays disabled until the required vaults, quotes, signers, and claims are ready."} />
           <div className="token-flow"><div><Goal /><span><small>01</small><strong>${launch.ticker} trades</strong><p>{isMainnet ? "Pump SOL market" : "Future community token market"}</p></span></div><ArrowRight /><div><BarChart3 /><span><small>02</small><strong>Eligible creator fees</strong><p>Finality and reconciliation</p></span></div><ArrowRight /><div className="split-flow"><span><Trophy /><b>80% · {rewardAsset.symbol} rewards</b></span><span><Flame /><b>20% · SPORTPAD buyback + burn</b></span></div></div>
         </section>
 

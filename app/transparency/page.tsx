@@ -23,7 +23,7 @@ export default async function TransparencyPage() {
         <PageIntro
           kicker="Proof of Rewards"
           title="Mainnet evidence appears only after verified execution."
-          copy="The launcher records verified Pump mainnet creation and immutable 80/20 fee configuration receipts. Finalized fee distributions are indexed from chain. Wallet-confirmed Jupiter swaps and SPORTPAD burns are recorded as they happen. Holder allocations and claims appear only after verified reward inventory exists."
+          copy="The launcher records verified community coin creation and immutable 80/20 fee receipts. SPORTPAD's own creator fees are excluded and retained for project development. Community-funded swaps, burns, allocations, and claims appear only after verified execution."
         >
           <div className="transparency-fresh">
             <Radio />
@@ -45,14 +45,14 @@ export default async function TransparencyPage() {
             copy="Counts remain at zero until real finalized transactions are recorded. Nothing below is simulated."
           />
           <div className="capital-flow">
-            <div className="flow-source"><CircleDollarSign /><span>Creator fees</span><strong>{feeEvents ? `${feeEvents} observed` : "None observed"}</strong><small>Only exact finalized Pump 80/20 distributions are indexed</small></div>
+            <div className="flow-source"><CircleDollarSign /><span>Community launch creator fees</span><strong>{feeEvents ? `${feeEvents} observed` : "None observed"}</strong><small>SPORTPAD&apos;s own fee stream is excluded from this ledger</small></div>
             <ArrowDown />
             <div className="flow-gate"><ShieldCheck /><span>Finality and reconciliation</span><small>Durable intents and exact signed messages</small></div>
             <ArrowDown />
             <div className="flow-split"><span>80 / 20</span><strong>Immutable onchain split</strong></div>
             <div className="flow-branches">
               <div><Trophy /><span>OFFICIAL FAN TOKEN REWARDS · 80%</span><strong>{rewardSwaps ? `${rewardSwaps} swaps submitted` : "No swaps submitted"}</strong><ArrowDown /><small>{rewardVaults ? `${rewardVaults} inventory records` : "No verified inventory yet"}</small><ArrowDown /><b>{protocol?.counts.rewardEpochs ? `${protocol.counts.rewardEpochs} reward epochs` : "No epochs yet"}</b></div>
-              <div><Flame /><span>SPORTPAD BUYBACK + BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{mainnet.sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
+              <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{mainnet.sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
             </div>
           </div>
         </section>
@@ -92,7 +92,7 @@ export default async function TransparencyPage() {
 
         <div className="incident-note">
           <AlertTriangle />
-          <div><strong>{mainnet.ready ? "Mainnet launcher is enabled." : "Mainnet launcher setup is incomplete."}</strong><p>Finalized fee indexing, wallet-confirmed swaps, holder epochs, Fan Token payouts, and SPORTPAD burn controls are deployed. Unattended signing stays off, and the 20% buyback waits for the public SPORTPAD mint.</p></div>
+          <div><strong>{mainnet.ready ? "Mainnet launcher is enabled." : "Mainnet launcher setup is incomplete."}</strong><p>The 80/20 route applies to community launches only. SPORTPAD&apos;s own creator fees stay with the project for development. The community-funded 20% buyback waits for the public SPORTPAD mint.</p></div>
         </div>
       </main>
     </SiteChrome>

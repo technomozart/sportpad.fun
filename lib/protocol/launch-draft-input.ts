@@ -33,7 +33,11 @@ export const launchDraftPayloadSchema = z
       .string()
       .trim()
       .transform((value) => value.toUpperCase())
-      .pipe(z.string().regex(/^[A-Z0-9]{2,10}$/, "Ticker must be 2-10 letters or numbers.")),
+      .pipe(
+        z.string()
+          .regex(/^[A-Z0-9]{2,10}$/, "Ticker must be 2-10 letters or numbers.")
+          .refine((value) => value !== "SPORTPAD", "SPORTPAD is reserved for the platform token."),
+      ),
     description: z.string().trim().max(280, "Description must be 280 characters or fewer.").optional().default(""),
     sport: z.enum(["Football", "Combat", "Motorsport", "Basketball"], {
       message: "Choose a supported sport.",

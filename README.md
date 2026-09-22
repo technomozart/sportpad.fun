@@ -6,10 +6,10 @@
 
 SPORTPAD is a sports-native Solana launchpad. Creators can save a private
 community-token draft, choose an official Fan Token reward, pass content review,
-and launch a real Pump coin on Solana mainnet from their own wallet. The launch
-locks Pump creator fees to two public treasury addresses: 80% for Fan Token
-rewards and 20% for SPORTPAD buyback and burn. Mainnet execution fails closed
-until those addresses and the explicit deployment flag are configured.
+and launch a real Pump coin on Solana mainnet from their own wallet. Each
+community launch locks its creator fees to two public treasury addresses: 80%
+for Fan Token rewards and 20% to buy and burn SPORTPAD. SPORTPAD's own creator
+fees are excluded from that route and retained for project development.
 
 Live site: [sportpad.fun](https://sportpad.fun)
 
@@ -67,8 +67,9 @@ Live site: [sportpad.fun](https://sportpad.fun)
   or using a signing key. The authenticated operator screen exposes the live
   gates, records, observations, and an emergency pause action.
 - A finalized Pump fee indexer that accepts only exact immutable 80/20
-  distributions for published launches and deduplicates them by signature and
-  instruction position. It cannot sign or move funds.
+  distributions for published community launches and deduplicates them by
+  signature and instruction position. It explicitly excludes the configured
+  SPORTPAD mint, whose own fees remain available for project development.
 - Exact wallet-confirmed Pump fee collection and immutable 80/20 distribution.
   The app verifies the active sharing configuration and revoked admin before the
   operator wallet can sign.
@@ -82,8 +83,9 @@ Live site: [sportpad.fun](https://sportpad.fun)
 - Deterministic Fan Token allocations backed by acquired inventory, plus exact
   wallet-confirmed SPL Token payouts with idempotent recipient token-account
   creation and confirmed Solana receipts.
-- Exact SPORTPAD burns for bought output once the public SPORTPAD mint address
-  is configured. The buyback wallet reviews and signs each permanent burn.
+- Exact SPORTPAD burns funded only by the 20% share from community launches,
+  once the public SPORTPAD mint address is configured. SPORTPAD's own creator
+  fees are never sent into its buyback and burn lane.
 
 The interface does not display fabricated market caps, trading volume, holder
 counts, reward balances, settlement events, or match results.

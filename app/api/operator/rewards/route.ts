@@ -5,10 +5,12 @@ import bs58 from "bs58";
 import { Buffer } from "buffer";
 
 import { allocateEpochRewards } from "@/lib/protocol/accounting";
+import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@/lib/protocol/pump-devnet-verification";
 import { associatedTokenAddress } from "@/lib/protocol/spl-burn";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { isOperatorRequest } from "@/lib/server/publication-policy";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 import { getMainnetConnection } from "@/lib/server/solana/devnet";
@@ -104,13 +106,16 @@ async function sha256Hex(value: string) {
 }
 
 async function launchById(id: string) {
-  return database.prepare(`
+  const launch = await database.prepare(`
     SELECT id, name, symbol, mainnet_mint, reward_symbol, reward_mint, mainnet_reward_treasury
     FROM launch_drafts
     WHERE id = ?1 AND status = 'mainnet_published' AND mainnet_mint IS NOT NULL
       AND reward_mint IS NOT NULL AND mainnet_reward_treasury IS NOT NULL
     LIMIT 1
   `).bind(id).first<LaunchRow>();
+  return launch && isCommunityLaunchFeeSource(launch.mainnet_mint, readMainnetConfig().sportpadMint)
+    ? launch
+    : null;
 }
 
 async function claimById(id: string) {
@@ -369,10 +374,12 @@ async function getConsoleData() {
   ]);
   return {
     controls: control ? { settlementPaused: Boolean(control.settlement_paused), rewardsPaused: Boolean(control.rewards_paused) } : null,
-    launches: launches.results.map((launch) => ({
+    launches: launches.results
+      .filter((launch) => isCommunityLaunchFeeSource(launch.mainnet_mint, readMainnetConfig().sportpadMint))
+      .map((launch) => ({
       id: launch.id, name: launch.name, symbol: launch.symbol, mint: launch.mainnet_mint,
       rewardSymbol: launch.reward_symbol, rewardMint: launch.reward_mint, rewardTreasury: launch.mainnet_reward_treasury,
-    })),
+      })),
     epochs: epochs.results.map((epoch) => ({
       id: epoch.id, launchId: epoch.launch_id, startsAt: epoch.starts_at, endsAt: epoch.ends_at,
       cutoffSlot: epoch.cutoff_slot, fundedAmountAtomic: epoch.funded_amount_atomic,
