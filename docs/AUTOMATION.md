@@ -45,7 +45,8 @@ Set only these private service variables:
 SPORTPAD_BASE_URL=https://sportpad.fun
 SPORTPAD_WORKER_TOKEN=<same value as Sites>
 CHILIZ_RPC_URL=https://rpc.chiliz.com
-CHILIZ_TREASURY_PRIVATE_KEY=<0x-prefixed private key for a dedicated Chiliz treasury>
+CHILIZ_TREASURY_PRIVATE_KEY=<64-hex-character key for a dedicated Chiliz treasury; optional 0x prefix>
+CHILIZ_TREASURY_ADDRESS=<public address derived from that private key>
 JUPITER_API_KEY=<server key>
 ```
 

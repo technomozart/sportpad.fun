@@ -2,6 +2,7 @@ import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { CHILIZ_REWARD_ASSETS } from "../lib/protocol/chiliz-reward-assets.ts";
 import {
+  assertChilizTreasuryAddressMatchesAccount,
   assertFreshQuote,
   assertOfficialV2Asset,
   chzSpendFromSolanaQuote,
@@ -45,6 +46,7 @@ const baseUrl = required("SPORTPAD_BASE_URL").replace(/\/$/, "");
 const workerToken = required("SPORTPAD_WORKER_TOKEN");
 const privateKey = normalizeChilizTreasuryPrivateKey(required("CHILIZ_TREASURY_PRIVATE_KEY"));
 const account = privateKeyToAccount(privateKey);
+assertChilizTreasuryAddressMatchesAccount(required("CHILIZ_TREASURY_ADDRESS"), account.address);
 const transport = http(CHILIZ.rpcUrls.default.http[0], { timeout: 20_000, retryCount: 2 });
 const publicClient = createPublicClient({ chain: CHILIZ, transport });
 const walletClient = createWalletClient({ account, chain: CHILIZ, transport });
