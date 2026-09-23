@@ -1,4 +1,5 @@
 import { getRewardOption, type RewardChain } from "@/lib/protocol/reward-options";
+import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
 import { checkChilizRewardRoute } from "@/lib/server/providers/chiliz-reward-route";
 import { checkRewardRoute } from "@/lib/server/providers/jupiter-reward-route";
 
@@ -15,8 +16,15 @@ export async function GET(request: Request, context: RouteContext) {
   if (!asset) {
     return Response.json({ error: "Unknown reward asset." }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
+  if (chain === "chiliz" && (!CHILIZ_ASSET_MIGRATION_VERIFIED ||
+    asset.routeStatus !== "current_verified")) {
+    return Response.json({ symbol: asset.symbol, chain, tokenAddress: asset.tokenAddress,
+      route: { available: false, checkedAt: new Date().toISOString(), inputAmountWei: "0",
+        outputAmountAtomic: null, router: "Kayen", reason: "asset_migration_unverified" } },
+    { headers: { "Cache-Control": "no-store" } });
+  }
   const route = chain === "chiliz"
-    ? await checkChilizRewardRoute(asset.wrappedTokenAddress!)
+    ? await checkChilizRewardRoute(asset.tokenAddress)
     : await checkRewardRoute(asset.tokenAddress);
   return Response.json(
     { symbol: asset.symbol, chain, tokenAddress: asset.tokenAddress, route },

@@ -2,9 +2,202 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { failureDisposition, FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL,
+import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBACK_SETTLEMENT_SQL, COMPLETE_CLAIM_SQL,
+  COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
+  DEFER_CHILIZ_EPOCH_SQL, failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
+  FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL,
   laneAllowsJob, ownsActiveLease, ownsBroadcast, pauseConditionSql,
-  QUEUE_CLAIM_JOB_SQL } from "./automation-safety.ts";
+  QUEUE_CLAIM_JOB_SQL, QUEUE_CLAIM_TRANSITION_SQL } from "./automation-safety.ts";
+
+function atomic(db: DatabaseSync, writes: (() => void)[]) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const write of writes) write();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function assertOne(db: DatabaseSync) {
+  db.prepare(ASSERT_ONE_ROW_CHANGED_SQL).get();
+}
+
+test("zero-row CAS raises an actual SQL error that rolls back earlier writes", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE ledger (id TEXT PRIMARY KEY, amount TEXT NOT NULL); INSERT INTO ledger VALUES ('a', '1')");
+  assert.throws(() => atomic(db, [
+    () => { db.prepare("UPDATE ledger SET amount = '2' WHERE id = 'a'").run(); },
+    () => assertOne(db),
+    () => { db.prepare("UPDATE ledger SET amount = '3' WHERE id = 'missing'").run(); },
+    () => assertOne(db),
+  ]), /malformed JSON/);
+  assert.equal(db.prepare("SELECT amount FROM ledger WHERE id = 'a'").get()?.amount, "1");
+  db.close();
+});
+
+test("mature epoch fencing is exclusive and an empty epoch can be reopened", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE reward_epochs (
+      id TEXT PRIMARY KEY, state TEXT, funded_amount_atomic TEXT,
+      ends_at TEXT, updated_at TEXT
+    );
+    INSERT INTO reward_epochs VALUES ('epoch', 'accruing', '1000000000000000000',
+      datetime(CURRENT_TIMESTAMP, '-1 hour'), NULL);
+  `);
+  assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 1);
+  assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
+  assert.equal(db.prepare("SELECT state FROM reward_epochs").get()?.state, "allocating");
+  assert.equal(db.prepare(DEFER_CHILIZ_EPOCH_SQL).run("epoch", "0").changes, 0);
+  assert.equal(db.prepare(DEFER_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 1);
+  assert.equal(db.prepare("SELECT state FROM reward_epochs").get()?.state, "accruing");
+  assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
+  db.close();
+});
+
+test("claim enqueue and retry are atomic and cannot overwrite an in-flight job", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE reward_claims (
+      id TEXT PRIMARY KEY, state TEXT NOT NULL, solana_wallet TEXT NOT NULL,
+      destination_chain TEXT, destination_address TEXT, claim_requested_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE automation_jobs (
+      id TEXT PRIMARY KEY, job_type TEXT NOT NULL, entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL, chain TEXT NOT NULL, payload_json TEXT NOT NULL,
+      state TEXT NOT NULL, available_at INTEGER NOT NULL, attempt INTEGER DEFAULT 0,
+      tx_hash TEXT, error_code TEXT, leased_until INTEGER, updated_at TEXT
+    );
+    CREATE UNIQUE INDEX job_entity_type ON automation_jobs(entity_id, job_type);
+    INSERT INTO reward_claims (id, state, solana_wallet) VALUES ('claim-1', 'claimable', 'wallet-a');
+  `);
+  const queue = (jobId: string, wallet: string) => atomic(db, [
+    () => { db.prepare(QUEUE_CLAIM_JOB_SQL).run(jobId, "chiliz_claim_unwrap", "claim-1", "chiliz", "{}", 1); },
+    () => assertOne(db),
+    () => { db.prepare(QUEUE_CLAIM_TRANSITION_SQL).run("claim-1", "chiliz", "0xdestination", jobId, wallet); },
+    () => assertOne(db),
+  ]);
+  assert.throws(() => queue("unauthorized", "wallet-b"), /malformed JSON/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM automation_jobs").get()?.count, 0);
+  queue("job-1", "wallet-a");
+  assert.equal(db.prepare("SELECT state FROM reward_claims WHERE id = 'claim-1'").get()?.state, "queued");
+  assert.throws(() => queue("job-2", "wallet-a"), /malformed JSON/);
+  assert.equal(db.prepare("SELECT id FROM automation_jobs").get()?.id, "job-1");
+  db.exec("UPDATE reward_claims SET state = 'claimable'; UPDATE automation_jobs SET state = 'failed'");
+  queue("job-3", "wallet-a");
+  assert.equal(db.prepare("SELECT id FROM automation_jobs").get()?.id, "job-3");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM automation_jobs").get()?.count, 1);
+  db.close();
+});
+
+test("two purchase completions cannot lose a vault increment or partially commit", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, state TEXT, tx_hash TEXT, error_code TEXT, leased_until INTEGER, updated_at TEXT);
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT, reward_swap_signature TEXT,
+      buyback_swap_signature TEXT, burn_signature TEXT, state TEXT, updated_at TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT, reward_mint TEXT, reward_wrapped_contract TEXT);
+    CREATE TABLE reward_vaults (
+      id TEXT PRIMARY KEY, launch_id TEXT, reward_mint TEXT, chain TEXT, owner_address TEXT,
+      state TEXT, inventory_atomic TEXT, updated_at TEXT,
+      UNIQUE(launch_id, reward_mint)
+    );
+    INSERT INTO launch_drafts VALUES ('launch', 'chiliz', 'v2-token', NULL);
+    INSERT INTO fee_events VALUES ('fee-a', 'launch'), ('fee-b', 'launch');
+    INSERT INTO settlements VALUES ('settlement-a', 'fee-a', NULL, NULL, NULL, 'reconciled', NULL),
+      ('settlement-b', 'fee-b', NULL, NULL, NULL, 'reconciled', NULL);
+    INSERT INTO automation_jobs VALUES ('job-a', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL),
+      ('job-b', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL);
+    INSERT INTO reward_vaults VALUES ('vault', 'launch', 'v2-token', 'chiliz', '0xowner', 'funded', '10000000000000000000', NULL);
+  `);
+  const complete = (jobId: string, settlementId: string, tx: string, expected: string, next: string) => atomic(db, [
+    () => { db.prepare(COMPLETE_BROADCAST_JOB_SQL).run(jobId, tx, "broadcasting:worker"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_PURCHASE_SETTLEMENT_SQL).run(settlementId, tx, "launch", "v2-token"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_PURCHASE_VAULT_SQL).run("unused-id", "launch", "v2-token", "0xowner", next, expected); },
+    () => assertOne(db),
+  ]);
+  complete("job-a", "settlement-a", "0xtx-a", "10000000000000000000", "14000000000000000000");
+  assert.throws(() => complete("job-b", "settlement-b", "0xtx-b", "10000000000000000000", "16000000000000000000"), /malformed JSON/);
+  assert.equal(db.prepare("SELECT state FROM automation_jobs WHERE id = 'job-b'").get()?.state, "broadcasting");
+  assert.equal(db.prepare("SELECT reward_swap_signature FROM settlements WHERE id = 'settlement-b'").get()?.reward_swap_signature, null);
+  complete("job-b", "settlement-b", "0xtx-b", "14000000000000000000", "20000000000000000000");
+  assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "20000000000000000000");
+  assert.throws(() => complete("job-a", "settlement-a", "0xtx-a", "20000000000000000000", "24000000000000000000"), /malformed JSON/);
+  assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "20000000000000000000");
+  db.close();
+});
+
+test("a settlement is complete only after both reward and buyback receipts, in either order", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT, reward_swap_signature TEXT,
+      buyback_swap_signature TEXT, burn_signature TEXT, state TEXT, updated_at TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT, reward_mint TEXT, reward_wrapped_contract TEXT);
+    INSERT INTO launch_drafts VALUES ('launch', 'chiliz', 'v2-token', NULL);
+    INSERT INTO fee_events VALUES ('fee-a', 'launch'), ('fee-b', 'launch');
+    INSERT INTO settlements VALUES ('settlement-a', 'fee-a', NULL, NULL, NULL, 'reconciled', NULL),
+      ('settlement-b', 'fee-b', NULL, NULL, NULL, 'reconciled', NULL);
+  `);
+  db.prepare(COMPLETE_BUYBACK_SETTLEMENT_SQL).run("settlement-a", "swap-a", "burn-a");
+  assertOne(db);
+  assert.equal(db.prepare("SELECT state FROM settlements WHERE id = 'settlement-a'").get()?.state, "buyback_burned");
+  db.prepare(COMPLETE_PURCHASE_SETTLEMENT_SQL).run("settlement-a", "reward-a", "launch", "v2-token");
+  assertOne(db);
+  assert.equal(db.prepare("SELECT state FROM settlements WHERE id = 'settlement-a'").get()?.state, "complete");
+
+  db.prepare(COMPLETE_PURCHASE_SETTLEMENT_SQL).run("settlement-b", "reward-b", "launch", "v2-token");
+  assertOne(db);
+  assert.equal(db.prepare("SELECT state FROM settlements WHERE id = 'settlement-b'").get()?.state, "reward_acquired");
+  db.prepare(COMPLETE_BUYBACK_SETTLEMENT_SQL).run("settlement-b", "swap-b", "burn-b");
+  assertOne(db);
+  assert.equal(db.prepare("SELECT state FROM settlements WHERE id = 'settlement-b'").get()?.state, "complete");
+  db.close();
+});
+
+test("two claim completions cannot double-debit a vault or leave a confirmed claim without debit", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, state TEXT, tx_hash TEXT, error_code TEXT, leased_until INTEGER, updated_at TEXT);
+    CREATE TABLE reward_claims (id TEXT PRIMARY KEY, state TEXT, claim_signature TEXT, updated_at TEXT);
+    CREATE TABLE reward_vaults (
+      launch_id TEXT, reward_mint TEXT, chain TEXT, inventory_atomic TEXT,
+      reserved_atomic TEXT, claimed_atomic TEXT, updated_at TEXT,
+      UNIQUE(launch_id, reward_mint)
+    );
+    INSERT INTO automation_jobs VALUES ('job-a', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL),
+      ('job-b', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL);
+    INSERT INTO reward_claims VALUES ('claim-a', 'queued', NULL, NULL), ('claim-b', 'queued', NULL, NULL);
+    INSERT INTO reward_vaults VALUES ('launch', 'wrapped', 'chiliz', '10000000000000000000', '10000000000000000000', '0', NULL);
+  `);
+  const complete = (jobId: string, claimId: string, tx: string, previous: string[], next: string[]) => atomic(db, [
+    () => { db.prepare(COMPLETE_BROADCAST_JOB_SQL).run(jobId, tx, "broadcasting:worker"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_CLAIM_VAULT_SQL).run("launch", "wrapped", ...next, ...previous, "chiliz"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_CLAIM_SQL).run(claimId, tx); },
+    () => assertOne(db),
+  ]);
+  complete("job-a", "claim-a", "0xtx-a",
+    ["10000000000000000000", "10000000000000000000", "0"],
+    ["4000000000000000000", "4000000000000000000", "6000000000000000000"]);
+  assert.throws(() => complete("job-b", "claim-b", "0xtx-b",
+    ["10000000000000000000", "10000000000000000000", "0"],
+    ["6000000000000000000", "6000000000000000000", "4000000000000000000"]), /malformed JSON/);
+  assert.equal(db.prepare("SELECT state FROM reward_claims WHERE id = 'claim-b'").get()?.state, "queued");
+  assert.equal(db.prepare("SELECT state FROM automation_jobs WHERE id = 'job-b'").get()?.state, "broadcasting");
+  complete("job-b", "claim-b", "0xtx-b",
+    ["4000000000000000000", "4000000000000000000", "6000000000000000000"],
+    ["0", "0", "10000000000000000000"]);
+  assert.deepEqual(db.prepare("SELECT inventory_atomic, reserved_atomic, claimed_atomic FROM reward_vaults").get(),
+    Object.assign(Object.create(null), { inventory_atomic: "0", reserved_atomic: "0", claimed_atomic: "10000000000000000000" }));
+  db.close();
+});
 
 const openLanes = {
   mainnetEnabled: true, settlementEnabled: true, rewardsEnabled: true,

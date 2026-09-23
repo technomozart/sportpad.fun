@@ -21,8 +21,8 @@ function addressWord(address: string) {
   return address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
-export function encodeKayenGetAmountsOut(outputWrappedContract: string, amountIn = ONE_CHZ_WEI) {
-  return `0x${GET_AMOUNTS_OUT_SELECTOR}${word(amountIn)}${word(64n)}${word(2n)}${addressWord(KAYEN.wrappedChz)}${addressWord(outputWrappedContract)}`;
+export function encodeKayenGetAmountsOut(outputTokenContract: string, amountIn = ONE_CHZ_WEI) {
+  return `0x${GET_AMOUNTS_OUT_SELECTOR}${word(amountIn)}${word(64n)}${word(2n)}${addressWord(KAYEN.wrappedChz)}${addressWord(outputTokenContract)}`;
 }
 
 export function decodeKayenGetAmountsOut(result: string) {
@@ -36,7 +36,7 @@ export function decodeKayenGetAmountsOut(result: string) {
   return BigInt(`0x${body.slice(lastStart, lastStart + 64)}`);
 }
 
-async function checkUncached(outputWrappedContract: string): Promise<ChilizRewardRouteStatus> {
+async function checkUncached(outputTokenContract: string): Promise<ChilizRewardRouteStatus> {
   const checkedAt = new Date().toISOString();
   try {
     const response = await fetch(process.env.CHILIZ_RPC_URL?.trim() || CHILIZ_CHAIN.rpcUrl, {
@@ -46,7 +46,7 @@ async function checkUncached(outputWrappedContract: string): Promise<ChilizRewar
         jsonrpc: "2.0",
         id: 1,
         method: "eth_call",
-        params: [{ to: KAYEN.router, data: encodeKayenGetAmountsOut(outputWrappedContract) }, "latest"],
+        params: [{ to: KAYEN.router, data: encodeKayenGetAmountsOut(outputTokenContract) }, "latest"],
       }),
       signal: AbortSignal.timeout(8_000),
     });
@@ -69,11 +69,11 @@ async function checkUncached(outputWrappedContract: string): Promise<ChilizRewar
   }
 }
 
-export async function checkChilizRewardRoute(outputWrappedContract: string) {
-  const key = outputWrappedContract.toLowerCase();
+export async function checkChilizRewardRoute(outputTokenContract: string) {
+  const key = outputTokenContract.toLowerCase();
   const found = cache.get(key);
   if (found && found.expiresAt > Date.now()) return found.value;
-  const value = await checkUncached(outputWrappedContract);
+  const value = await checkUncached(outputTokenContract);
   cache.set(key, { value, expiresAt: Date.now() + 30_000 });
   return value;
 }

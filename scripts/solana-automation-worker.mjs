@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
   createBurnCheckedInstruction,
@@ -9,12 +9,13 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import { inspectBuybackOrder, inspectBuybackSettlement, inspectBuybackBurnReceipt } from "../lib/protocol/buyback-safety.mjs";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const ORDER_URL = "https://api.jup.ag/swap/v2/order";
 const EXECUTE_URL = "https://api.jup.ag/swap/v2/execute";
-// The buyback lane must stay closed until the third-party transaction can be
-// validated against exact signer debits and token outputs before it is signed.
+// The quote and transaction are now inspected before signing, but the buyback
+// lane remains closed until swap and burn have a durable replay-safe ledger.
 const BUYBACK_EXECUTION_SAFE = false;
 
 function required(name) {
@@ -37,7 +38,7 @@ const heliusKey = required("HELIUS_API_KEY");
 const buyback = process.env.SOLANA_BUYBACK_PRIVATE_KEY?.trim() ? keypairFromSecret(process.env.SOLANA_BUYBACK_PRIVATE_KEY, "SOLANA_BUYBACK_PRIVATE_KEY") : null;
 const rewards = process.env.SOLANA_REWARD_VAULT_PRIVATE_KEY?.trim() ? keypairFromSecret(process.env.SOLANA_REWARD_VAULT_PRIVATE_KEY, "SOLANA_REWARD_VAULT_PRIVATE_KEY") : null;
 if (!buyback && !rewards) throw new Error("Configure at least one Solana automation key.");
-if (!rewards && !BUYBACK_EXECUTION_SAFE) throw new Error("Buyback execution is disabled pending transaction validation.");
+if (!rewards && !BUYBACK_EXECUTION_SAFE) throw new Error("Buyback execution is disabled pending durable swap/burn recovery.");
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}`, "confirmed");
 const workerId = `solana:${(buyback ?? rewards).publicKey.toBase58()}`;
 
@@ -77,7 +78,7 @@ async function api(body) {
 }
 
 async function buyAndBurn(payload, arm) {
-  if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_transaction_validation");
+  if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_durable_recovery");
   if (!buyback) throw new Error("buyback_signer_not_configured");
   const mint = new PublicKey(payload.sportpadMint);
   const tokenProgram = await tokenProgramForMint(mint);
@@ -86,26 +87,30 @@ async function buyAndBurn(payload, arm) {
   const tokenAccount = await getOrCreateAssociatedTokenAccount(
     connection, buyback, mint, buyback.publicKey, false, "confirmed", undefined, tokenProgram,
   );
-  const balanceBefore = BigInt((await connection.getTokenAccountBalance(tokenAccount.address, "confirmed")).value.amount);
-  const supplyBefore = mintState.supply;
   const order = new URL(ORDER_URL);
   order.searchParams.set("inputMint", SOL);
   order.searchParams.set("outputMint", mint.toBase58());
   order.searchParams.set("amount", payload.amountLamports);
   order.searchParams.set("taker", buyback.publicKey.toBase58());
   order.searchParams.set("slippageBps", "100");
-  order.searchParams.set("excludeRouters", "jupiterz,dflow");
+  order.searchParams.set("excludeRouters", "jupiterz,dflow,okx");
   const orderResponse = await fetch(order, { headers: { Accept: "application/json", "x-api-key": jupiterKey }, signal: AbortSignal.timeout(15_000) });
   const quote = await orderResponse.json().catch(() => ({}));
-  if (!orderResponse.ok || !quote.transaction || !new Set(["metis", "okx"]).has(quote.router)) {
+  if (!orderResponse.ok || !quote.transaction) {
     throw new Error("sportpad_jupiter_route_unavailable");
   }
-  if (quote.inputMint !== SOL || quote.outputMint !== mint.toBase58() || quote.inAmount !== payload.amountLamports || quote.taker !== buyback.publicKey.toBase58()) throw new Error("sportpad_jupiter_constraint_changed");
-  const impact = Math.abs(Number(quote.priceImpact));
-  if (!Number.isFinite(impact) || impact > 5) throw new Error("sportpad_price_impact_limit");
-  const transaction = VersionedTransaction.deserialize(Buffer.from(quote.transaction, "base64"));
-  if (transaction.message.staticAccountKeys[0]?.toBase58() !== buyback.publicKey.toBase58()) throw new Error("sportpad_fee_payer_mismatch");
+  const inspection = await inspectBuybackOrder({
+    connection,
+    quote,
+    signer: buyback.publicKey,
+    mint,
+    tokenProgram,
+    amountLamports: payload.amountLamports,
+  });
+  if (!inspection.outputAta.equals(tokenAccount.address)) throw new Error("sportpad_output_ata_mismatch");
+  const transaction = inspection.transaction;
   transaction.sign([buyback]);
+  const expectedSignature = bs58.encode(transaction.signatures[0]);
   const executeResponse = await fetch(EXECUTE_URL, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": jupiterKey },
@@ -114,15 +119,22 @@ async function buyAndBurn(payload, arm) {
   });
   const executed = await executeResponse.json().catch(() => ({}));
   if (!executeResponse.ok || executed.status !== "Success" || !executed.signature) throw new Error("sportpad_swap_failed");
+  if (executed.signature !== expectedSignature) throw new Error("sportpad_swap_signature_mismatch");
+  const receipt = await connection.getTransaction(executed.signature, {
+    commitment: "confirmed", maxSupportedTransactionVersion: 0,
+  });
+  const { purchased } = inspectBuybackSettlement(receipt, inspection);
   const balanceAfter = BigInt((await connection.getTokenAccountBalance(tokenAccount.address, "confirmed")).value.amount);
-  const purchased = balanceAfter - balanceBefore;
-  if (purchased <= 0n) throw new Error("sportpad_swap_output_missing");
+  if (balanceAfter < purchased) throw new Error("sportpad_swap_output_missing");
   const burn = new Transaction().add(createBurnCheckedInstruction(
     tokenAccount.address, mint, buyback.publicKey, purchased, mintState.decimals, [], tokenProgram,
   ));
   const burnSignature = await sendAndConfirmTransaction(connection, burn, [buyback], { commitment: "confirmed", maxRetries: 4 });
-  const supplyAfter = (await getMint(connection, mint, "confirmed", tokenProgram)).supply;
-  if (supplyBefore - supplyAfter !== purchased) throw new Error("sportpad_supply_delta_mismatch");
+  const burnReceipt = await connection.getTransaction(burnSignature, { commitment: "confirmed" });
+  inspectBuybackBurnReceipt(burnReceipt, {
+    signature: burnSignature, outputAta: tokenAccount.address, mint,
+    signer: buyback.publicKey, amount: purchased,
+  });
   return { txHash: burnSignature, sourceTxHash: executed.signature, outputAmountAtomic: purchased.toString() };
 }
 

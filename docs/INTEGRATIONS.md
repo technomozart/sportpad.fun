@@ -1,13 +1,14 @@
 # Integration checklist
 
-Mainnet launch execution is configuration-gated. Current integrations support
+Mainnet launch execution is currently paused. Current integrations support
 private draft storage, signed Solana wallet sessions, wallet-approved Pump
 mainnet launches, exact finalized onchain verification, public launch receipts,
 official asset identity, and live read-only provider and reward-route checks.
 The durable execution control plane, treasury observer, finalized Pump fee
 indexer, wallet-confirmed fee distribution and swaps, holder accounting,
-inventory-backed allocations, Fan Token payouts, and SPORTPAD burn builder are
-implemented. Unattended signing remains locked.
+inventory-backed allocation code, Fan Token payout plans, and a SPORTPAD burn
+builder are implemented. Automatic acquisition, payouts, bridging, and burns
+are not live. See [current deployment and blockers](AUTOMATION.md).
 
 ## Implemented infrastructure
 
@@ -35,19 +36,18 @@ implemented. Unattended signing remains locked.
 
 - `SPORTPAD_WORKER_TOKEN` authenticates internal scheduler calls. It is a
   server secret, not a wallet key.
-- `SPORTPAD_SIGNER_PROVIDER` identifies the KMS, HSM, MPC, or transaction-policy
-  service. `SOLANA_FEE_COLLECTOR_KEY_REF`,
-  `SOLANA_REWARD_VAULT_KEY_REF`, and
-  `SOLANA_BUYBACK_EXECUTOR_KEY_REF` are opaque provider references. They must
-  never contain raw private keys or seed phrases.
+- Two isolated Railway worker services have been deployed. Dedicated signing
+  keys may be added only to those services' private variables; they are not
+  stored in D1, Sites, source control, or chat. The services currently lack
+  signer keys, and adding keys alone does not lift the financial gate.
 - `SPORTPAD_FEE_INDEXER_ENABLED` gates the read-only finalized Pump fee indexer.
   It does not authorize signing or moving funds.
 - `SPORTPAD_SETTLEMENT_ENABLED`, `SPORTPAD_REWARDS_ENABLED`,
   `SPORTPAD_HOLDER_INDEXER_ENABLED`, `SPORTPAD_CLAIMS_ENABLED`, and
   `SPORTPAD_BUYBACK_ENABLED` independently gate each lane and default false.
-- Database pause controls default true. A lane becomes ready only when its
-  deployment flag, managed signer requirements, worker authentication, and
-  pause state all pass.
+- Database pause controls default true. A lane remains unavailable while the
+  static financial gate is closed, even if its deployment flag, signer, worker
+  authentication, and pause controls otherwise pass.
 - The treasury observer uses Helius only for finalized reads and writes real
   slots and lamport balances to D1. It has no signing capability.
 - The Pump fee indexer scans each published launch's immutable sharing-config
@@ -58,8 +58,9 @@ implemented. Unattended signing remains locked.
 - The holder indexer aggregates finalized Helius token accounts by on-curve
   owner, excludes creator and protocol-controlled wallets, accrues the previous
   balance over each measured interval, and records a deterministic snapshot hash.
-- Reward epochs can allocate only verified Jupiter output not already funded to
-  another epoch and not reserved for an unpaid allocation.
+- Reward epochs require acquired inventory that is not already funded to
+  another epoch or reserved for an unpaid allocation. Holder-snapshot and
+  receipt-verification hardening is still in progress.
 - Fan Token payouts are exact `TransferChecked` transactions. The server binds
   the mint, treasury, recipient, amount, token program, blockhash, and message
   hash before the treasury wallet may sign.
@@ -119,8 +120,11 @@ implemented. Unattended signing remains locked.
   `SOLANA_BUYBACK_TREASURY_ADDRESS` values. Missing or invalid configuration
   fails closed.
 - The creator's verified wallet must differ from both platform treasuries.
-- The selected reward address must still match the official registry and have
-  a live Jupiter SOL route immediately before signing.
+- The selected reward must match the official registry and pass its
+  chain-specific route policy immediately before signing. Only the Solana
+  subset is selectable today and uses a Jupiter SOL route. Chiliz rewards
+  remain paused until direct acquisition and claims of current V2 contracts
+  are proven with a prefunded CHZ treasury.
 - The first wallet approval creates the Pump V2 Token-2022 coin with no initial
   buy. The second creates and irrevocably locks the exact 8,000 / 2,000 bps
   creator-fee recipients.
@@ -160,11 +164,15 @@ implemented. Unattended signing remains locked.
 
 - Fan Tokens are rooted in the Chiliz ecosystem and now use an omnichain supply
   model across Chiliz Chain, Solana, and Base through LayerZero.
-- The selectable registry contains 82 exact Solana token addresses from the
-  official Chiliz token address registry. These identify official Fan Tokens
-  on Solana, not independent SportPad copies.
+- The catalog contains 82 exact Solana token addresses from the official
+  Chiliz token address registry. These identify official Fan Tokens on Solana,
+  not independent SportPad copies or proof of executable Jupiter liquidity.
 - Another 14 FanTokens catalog assets are displayed as catalog-only because the
   snapshot has no official Solana token address for them.
+- The 78 Chiliz catalog entries now identify official 18-decimal V2 contracts
+  from Chiliz's 2026 migration table. Historical 0-decimal contracts and Kayen
+  wrappers are retained only as legacy references. Read-only direct V2 Kayen
+  quotes are not a verified execution, inventory, or payout route.
 - Registry membership never enables swaps by itself. Liquidity, inventory, and
   canary checks are still required per asset.
 
@@ -206,24 +214,25 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
   operator suspension, read-only Helius and Jupiter checks, execution controls,
   worker authentication, treasury observations, and finalized Pump fee
   ingestion.
-- Activation still requires an explicit deployment approval, managed signer
-  integration, and a capped mainnet canary. The two public receive addresses are
-  configured but are not automated signers.
-- Locked: fee sweeping, treasury swap automation, funded reward
-  vaults, holder accounting workers, claims, SPORTPAD mint or burns, and
-  cross-chain replenishment.
+- Activation still requires dedicated worker signers, chain-receipt and ledger
+  verification, funded route checks, independent review, and capped canaries.
+  The two public Solana receive addresses are configured but currently have
+  no automated signing keys in Railway.
+- Locked: public mainnet launch, financial settlement, treasury swap
+  automation, funded reward claims, SPORTPAD buyback and burn, and cross-chain
+  replenishment. Read-only observations are not a claim of execution readiness.
 
 ## Remaining mainnet transaction stages
 
-- Policy-controlled references for the reward treasury, reward vault, and
-  SPORTPAD buyback executor signers.
+- Dedicated signing keys installed privately in the matching Railway workers,
+  with strict float limits and an upgrade path to policy-controlled signing.
 - A deployed and independently verified SPORTPAD mint for buyback and burn.
-- A written allowlist limited to official Fan Token Solana addresses with verified
+- A written allowlist of official Fan Token assets with verified chain-specific
   liquidity and inventory routes.
 - Per-transaction and daily limits, pause controls, monitoring, and independent
   RPC reconciliation.
 
-### Cross-chain inventory, only if required
+### Cross-chain inventory for Chiliz rewards
 
 - LayerZero Value Transfer API access.
 - Production Chiliz RPC provider plus a second read-only endpoint.
@@ -232,10 +241,13 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
   inventory threshold for every enabled token.
 
 Cross-chain replenishment must be asynchronous treasury inventory management.
-It must not block a user's Solana reward claim.
+It must not present a quote as funded inventory, and it must not block a user's
+claim after that claim has already been backed by acquired inventory.
 
 ## Never provide
 
-Do not paste or upload a production private key, seed phrase, keystore, or raw
-signing secret. The application should consume a signer reference supplied by a
-secret manager or transaction-policy service.
+Do not paste or upload a private key, seed phrase, keystore, or raw signing
+secret to chat, source control, D1, the public website, or Sites variables.
+Only dedicated low-balance hot-wallet private keys may be placed directly in
+the matching Railway worker's private service variables; a seed phrase should
+never be used for that purpose.

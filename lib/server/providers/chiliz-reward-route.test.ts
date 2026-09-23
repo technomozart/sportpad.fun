@@ -8,7 +8,7 @@ function word(value: bigint) {
   return value.toString(16).padStart(64, "0");
 }
 
-test("Kayen quote calldata uses the exact WCHZ to wrapped Fan Token path", () => {
+test("Kayen quote calldata uses the exact WCHZ to selected Fan Token path", () => {
   const output = "0x1111111111111111111111111111111111111111";
   const data = encodeKayenGetAmountsOut(output, 7n);
 

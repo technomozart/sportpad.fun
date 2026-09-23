@@ -2,18 +2,26 @@
 
 [![CI](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml/badge.svg)](https://github.com/technomozart/sportpad.fun/actions/workflows/ci.yml)
 [![Live site](https://img.shields.io/badge/live-sportpad.fun-9cff57)](https://sportpad.fun)
-![Mainnet live](https://img.shields.io/badge/mainnet-wallet_confirmed-9cff57)
+![Mainnet paused](https://img.shields.io/badge/mainnet-execution_paused-f4b860)
 
 SPORTPAD is a sports-native Solana launchpad. Creators can save a private
-community-token draft, choose an official Fan Token reward, pass content review,
-and launch a real Pump coin on Solana mainnet from their own wallet. Each
-community launch locks its creator fees to two public treasury addresses: 80%
-for Fan Token rewards and 20% to buy and burn SPORTPAD. SPORTPAD's own creator
-fees are excluded from that route and retained for project development.
+community-token draft and choose an official Fan Token reward. The Pump mainnet
+launcher and 80/20 creator-fee route are implemented but **public mainnet
+execution is currently paused**. The intended route sends 80% of a community
+launch's creator fees toward Fan Token rewards and 20% toward buying and burning
+SPORTPAD. SPORTPAD's own creator fees are excluded and retained for project
+development. Do not interpret a public website or running worker as a live
+reward, claim, bridge, or burn service.
 
 Live site: [sportpad.fun](https://sportpad.fun)
 
-## What works today
+## Implemented components and current hold
+
+The interface and private drafting workflow are public. Economic execution is
+held by `MAINNET_EXECUTION_ENABLED=false` and the static financial-ledger gate
+while signer setup, receipt verification, bridge funding, and canaries remain
+unfinished. The capabilities below describe code paths, not a promise that all
+paths can be used with real funds today.
 
 - A responsive product site covering discovery, launch creation, rewards,
   matchday, official Fan Tokens, economics, policy, learning, SPORTPAD, and
@@ -31,18 +39,20 @@ Live site: [sportpad.fun](https://sportpad.fun)
   account through an opaque, expiring, HttpOnly session. Seed phrases and private
   keys never enter the application. Phantom, Solflare, Backpack, Brave Wallet,
   and compatible injected Solana wallets are detected without storing a private key.
-- Wallet-approved Pump mainnet coin creation with no initial buy and no Pump
+- A gated wallet-approved Pump mainnet coin creation path with no initial buy and no Pump
   holder rewards. The server independently verifies the creator, Token-2022
   mint, SOL-paired bonding curve, and reviewed metadata before publication.
-- A second wallet approval creates and permanently locks Pump fee sharing with
+- A gated second wallet approval is designed to create and permanently lock Pump fee sharing with
   exactly 8,000 bps sent to the configured reward treasury and 2,000 bps sent
   to the SPORTPAD buyback treasury. The server verifies both recipients and the
   revoked fee-share admin onchain.
-- A live Jupiter route check for the selected official Fan Token before IPFS
-  preparation or mainnet signing. Assets without an executable SOL route are
-  blocked instead of being presented as launchable.
+- A live Jupiter route check for selectable Solana Fan Tokens before IPFS
+  preparation or mainnet signing. Chiliz selections are paused while their
+  post-migration V2 acquisition and payout path is verified. A registry address
+  or a small read-only Kayen quote is not evidence of an executable reward.
 - A 96-asset FanTokens catalog view: 82 official Fan Tokens have published
-  Solana token addresses in the Chiliz registry and are selectable; 14
+  Solana token addresses in the Chiliz registry. That does not mean 82 can be
+  bought through Jupiter: an actual executable route must pass checks. Fourteen
   catalog-only assets are shown without an invented Solana address or route.
   Fan Tokens are rooted in the Chiliz ecosystem and use an omnichain supply
   model across Chiliz Chain, Solana, and Base. The Solana addresses are not
@@ -70,22 +80,22 @@ Live site: [sportpad.fun](https://sportpad.fun)
   distributions for published community launches and deduplicates them by
   signature and instruction position. It explicitly excludes the configured
   SPORTPAD mint, whose own fees remain available for project development.
-- Exact wallet-confirmed Pump fee collection and immutable 80/20 distribution.
+- A held wallet-confirmed Pump fee collection and immutable 80/20 distribution path.
   The app verifies the active sharing configuration and revoked admin before the
   operator wallet can sign.
-- Exact Jupiter Swap V2 intents for buying the selected official Fan Token with
+- Held Jupiter Swap V2 intents for buying selectable Solana Fan Tokens with
   the 80% treasury and SPORTPAD with the 20% treasury. Orders are exact-in,
   capped at 1% slippage and 5% price impact, message-hash bound, and submitted
   only after the matching treasury wallet signs.
 - A finalized Helius holder indexer for active reward epochs. It aggregates all
   token accounts by on-curve wallet, excludes protocol and treasury accounts,
   accrues time-weighted token-seconds, and records a hash for every snapshot.
-- Deterministic Fan Token allocations backed by acquired inventory, plus exact
-  wallet-confirmed SPL Token payouts with idempotent recipient token-account
-  creation and confirmed Solana receipts.
-- Exact SPORTPAD burns funded only by the 20% share from community launches,
-  once the public SPORTPAD mint address is configured. SPORTPAD's own creator
-  fees are never sent into its buyback and burn lane.
+- Deterministic Fan Token allocation and Solana payout code paths, with payout
+  execution currently held while atomic accounting and receipt verification are
+  completed and tested.
+- A planned SPORTPAD buyback and burn lane for only the 20% share from community
+  launches. The automatic lane is hard-disabled even after a SPORTPAD mint is
+  configured; it still needs durable swap-to-burn recovery and funded canaries.
 
 The interface does not display fabricated market caps, trading volume, holder
 counts, reward balances, settlement events, or match results.
@@ -97,31 +107,38 @@ counts, reward balances, settlement events, or match results.
 | Product interface | Implemented and public |
 | Private drafts and image storage | Implemented |
 | Wallet authentication | Implemented for Solana mainnet wallets |
-| Pump mainnet launch | Implemented behind content approval, route validation, treasury configuration, and two explicit wallet approvals |
-| Public mainnet receipts | Independently verified onchain before publication; operator suspension supported |
-| Production activation | Mainnet enabled; public treasuries, Helius, Jupiter, moderation, and worker authentication configured |
-| Control plane, treasury observation, and fee ingestion | Implemented and public-status visible |
-| Fee sweeping and swaps | Wallet-confirmed execution deployed |
-| Holder rewards and payouts | Finalized indexing, time-weighted allocation, wallet dashboard, and wallet-confirmed Fan Token payouts deployed |
-| SPORTPAD buyback and burn | Execution deployed; waiting only for the public SPORTPAD mint address |
+| Pump mainnet launch | Code path implemented, but public execution paused |
+| Public mainnet receipts | Verification path implemented; no unverified receipts should be presented as live |
+| Production activation | Paused; the workers lack dedicated signing keys and the financial gate remains closed |
+| Control plane, treasury observation, and fee ingestion | Implemented; this does not imply financial settlement |
+| Fee sweeping and swaps | Economic execution paused; Chiliz acquisition currently needs prefunded CHZ |
+| Holder rewards and payouts | Dashboard and allocation paths exist, but automatic payouts are not live |
+| SOL-to-Chiliz replenishment | Quote-only route checker; no live bridge signer or transaction recovery |
+| SPORTPAD buyback and burn | Hard-disabled; mint configuration alone cannot activate it |
 
 ## Remaining external setup
 
-Unattended treasury signing is intentionally not enabled. Collection, swaps,
-Fan Token payouts, and burns require the matching treasury wallet to review and
-sign the exact transaction. This keeps seed phrases and raw private keys out of
-the application.
-
-The 20% buyback can start as soon as the public SPORTPAD mint address is added to
-the production environment. Cross-chain inventory replenishment is not required
-for Fan Tokens with executable Solana liquidity, and remains a later option for
-catalog assets without a Solana route. Unattended execution should remain locked
-until signer isolation, legal review, monitoring, capped canaries, and an
-external security audit are complete.
+The two restricted Railway workers exist, but their dedicated treasury signing
+keys have not yet been added. Adding them may start worker processes; it will
+**not** unlock launches or financial execution. The Chiliz worker currently
+needs prefunded native CHZ and cannot refill itself from Solana. All 78 saved
+Chiliz reward addresses had legacy 0-decimal contracts after the official 2026
+migration, so current 18-decimal V2 contract identity and direct Kayen routes
+are being revalidated. Read-only 1-CHZ and 100-CHZ quotes exist for all 78,
+but 25 show severe depth impact at 100 CHZ; these quotes do not make rewards
+launch-ready. The quote-only
+replenishment tool still needs production LayerZero Value Transfer API access,
+validated executable routes, signing, a durable transaction journal, and
+post-bridge reconciliation. The buyback lane also needs durable swap/burn
+recovery and a funded test of the coded two-leg settlement ordering. Server-side receipt and holder-snapshot
+atomicity code now exists but still needs end-to-end funded canaries, monitoring,
+and independent security review before public funds should be routed through
+the system.
 
 Raw private keys and seed phrases do not belong in this repository, chat, or
-local environment files. Production signers must use policy-controlled KMS,
-HSM, or MPC references.
+local environment files. Dedicated hot-wallet private keys may be entered only
+into the matching Railway worker's private service variables, with limited
+balances and operational controls. See [operator setup and live blockers](docs/AUTOMATION.md).
 
 ## Product routes
 

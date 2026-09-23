@@ -169,6 +169,9 @@ export async function POST(request: Request) {
   if (!rewardAsset) {
     return privateJson({ error: "Choose a verified reward asset." }, 400);
   }
+  if (rewardAsset.chain === "chiliz" && rewardAsset.routeStatus !== "current_verified") {
+    return privateJson({ error: "Chiliz Fan Token drafts are paused while current V2 purchase and payout routes are verified. Choose a Solana reward option for now." }, 409);
+  }
   if (!env.BUCKET) {
     return privateJson({ error: "Image storage is unavailable. Please retry shortly." }, 503);
   }

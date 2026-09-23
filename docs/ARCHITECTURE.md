@@ -1,11 +1,13 @@
 # SPORTPAD architecture
 
-Status: product interface, private draft storage, wallet authentication, Pump
-mainnet launch, immutable 80/20 routing, finalized fee indexing, exact Jupiter
-swaps, holder indexing, time-weighted allocations, Fan Token payouts, and
-SPORTPAD burn transactions are implemented. Every treasury transaction is
-wallet-confirmed. Unattended signing remains locked, and SPORTPAD buyback waits
-for the public SPORTPAD mint address.
+Status: the product interface, private draft storage, wallet authentication,
+Pump mainnet transaction assembly and verification, immutable 80/20 routing,
+and read-only indexing paths are implemented. **Public mainnet launch and all
+automatic financial execution are paused.** The worker services are deployed
+but lack dedicated signer keys; server-side receipt verification, atomic holder
+snapshots, bridge replenishment, durable buyback recovery, and funded canaries
+are unfinished. Neither a SPORTPAD mint address nor a running worker alone
+can activate the burn lane. See [current operator status](AUTOMATION.md).
 
 ## Implemented application path
 
@@ -118,17 +120,23 @@ use `no-store` caching so a takedown is not held by an application cache.
 
 The catalog currently contains 96 FanTokens entries:
 
-- 82 selectable official Fan Tokens with exact Solana token addresses from the
-  Chiliz registry and official token imagery. Fan Tokens are rooted in the
+- 82 official Fan Tokens with exact Solana token addresses from the
+  Chiliz registry and official token imagery. Published addresses do not imply
+  Jupiter liquidity or that an asset is launchable. Fan Tokens are rooted in the
   Chiliz ecosystem and use an omnichain supply model across Chiliz Chain,
   Solana, and Base. The Solana address is not an independent SportPad copy.
 - 14 catalog-only assets without a published official Solana address in the
   registry snapshot. They remain visible but are not given an invented route.
 
-Every selected reward asset receives a live Jupiter route check before mainnet
-signing. A published token address proves identity, not liquidity, inventory,
-or execution readiness. A route check proves quote availability only; it does
-not prove a funded reward vault or claim system.
+The launch builder currently shows only two Solana reward options, each subject
+to a live Jupiter route check. The 78 Chiliz assets remain in the catalog but
+are not selectable. Their saved Kayen wrapper routes referred to legacy
+0-decimal Fan Tokens, while official V2 contracts use 18 decimals. Read-only
+Kayen quotes now find direct routes to all 78 V2 contracts, but the worker,
+receipt checks, and claim accounting must be migrated and proven before these
+can be enabled. A published token address proves identity, not liquidity,
+inventory, or execution readiness. A small quote does not prove depth or a
+funded reward vault.
 
 ## Data stores and migrations
 
@@ -216,14 +224,14 @@ rewards, buy SPORTPAD, or burn supply.
 
 ## Implemented mainnet launch coordinator
 
-The production launcher is a separate wallet-approved path. It is available
-only when `MAINNET_EXECUTION_ENABLED=true` and two valid, distinct public Solana
-addresses are configured as `SOLANA_REWARD_TREASURY_ADDRESS` and
-`SOLANA_BUYBACK_TREASURY_ADDRESS`.
+The production launcher is a separate wallet-approved path. It remains held
+while `MAINNET_EXECUTION_ENABLED=false`, regardless of configured public
+treasury addresses. Releasing that flag also requires the independent launch
+and financial-safety gates to pass; it must not be treated as a sole activation
+switch.
 
-Immediately before signing, the server confirms the reviewed reward address is
-still in the official registry and requests a live SOL-to-reward quote from
-Jupiter. It then freezes the creator wallet, Pump metadata URI, 80% reward
+Immediately before signing, the server checks the selected reward against its
+chain-specific route policy. It then freezes the creator wallet, Pump metadata URI, 80% reward
 treasury, and 20% SPORTPAD buyback treasury in D1. The creator wallet signs two
 transactions: Pump V2 coin creation with no initial buy, followed by the
 one-time fee-sharing configuration and admin revocation.
@@ -288,8 +296,8 @@ authorities must be read from chain state.
 
 ## Mainnet execution components
 
-The following components are deployed behind the operator allowlist, database
-pause controls, exact transaction intents, and matching treasury wallets:
+The following components exist in code behind operator, environment, static,
+and database safety gates. Their presence does not imply they are live:
 
 1. **Settlement keeper**
    - Permissionlessly sweeps post-graduation Pump AMM creator fees and triggers
@@ -300,24 +308,29 @@ pause controls, exact transaction intents, and matching treasury wallets:
 2. **Holder indexer and reward publisher**
    - Aggregates token accounts by owner and excludes controlled accounts.
    - Uses time-weighted token-seconds instead of an end-of-epoch snapshot.
-   - Publishes only fully funded allocations with deterministic proofs and
-     single-claim protection.
+   - Is being hardened so only complete, funded holder snapshots can produce
+     deterministic allocations; public claims remain held.
 
 3. **SPORTPAD burn executor**
-   - Buys the deployed SPORTPAD mint from the 20% share.
-   - Calls an exact SPL burn after the buyback wallet approves it.
-   - Remains inactive until `SPORTPAD_MINT_ADDRESS` identifies the deployed token.
+   - Is designed to buy the deployed SPORTPAD mint from the 20% share and burn it.
+   - Is hard-disabled. A mint address alone cannot enable it; it still requires
+     durable swap-to-burn recovery, funded validation of two-leg ordering, spend limits,
+     receipt verification, and a funded canary.
 
-4. **Optional cross-chain replenishment**
-   - Remains a treasury inventory operation, not a user claim dependency.
-   - Requires a validated route, capped signer, decimal handling, timeout
-     policy, and sufficient prefunded inventory.
+4. **Cross-chain replenishment**
+   - Is a treasury inventory operation required before unattended Chiliz
+     rewards can be funded from Solana creator fees.
+   - Currently has a quote-only route checker, not a signer or bridge worker.
+     Production Value Transfer API access, funded route checks, a durable
+     transfer journal, destination reconciliation, and canaries remain.
 
 ## Safety and failure policy
 
 Production private keys must never appear in chat, source control, database
-rows, ordinary environment files, logs, screenshots, or analytics. Material
-funds require multisig or cold custody, while automated roles require
+rows, public Sites variables, local environment files, logs, screenshots, or
+analytics. Dedicated hot-wallet keys may be entered only into private Railway
+worker variables with tightly limited balances; material funds require
+multisig or cold custody. Longer-term automated roles should use
 policy-controlled KMS, HSM, or MPC references with mint allowlists and hard
 transaction limits.
 

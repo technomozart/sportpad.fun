@@ -1,5 +1,13 @@
 import { createPublicClient, createWalletClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { CHILIZ_REWARD_ASSETS } from "../lib/protocol/chiliz-reward-assets.ts";
+import {
+  assertFreshQuote,
+  assertOfficialV2Asset,
+  chzSpendFromSolanaQuote,
+  positiveAtomic,
+  validateKayenQuote,
+} from "../lib/protocol/chiliz-worker-safety.mjs";
 
 const CHILIZ = {
   id: 88888,
@@ -9,21 +17,22 @@ const CHILIZ = {
   blockExplorers: { default: { name: "Chiliz Explorer", url: "https://scan.chiliz.com" } },
 };
 const KAYEN_ROUTER = "0x1918EbB39492C8b98865c5E53219c3f1AE79e76F";
-const WRAPPER_FACTORY = "0xAEdcF2bf41891777c5F638A098bbdE1eDBa7B264";
 const WCHZ = "0x677F7e16C7Dd57be1D4C8aD1244883214953DC47";
 const SOL = "So11111111111111111111111111111111111111112";
 const SOLANA_CHZ = "6eftxVbSAunVEoxUWdGhPdxg5UdsJ8Wkwy5w5YFuxouw";
-const ONE_FAN_TOKEN = 1_000_000_000_000_000_000n;
+const ONE_CHZ = 1_000_000_000_000_000_000n;
+// A read-only route audit is not a funded end-to-end canary. Keep this hold
+// independent of API flags so an accidental deployment cannot move funds.
+const CHILIZ_WORKER_V2_EXECUTION_VERIFIED = false;
 const ERC20 = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
+  "function decimals() view returns (uint8)",
+  "function transfer(address to, uint256 amount) returns (bool)",
 ]);
 const ROUTER = parseAbi([
   "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
   "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
 ]);
-const WRAPPER = parseAbi(["function unwrap(address account, address wrappedToken, uint256 amount)"]);
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -64,74 +73,80 @@ async function runMaintenance(path) {
 }
 
 async function solToChzWei(lamports) {
+  positiveAtomic(lamports, "chiliz_quote_input_invalid");
   const key = required("JUPITER_API_KEY");
   const url = new URL("https://api.jup.ag/swap/v2/order");
   url.searchParams.set("inputMint", SOL);
   url.searchParams.set("outputMint", SOLANA_CHZ);
   url.searchParams.set("amount", lamports);
   const response = await fetch(url, { headers: { Accept: "application/json", "x-api-key": key }, signal: AbortSignal.timeout(12_000) });
+  const quotedAt = Date.now();
   const quote = await response.json().catch(() => ({}));
-  if (!response.ok || !/^[1-9][0-9]*$/.test(quote.outAmount || "")) throw new Error("chz_quote_unavailable");
-  const impact = Math.abs(Number(quote.priceImpact));
-  if (!Number.isFinite(impact) || impact > 5) throw new Error("chz_quote_price_impact");
-  return BigInt(quote.outAmount) * 10_000_000_000n;
+  if (!response.ok) throw new Error("chiliz_quote_unavailable");
+  return chzSpendFromSolanaQuote(quote, lamports, quotedAt, Date.now(), SOL, SOLANA_CHZ);
 }
 
 async function executePurchase(payload, arm) {
+  if (!CHILIZ_WORKER_V2_EXECUTION_VERIFIED) throw new Error("chiliz_v2_execution_not_verified");
+  assertOfficialV2Asset(payload, CHILIZ_REWARD_ASSETS);
+  const token = payload.fanTokenContract;
+  const decimals = await publicClient.readContract({ address: token, abi: ERC20, functionName: "decimals" });
+  if (decimals !== 18) throw new Error("chiliz_v2_decimals_mismatch");
   const spend = await solToChzWei(payload.rewardAmountLamports);
-  const gasReserve = 3n * ONE_FAN_TOKEN;
+  const gasReserve = 3n * ONE_CHZ;
   const balance = await publicClient.getBalance({ address: account.address });
   if (balance <= spend + gasReserve) throw new Error("chiliz_treasury_underfunded");
-  const path = [WCHZ, payload.wrappedContract];
-  const amounts = await publicClient.readContract({ address: KAYEN_ROUTER, abi: ROUTER, functionName: "getAmountsOut", args: [spend, path] });
-  const expected = amounts.at(-1);
-  if (!expected || expected <= 0n) throw new Error("kayen_route_unavailable");
-  const minimum = expected * 975n / 1_000n;
-  const before = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "balanceOf", args: [account.address] });
+  const path = [WCHZ, token];
+  const probeInput = spend / 10n;
+  const [probeAmounts, fullAmounts] = await Promise.all([
+    publicClient.readContract({ address: KAYEN_ROUTER, abi: ROUTER, functionName: "getAmountsOut", args: [probeInput, path] }),
+    publicClient.readContract({ address: KAYEN_ROUTER, abi: ROUTER, functionName: "getAmountsOut", args: [spend, path] }),
+  ]);
+  const quotedAt = Date.now();
+  const minimum = validateKayenQuote(spend, probeInput, probeAmounts, fullAmounts, quotedAt, Date.now());
+  const before = await publicClient.readContract({ address: token, abi: ERC20, functionName: "balanceOf", args: [account.address] });
   await arm();
+  assertFreshQuote(quotedAt, Date.now());
   const hash = await walletClient.writeContract({
     address: KAYEN_ROUTER,
     abi: ROUTER,
     functionName: "swapExactETHForTokens",
-    args: [minimum, path, account.address, BigInt(Math.floor(Date.now() / 1_000) + 180)],
+    args: [minimum, path, account.address, BigInt(Math.floor(Date.now() / 1_000) + 90)],
     value: spend,
     account,
   });
   const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 2, timeout: 120_000 });
   if (receipt.status !== "success") throw new Error("kayen_swap_reverted");
-  const after = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "balanceOf", args: [account.address] });
+  const after = await publicClient.readContract({ address: token, abi: ERC20, functionName: "balanceOf", args: [account.address] });
   const acquired = after - before;
   if (acquired < minimum) throw new Error("kayen_output_below_minimum");
   return { txHash: hash, outputAmountAtomic: acquired.toString() };
 }
 
 async function executeClaim(payload, arm) {
-  const amount = BigInt(payload.amountAtomic);
-  if (amount <= 0n || amount % ONE_FAN_TOKEN !== 0n) throw new Error("claim_amount_not_whole_token");
-  const balance = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "balanceOf", args: [account.address] });
-  if (balance < amount) throw new Error("reward_inventory_underfunded");
-  const allowance = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "allowance", args: [account.address, WRAPPER_FACTORY] });
-  await arm();
-  if (allowance < amount) {
-    const approvalHash = await walletClient.writeContract({
-      address: payload.wrappedContract,
-      abi: ERC20,
-      functionName: "approve",
-      args: [WRAPPER_FACTORY, 2n ** 256n - 1n],
-      account,
-    });
-    const approval = await publicClient.waitForTransactionReceipt({ hash: approvalHash, confirmations: 2, timeout: 120_000 });
-    if (approval.status !== "success") throw new Error("wrapper_approval_reverted");
+  if (!CHILIZ_WORKER_V2_EXECUTION_VERIFIED) throw new Error("chiliz_v2_execution_not_verified");
+  assertOfficialV2Asset(payload, CHILIZ_REWARD_ASSETS);
+  if (typeof payload.destinationAddress !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(payload.destinationAddress)) {
+    throw new Error("claim_destination_invalid");
   }
+  const amount = positiveAtomic(payload.amountAtomic, "claim_amount_invalid");
+  const token = payload.fanTokenContract;
+  const decimals = await publicClient.readContract({ address: token, abi: ERC20, functionName: "decimals" });
+  if (decimals !== 18) throw new Error("chiliz_v2_decimals_mismatch");
+  const balance = await publicClient.readContract({ address: token, abi: ERC20, functionName: "balanceOf", args: [account.address] });
+  if (balance < amount) throw new Error("reward_inventory_underfunded");
+  const gasBalance = await publicClient.getBalance({ address: account.address });
+  if (gasBalance < ONE_CHZ) throw new Error("chiliz_claim_gas_underfunded");
+  await arm();
   const hash = await walletClient.writeContract({
-    address: WRAPPER_FACTORY,
-    abi: WRAPPER,
-    functionName: "unwrap",
-    args: [payload.destinationAddress, payload.wrappedContract, amount],
+    address: token,
+    abi: ERC20,
+    functionName: "transfer",
+    args: [payload.destinationAddress, amount],
     account,
   });
   const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 2, timeout: 120_000 });
-  if (receipt.status !== "success") throw new Error("reward_unwrap_reverted");
+  if (receipt.status !== "success") throw new Error("reward_transfer_reverted");
   return { txHash: hash };
 }
 

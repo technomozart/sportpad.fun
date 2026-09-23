@@ -5,6 +5,7 @@ import bs58 from "bs58";
 import { Buffer } from "buffer";
 
 import { allocateEpochRewards } from "@/lib/protocol/accounting";
+import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
 import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@/lib/protocol/pump-devnet-verification";
@@ -408,6 +409,9 @@ export async function POST(request: Request) {
   if (!isOperatorRequest(request)) return privateJson({ error: "Operator access is required." }, 403);
   if (!isSameOrigin(request)) return privateJson({ error: "Same-origin request required." }, 403);
   if (!database) return privateJson({ error: "Reward database is unavailable." }, 503);
+  if (!FINANCIAL_LEDGER_VERIFIED) {
+    return privateJson({ error: "Legacy reward execution is paused pending atomic accounting and receipt verification." }, 503);
+  }
   const actor = getLaunchDraftOwner(request);
   if (!actor) return privateJson({ error: "Operator access is required." }, 403);
   const rateLimit = await consumeFixedWindow({ scope: "operator_rewards", subject: actor, limit: 30, windowSeconds: 60 });

@@ -9,6 +9,7 @@ import {
   type MaintenanceRun,
 } from "@/lib/protocol/launch-automation-gate";
 import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
+import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
 import type { RewardChain } from "@/lib/protocol/reward-options";
 import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig } from "@/lib/server/execution-config";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
@@ -64,6 +65,9 @@ export async function readLaunchAutomationReadiness(
   if (!execution.flags.rewardsEnabled || !execution.flags.claimsEnabled || controls.rewardsPaused) missing.push("reward and claim execution");
   if (!execution.flags.buybackEnabled || controls.buybackPaused) missing.push("buyback execution");
   if (!FINANCIAL_LEDGER_VERIFIED) missing.push("financial ledger and receipt verification");
+  if (rewardChain === "chiliz" && !CHILIZ_ASSET_MIGRATION_VERIFIED) {
+    missing.push("Chiliz V2 acquisition and payout execution not verified");
+  }
   if (!BUYBACK_EXECUTION_VERIFIED) missing.push("buyback safety verification");
   return { ready: missing.length === 0, missing };
 }

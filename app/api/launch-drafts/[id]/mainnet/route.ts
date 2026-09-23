@@ -150,6 +150,9 @@ export async function POST(request: Request, context: MainnetRouteContext) {
       if (!rewardAsset || rewardAsset.tokenAddress.toLowerCase() !== draft.rewardMint?.toLowerCase()) {
         return privateJson({ error: "The approved reward token no longer matches the verified registry." }, 409);
       }
+      if (rewardChain === "chiliz" && rewardAsset.routeStatus !== "current_verified") {
+        return privateJson({ error: "This Fan Token's current Chiliz acquisition and payout route is not verified." }, 409);
+      }
       const config = readMainnetConfig();
       if (!config.ready || !config.rewardTreasury || !config.buybackTreasury) {
         return privateJson({ error: `Mainnet launch is waiting for: ${config.missing.join(", ")}.` }, 409);
@@ -162,7 +165,7 @@ export async function POST(request: Request, context: MainnetRouteContext) {
         return privateJson({ error: `Mainnet launches are paused until reward and buyback automation are verified. Waiting for: ${automation.missing.join(", ")}.` }, 409);
       }
       const rewardRoute = rewardChain === "chiliz"
-        ? await checkChilizRewardRoute(rewardAsset.wrappedTokenAddress!)
+        ? await checkChilizRewardRoute(rewardAsset.tokenAddress)
         : await checkRewardRoute(rewardAsset.tokenAddress);
       if (!rewardRoute.available) {
         return privateJson({ error: `${rewardAsset.symbol} does not have a live acquisition route on ${rewardAsset.venue} right now.` }, 409);

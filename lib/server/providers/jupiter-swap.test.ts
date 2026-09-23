@@ -73,6 +73,18 @@ test("accepts the verified OKX router used by a live Fan Token route", async () 
   }), /routing policy/);
 });
 
+test("reports an unfunded Jupiter order before the fee-payer policy check", async () => {
+  const fixture = orderFixture({ error: "Insufficient funds", signatureFeePayer: null });
+  await assert.rejects(() => prepareJupiterSwap({
+    apiKey: "test-key",
+    inputMint: fixture.inputMint,
+    outputMint: fixture.outputMint,
+    amountAtomic: fixture.inAmount,
+    taker: fixture.taker,
+    fetcher: async () => Response.json(fixture),
+  }), /insufficient SOL/);
+});
+
 test("rejects changed amounts, payers, and excessive price impact", async () => {
   const fixture = orderFixture();
   await assert.rejects(() => prepareJupiterSwap({

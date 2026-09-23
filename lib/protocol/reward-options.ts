@@ -1,4 +1,4 @@
-import { CHILIZ_REWARD_ASSETS, KAYEN } from "./chiliz-reward-assets.ts";
+import { CHILIZ_REWARD_ASSETS, CHILIZ_V2_MIGRATION_SOURCE } from "./chiliz-reward-assets.ts";
 import { REWARD_ASSETS } from "./reward-assets.ts";
 
 export type RewardChain = "chiliz" | "solana";
@@ -11,6 +11,9 @@ export type RewardOption = {
   category: string;
   tokenAddress: string;
   wrappedTokenAddress: string | null;
+  legacyTokenAddress?: string;
+  legacyWrappedTokenAddress?: string;
+  routeStatus: "legacy_unverified" | "current_verified" | "route_check_required";
   imagePath?: string;
   venue: "Kayen" | "Jupiter";
   source: string;
@@ -28,6 +31,7 @@ export const SOLANA_REWARD_OPTIONS: ReadonlyArray<RewardOption> = REWARD_ASSETS
     category: asset.category,
     tokenAddress: asset.solanaMint,
     wrappedTokenAddress: null,
+    routeStatus: "route_check_required" as const,
     imagePath: asset.imagePath,
     venue: "Jupiter" as const,
     source: asset.source,
@@ -39,11 +43,17 @@ export const CHILIZ_REWARD_OPTIONS: ReadonlyArray<RewardOption> = CHILIZ_REWARD_
   symbol: asset.symbol,
   name: asset.name,
   category: asset.category,
-  tokenAddress: asset.contract,
-  wrappedTokenAddress: asset.wrappedContract,
+  // Only the official V2 contract identifies a current Fan Token. Kayen's
+  // historical wrapper has no verified unwrap path to it, so no route is
+  // selectable until a new acquisition and payout path is audited.
+  tokenAddress: asset.currentV2Contract,
+  wrappedTokenAddress: null,
+  legacyTokenAddress: asset.contract,
+  legacyWrappedTokenAddress: asset.wrappedContract,
+  routeStatus: asset.routeStatus,
   imagePath: asset.imagePath,
   venue: "Kayen" as const,
-  source: KAYEN.source,
+  source: CHILIZ_V2_MIGRATION_SOURCE,
 }));
 
 export const REWARD_OPTIONS: ReadonlyArray<RewardOption> = [

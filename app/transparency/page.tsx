@@ -28,11 +28,11 @@ export default async function TransparencyPage() {
         <PageIntro
           kicker="Proof of Rewards"
           title="Mainnet evidence appears only after verified execution."
-          copy="The launcher records verified community coin creation and immutable 80/20 fee receipts. SPORTPAD's own creator fees are excluded and retained for project development. Community-funded swaps, burns, allocations, and claims appear only after verified execution."
+          copy="When enabled, the launcher will record community coin creation and immutable 80/20 fee receipts. SPORTPAD's own creator fees are excluded and retained for development. Chiliz V2 purchase and payout routes remain unverified, and financial execution is paused."
         >
           <div className="transparency-fresh">
             <Radio />
-            <span><strong>{feeEvents ? `${feeEvents} fee events observed` : "No fee events yet"}</strong><small>{protocol?.capabilities.unattendedAutomation ? "Automatic treasury worker active" : "Treasury automation is paused"}</small></span>
+            <span><strong>{feeEvents ? `${feeEvents} fee events observed` : "No fee events yet"}</strong><small>{protocol?.capabilities.unattendedAutomation ? "Worker heartbeat observed; financial execution remains separately gated" : "Treasury automation is paused"}</small></span>
           </div>
         </PageIntro>
 
@@ -56,8 +56,8 @@ export default async function TransparencyPage() {
             <ArrowDown />
             <div className="flow-split"><span>80 / 20</span><strong>Target onchain fee split</strong></div>
             <div className="flow-branches">
-              <div><Trophy /><span>OFFICIAL FAN TOKEN REWARDS · 80%</span><strong>{rewardSwaps ? `${rewardSwaps} swaps submitted` : "No swaps submitted"}</strong><ArrowDown /><small>{rewardVaults ? `${rewardVaults} inventory records` : "No verified inventory yet"}</small><ArrowDown /><b>{protocol?.counts.rewardEpochs ? `${protocol.counts.rewardEpochs} reward epochs` : "No epochs yet"}</b></div>
-              <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
+              <div><Trophy /><span>OFFICIAL FAN TOKEN REWARDS · 80%</span><strong>{rewardSwaps ? `${rewardSwaps} swap records` : "No swap records"}</strong><ArrowDown /><small>{rewardVaults ? `${rewardVaults} inventory records` : "No verified inventory yet"}</small><ArrowDown /><b>{protocol?.counts.rewardEpochs ? `${protocol.counts.rewardEpochs} reward epochs` : "No epochs yet"}</b></div>
+              <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buyback records` : "No buyback records"}</strong><ArrowDown /><small>{sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not configured"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burn records` : "No burn events yet"}</b></div>
             </div>
           </div>
         </section>
@@ -77,8 +77,8 @@ export default async function TransparencyPage() {
         <section className="page-section">
           <SectionHeading
             eyebrow="Reward vaults"
-            title={rewardVaults ? `${rewardVaults} reward vaults verified.` : "No reward vaults are funded."}
-            copy="Balances, claim liabilities, and unallocated inventory remain absent until verified vault addresses and official Fan Token inventory exist."
+            title={rewardVaults ? `${rewardVaults} reward vault records.` : "No reward vaults are funded."}
+            copy="A vault record alone does not prove the current Fan Token is held. Balances, claim liabilities, and unallocated inventory require verified token accounts and chain receipts."
           />
           <div className="source-panel">
             <div><ShieldCheck /><span><strong>{rewardVaults ? "Vault inventory records available" : "No inventory data"}</strong><small>{protocol?.readiness.rewards.missing.join(", ") || "Reward lane ready"}</small></span></div>

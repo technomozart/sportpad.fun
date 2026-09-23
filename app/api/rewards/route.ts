@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
-import { FINANCIAL_LEDGER_VERIFIED, QUEUE_CLAIM_JOB_SQL } from "@/lib/protocol/automation-safety";
+import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
+import { ASSERT_ONE_ROW_CHANGED_SQL, FINANCIAL_LEDGER_VERIFIED, QUEUE_CLAIM_JOB_SQL,
+  QUEUE_CLAIM_TRANSITION_SQL } from "@/lib/protocol/automation-safety";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type ClaimRow = {
@@ -116,36 +118,40 @@ export async function POST(request: Request) {
     amountAtomic: claim.amount_atomic,
   };
   if (claim.reward_chain === "chiliz") {
+    if (!CHILIZ_ASSET_MIGRATION_VERIFIED) {
+      return json({ error: "Chiliz V2 reward claims are paused until direct payout is verified." }, 503);
+    }
     const link = await env.DB.prepare(`
       SELECT evm_address FROM evm_wallet_links WHERE owner_user_id = ?1 AND solana_wallet = ?2
     `).bind(session.ownerUserId, session.walletAddress).first<{ evm_address: string }>();
     if (!link) return json({ error: "Connect and verify a Chiliz wallet before claiming this reward." }, 409);
     const asset = getChilizRewardAsset(claim.reward_symbol);
-    if (!asset || asset.contract.toLowerCase() !== claim.reward_mint.toLowerCase() || !claim.reward_wrapped_contract) {
-      return json({ error: "The Chiliz reward contract could not be verified." }, 409);
+    if (!asset || asset.routeStatus !== "current_verified" ||
+      asset.currentV2Contract.toLowerCase() !== claim.reward_mint.toLowerCase() ||
+      claim.reward_wrapped_contract !== null) {
+      return json({ error: "The current Chiliz V2 reward contract and route could not be verified." }, 409);
     }
     destinationAddress = link.evm_address;
     jobType = "chiliz_claim_unwrap";
     payload = {
       claimId: claim.id,
+      rewardSymbol: claim.reward_symbol,
       destinationAddress,
-      underlyingContract: asset.contract,
-      wrappedContract: asset.wrappedContract,
+      fanTokenContract: asset.currentV2Contract,
       amountAtomic: claim.amount_atomic,
     };
   }
   const jobId = crypto.randomUUID();
   const now = Date.now();
-  const results = await env.DB.batch([
-    env.DB.prepare(QUEUE_CLAIM_JOB_SQL).bind(jobId, jobType, claim.id, claim.reward_chain, JSON.stringify(payload), now),
-    env.DB.prepare(`
-      UPDATE reward_claims SET state = 'queued', destination_chain = ?2, destination_address = ?3,
-        claim_requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?1 AND state = 'claimable'
-        AND EXISTS (SELECT 1 FROM automation_jobs WHERE id = ?4 AND state = 'queued')
-    `).bind(claim.id, claim.reward_chain, destinationAddress, jobId),
-  ]);
-  if (results[0]?.meta.changes !== 1 || results[1]?.meta.changes !== 1) {
+  try {
+    await env.DB.batch([
+      env.DB.prepare(QUEUE_CLAIM_JOB_SQL).bind(jobId, jobType, claim.id, claim.reward_chain, JSON.stringify(payload), now),
+      env.DB.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      env.DB.prepare(QUEUE_CLAIM_TRANSITION_SQL).bind(claim.id, claim.reward_chain,
+        destinationAddress, jobId, session.walletAddress),
+      env.DB.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+    ]);
+  } catch {
     return json({ error: "This reward changed before it could be queued. Reload and retry." }, 409);
   }
   return json({ queued: true, claimId: claim.id, jobId, destinationChain: claim.reward_chain, destinationAddress }, 202);

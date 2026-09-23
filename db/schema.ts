@@ -201,6 +201,10 @@ export const settlements = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_settlements_fee_event").on(table.feeEventId),
+    uniqueIndex("idx_settlements_reward_swap_signature").on(table.rewardSwapSignature)
+      .where(sql`${table.rewardSwapSignature} IS NOT NULL`),
+    uniqueIndex("idx_settlements_buyback_swap_signature").on(table.buybackSwapSignature)
+      .where(sql`${table.buybackSwapSignature} IS NOT NULL`),
     index("idx_settlements_state").on(table.state),
   ],
 );
@@ -251,6 +255,8 @@ export const rewardClaims = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_reward_claims_epoch_wallet").on(table.epochId, table.solanaWallet),
+    uniqueIndex("idx_reward_claims_claim_signature").on(table.claimSignature)
+      .where(sql`${table.claimSignature} IS NOT NULL`),
     index("idx_reward_claims_wallet_state").on(table.solanaWallet, table.state),
   ],
 );
@@ -373,6 +379,7 @@ export const automationJobs = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_automation_job_entity_type").on(table.entityId, table.jobType),
+    uniqueIndex("idx_automation_jobs_tx_hash").on(table.txHash).where(sql`${table.txHash} IS NOT NULL`),
     index("idx_automation_jobs_state_available").on(table.state, table.availableAt),
   ],
 );
@@ -405,6 +412,37 @@ export const holderEpochPositions = sqliteTable(
     index("idx_holder_positions_launch_wallet").on(table.launchId, table.wallet),
   ],
 );
+
+// Multi-batch holder observations live here until an atomic set-based commit
+// replaces the epoch's canonical positions. Incomplete generations are inert.
+export const holderSnapshotStaging = sqliteTable(
+  "holder_snapshot_staging",
+  {
+    generationId: text("generation_id").notNull(),
+    epochId: text("epoch_id").notNull().references(() => rewardEpochs.id),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    wallet: text("wallet").notNull(),
+    tokenSecondsAtomic: text("token_seconds_atomic").notNull(),
+    endingBalanceAtomic: text("ending_balance_atomic").notNull(),
+    observedSlot: integer("observed_slot").notNull(),
+    observedAt: integer("observed_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_holder_snapshot_stage_generation_wallet").on(table.generationId, table.wallet),
+    index("idx_holder_snapshot_stage_epoch").on(table.epochId),
+  ],
+);
+
+export const holderSnapshotCheckpoints = sqliteTable("holder_snapshot_checkpoints", {
+  epochId: text("epoch_id").primaryKey().references(() => rewardEpochs.id),
+  generationId: text("generation_id").notNull(),
+  lastObservedSlot: integer("last_observed_slot").notNull(),
+  lastObservedAt: integer("last_observed_at").notNull(),
+  positionCount: integer("position_count").notNull(),
+  evidenceHash: text("evidence_hash").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const protocolEvents = sqliteTable(
   "protocol_events",

@@ -24,7 +24,7 @@
     "test:wallets": "node --experimental-strip-types --test components/solana-wallet-providers.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "worker:automation": "node scripts/automation-worker.mjs",
+    "worker:automation": "node --experimental-strip-types scripts/automation-worker.mjs",
     "worker:solana": "node scripts/solana-automation-worker.mjs"
   },
   "dependencies": {

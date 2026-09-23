@@ -4,6 +4,15 @@ import { env } from "cloudflare:workers";
 import { PublicKey } from "@solana/web3.js";
 
 import { accrueHolderPosition } from "@/lib/protocol/holder-rewards";
+import {
+  ASSERT_ONE_CHECKPOINT_SQL,
+  ASSERT_POSITION_COUNT_SQL,
+  ASSERT_STAGED_SNAPSHOT_SQL,
+  COMMIT_HOLDER_CHECKPOINT_SQL,
+  COMMIT_STAGED_HOLDER_POSITIONS_SQL,
+  RECORD_HOLDER_SNAPSHOT_SQL,
+  STAGE_HOLDER_POSITION_SQL,
+} from "@/lib/protocol/holder-indexer-sql";
 import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
 import { bondingCurvePda, feeSharingConfigPda } from "@/lib/protocol/pump-devnet-verification";
 import { readExecutionConfig } from "@/lib/server/execution-config";
@@ -49,6 +58,9 @@ async function writeBatches(database: D1Database, statements: D1PreparedStatemen
 }
 
 async function indexEpoch(database: D1Database, epoch: EpochRow) {
+  // A terminated worker may leave an unfinished stage. Such rows are never
+  // read by allocation and can be safely reclaimed after a day.
+  await database.prepare("DELETE FROM holder_snapshot_staging WHERE created_at < datetime('now', '-1 day')").run();
   const mint = new PublicKey(epoch.mainnet_mint);
   const excluded = new Set([
     epoch.mainnet_creator_wallet,
@@ -59,6 +71,12 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
     PublicKey.default.toBase58(),
   ].filter((value): value is string => Boolean(value)));
   const snapshot = await fetchFinalizedTokenHolders({ mintAddress: mint.toBase58(), excludedWallets: excluded });
+  // Read the base generation before positions. If another indexer commits
+  // while this run stages, the final checkpoint compare-and-swap rejects the
+  // stale accrual even when its slot and wall-clock time are later.
+  const baseCheckpoint = await database.prepare(`
+    SELECT generation_id FROM holder_snapshot_checkpoints WHERE epoch_id = ?1
+  `).bind(epoch.epoch_id).first<{ generation_id: string }>();
   const existingResult = await database.prepare(`
     SELECT wallet, token_seconds_atomic, ending_balance_atomic, last_observed_at
     FROM holder_epoch_positions WHERE epoch_id = ?1
@@ -68,6 +86,8 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
   const observedAt = Math.floor(Date.now() / 1000);
   const startsAt = unixSeconds(epoch.starts_at);
   const endsAt = unixSeconds(epoch.ends_at);
+  const checkpointAt = Math.min(Math.max(observedAt, startsAt), endsAt);
+  const generationId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [];
 
   for (const wallet of wallets) {
@@ -83,19 +103,8 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
       startsAt,
       endsAt,
     });
-    statements.push(database.prepare(`
-      INSERT INTO holder_epoch_positions (
-        id, epoch_id, launch_id, wallet, token_seconds_atomic, ending_balance_atomic,
-        last_observed_slot, last_observed_at, excluded, updated_at
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, CURRENT_TIMESTAMP)
-      ON CONFLICT(epoch_id, wallet) DO UPDATE SET
-        token_seconds_atomic = excluded.token_seconds_atomic,
-        ending_balance_atomic = excluded.ending_balance_atomic,
-        last_observed_slot = excluded.last_observed_slot,
-        last_observed_at = excluded.last_observed_at,
-        updated_at = CURRENT_TIMESTAMP
-    `).bind(
-      `position:${epoch.epoch_id}:${wallet}`,
+    statements.push(database.prepare(STAGE_HOLDER_POSITION_SQL).bind(
+      generationId,
       epoch.epoch_id,
       epoch.launch_id,
       wallet,
@@ -105,21 +114,33 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
       next.lastObservedAt,
     ));
   }
-  const changed = await writeBatches(database, statements);
-  await database.prepare(`
-    INSERT OR IGNORE INTO protocol_events (
-      id, category, entity_type, entity_id, event_type, idempotency_key, state,
-      slot, amount_atomic, mint, evidence_hash
-    ) VALUES (?1, 'rewards', 'epoch', ?2, 'holder_snapshot_indexed', ?1, 'verified', ?3, ?4, ?5, ?6)
-  `).bind(
-    `holder-snapshot:${epoch.epoch_id}:${snapshot.slot}`,
-    epoch.epoch_id,
-    snapshot.slot,
-    String(snapshot.balances.size),
-    epoch.mainnet_mint,
-    snapshot.evidenceHash,
-  ).run();
-  return { accountsSeen: snapshot.accountsSeen, holders: snapshot.balances.size, changed, slot: snapshot.slot };
+  try {
+    const staged = await writeBatches(database, statements);
+    if (staged !== wallets.size) throw new Error("holder_snapshot_stage_incomplete");
+    const eventId = `holder-snapshot:${epoch.epoch_id}:${snapshot.slot}:${checkpointAt}`;
+    // D1.batch is a transaction. A failed count, stale checkpoint, or failed
+    // canonical copy rolls back the entire generation, including its event.
+    const results = await database.batch([
+      database.prepare(ASSERT_STAGED_SNAPSHOT_SQL).bind(generationId, epoch.epoch_id, wallets.size),
+      database.prepare(COMMIT_HOLDER_CHECKPOINT_SQL).bind(
+        epoch.epoch_id, generationId, snapshot.slot, checkpointAt, wallets.size, snapshot.evidenceHash,
+        baseCheckpoint?.generation_id ?? null,
+      ),
+      database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
+      database.prepare(COMMIT_STAGED_HOLDER_POSITIONS_SQL).bind(generationId, epoch.epoch_id),
+      database.prepare(ASSERT_POSITION_COUNT_SQL).bind(wallets.size),
+      database.prepare(RECORD_HOLDER_SNAPSHOT_SQL).bind(
+        eventId, epoch.epoch_id, snapshot.slot, String(snapshot.balances.size),
+        epoch.mainnet_mint, snapshot.evidenceHash, generationId,
+      ),
+      database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
+    ]);
+    const changed = Number(results[3].meta.changes ?? 0);
+    return { accountsSeen: snapshot.accountsSeen, holders: snapshot.balances.size, changed, slot: snapshot.slot };
+  } finally {
+    await database.prepare("DELETE FROM holder_snapshot_staging WHERE generation_id = ?1")
+      .bind(generationId).run();
+  }
 }
 
 async function activeEpochs(database: D1Database, epochId?: string) {

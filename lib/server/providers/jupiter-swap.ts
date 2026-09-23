@@ -100,6 +100,11 @@ export async function prepareJupiterSwap({
   let payload: unknown = null;
   try { payload = await response.json(); } catch { payload = null; }
   if (!response.ok || !isRecord(payload)) throw new Error(`Jupiter order failed with status ${response.status}.`);
+  if (typeof payload.error === "string" && payload.error.trim()) {
+    throw new Error(/insufficient funds/i.test(payload.error)
+      ? "Jupiter order is not executable: the treasury has insufficient SOL."
+      : "Jupiter order is not executable.");
+  }
 
   const responseInputMint = requiredString(payload.inputMint, "input mint");
   const responseOutputMint = requiredString(payload.outputMint, "output mint");

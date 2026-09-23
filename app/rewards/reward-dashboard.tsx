@@ -159,7 +159,7 @@ export function RewardDashboard() {
   const lifecycle = [
     { icon: Coins, title: "Earning", copy: protocol?.capabilities.holderIndexerEnabled ? "Finalized holder indexing enabled" : "Holder indexer locked" },
     { icon: Clock3, title: "Allocating", copy: protocol ? `${protocol.counts.rewardEpochs} recorded reward epochs` : "Reading epoch ledger" },
-    { icon: Network, title: "Routing", copy: "Kayen on Chiliz or Jupiter on Solana" },
+    { icon: Network, title: "Routing", copy: "Chiliz V2 route unverified; Solana uses Jupiter quotes" },
     { icon: CheckCircle2, title: "Claiming", copy: "Payouts paused pending ledger and receipt verification" },
   ];
 
@@ -181,7 +181,7 @@ export function RewardDashboard() {
     {notice ? <p className="reward-action-notice" role="status">{notice}</p> : null}
 
     {chartData.length ? <div className="reward-wallet-chart">
-      <div><strong>Rewards held for this wallet</strong><small>Finalized allocations grouped by Fan Token and launch.</small></div>
+      <div><strong>Rewards allocated to this wallet</strong><small>Finalized allocations grouped by Fan Token and launch, not yet paid.</small></div>
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={chartData} margin={{ top: 18, right: 18, left: 0, bottom: 12 }}>
           <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />
@@ -205,9 +205,9 @@ export function RewardDashboard() {
         <span><strong>${claim.launchSymbol}</strong><small>{claim.launchName}</small></span><span>Epoch closed</span>
         <strong>${claim.rewardSymbol}</strong><span>{claim.rewardChain === "chiliz" ? "Chiliz" : "Solana"}</span>
         <strong>{formatAtomic(claim.amountAtomic, claim.rewardDecimals)} ${claim.rewardSymbol}</strong>
-        <span className="claim-status">{payoutState(claim.state)}</span>
+        <span className="claim-status">{claim.state === "claimable" && !protocol?.readiness.claims.ready ? "Claim paused" : payoutState(claim.state)}</span>
         {claim.signature ? <a href={claim.rewardChain === "chiliz" ? `${CHILIZ_CHAIN.explorerUrl}/tx/${claim.signature}` : `https://solscan.io/tx/${claim.signature}`} target="_blank" rel="noopener noreferrer" aria-label="Open payout receipt"><ExternalLink /></a>
-          : claim.state === "claimable" ? <Button size="sm" onClick={() => void claimReward(claim)} disabled={Boolean(busy) || (claim.rewardChain === "chiliz" && !currentData.evmWallet)}>{busy === claim.id ? "Queueing" : "Claim"}</Button> : <span />}
+          : claim.state === "claimable" ? <Button size="sm" onClick={() => void claimReward(claim)} disabled={Boolean(busy) || !protocol?.readiness.claims.ready || (claim.rewardChain === "chiliz" && !currentData.evmWallet)}>{busy === claim.id ? "Queueing" : "Claim"}</Button> : <span />}
       </div>)}
       {!currentData || (!currentData.positions.length && !currentData.claims.length) ? <div className="empty-state"><Wallet /><h2>No reward positions to show.</h2><p>{walletSession.wallet ? "This wallet has no finalized SportPad holder position yet." : "Verify your Solana wallet to load its real indexed positions and allocations."}</p></div> : null}
     </div>

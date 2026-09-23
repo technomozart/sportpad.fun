@@ -79,8 +79,10 @@ export type FanAsset = {
   name: string;
   category: string;
   mint: string;
+  currentTokenAddress: string;
+  routeStatus: "legacy_unverified" | "current_verified" | "route_check_required";
   imagePath?: string;
-  status: "Registry-verified address";
+  status: "Official V2 address; route unverified" | "Registry-verified address";
   route: "Kayen" | "Jupiter";
   vault: "Created on funding";
   source: string;
@@ -103,8 +105,12 @@ export const fanAssets: FanAsset[] = REWARD_OPTIONS.map((asset) => ({
   name: asset.name,
   category: asset.category,
   mint: asset.tokenAddress,
+  currentTokenAddress: asset.tokenAddress,
+  routeStatus: asset.routeStatus,
   imagePath: asset.imagePath,
-  status: "Registry-verified address",
+  status: asset.routeStatus === "legacy_unverified"
+    ? "Official V2 address; route unverified"
+    : "Registry-verified address",
   route: asset.venue,
   vault: "Created on funding",
   source: asset.source,
