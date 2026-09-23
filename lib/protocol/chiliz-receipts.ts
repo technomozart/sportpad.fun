@@ -70,11 +70,13 @@ function transferDelta(logs: readonly Log[], token: string, holder: string) {
 
 export function verifyChilizPurchaseReceipt(evidence: ChilizChainEvidence, expected: {
   txHash: string; treasury: string; fanTokenContract: string; outputAmountAtomic: string;
+  maxSpendChzWei: string;
 }) {
   confirmed(evidence, expected.txHash, expected.treasury);
   if (evidence.tokenDecimals !== 18) fail("chiliz_v2_decimals_mismatch");
   const tx = evidence.transaction;
   if (!sameAddress(tx.to, KAYEN_ROUTER) || tx.value <= 0n) fail("chiliz_purchase_target_or_value_mismatch");
+  if (tx.value > positiveAtomic(expected.maxSpendChzWei)) fail("chiliz_purchase_spend_cap_exceeded");
   let minimum: bigint;
   try {
     const decoded = decodeFunctionData({ abi: ROUTER_ABI, data: tx.input as `0x${string}` });

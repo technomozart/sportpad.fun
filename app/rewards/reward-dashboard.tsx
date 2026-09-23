@@ -62,16 +62,18 @@ function textToHex(value: string) {
 export function RewardDashboard() {
   const walletSession = useSolanaWalletSession();
   const [protocol, setProtocol] = useState<RewardProtocolStatus | null>(null);
-  const [walletData, setWalletData] = useState<WalletRewardData | null>(null);
+  const [walletDataByWallet, setWalletDataByWallet] = useState<Record<string, WalletRewardData>>({});
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
 
   const loadRewards = useCallback(async () => {
-    if (!walletSession.wallet) return;
+    const requestedWallet = walletSession.wallet;
+    if (!requestedWallet) return;
     const response = await fetch("/api/rewards", { cache: "no-store" });
     const body = await response.json() as WalletRewardData & { error?: string };
     if (!response.ok) throw new Error(body.error ?? "Wallet rewards are unavailable.");
-    setWalletData(body);
+    if (body.wallet !== requestedWallet) throw new Error("Reward data did not match the verified wallet.");
+    setWalletDataByWallet((current) => ({ ...current, [requestedWallet]: body }));
   }, [walletSession.wallet]);
 
   useEffect(() => {
@@ -83,16 +85,30 @@ export function RewardDashboard() {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-    if (!walletSession.wallet) return;
+    const requestedWallet = walletSession.wallet;
+    if (!requestedWallet) return;
     const controller = new AbortController();
     fetch("/api/rewards", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json() as WalletRewardData & { error?: string };
         if (!response.ok) throw new Error(body.error ?? "Wallet rewards are unavailable.");
+        if (body.wallet !== requestedWallet) throw new Error("Reward data did not match the verified wallet.");
         return body;
       })
-      .then((body) => setWalletData(body))
-      .catch((error) => { if ((error as Error).name !== "AbortError") setWalletData(null); });
+      .then((body) => {
+        if (!controller.signal.aborted) {
+          setWalletDataByWallet((current) => ({ ...current, [requestedWallet]: body }));
+        }
+      })
+      .catch((error) => {
+        if ((error as Error).name !== "AbortError" && !controller.signal.aborted) {
+          setWalletDataByWallet((current) => {
+            const next = { ...current };
+            delete next[requestedWallet];
+            return next;
+          });
+        }
+      });
     return () => controller.abort();
   }, [walletSession.wallet]);
 
@@ -150,12 +166,12 @@ export function RewardDashboard() {
     finally { setBusy(""); }
   }
 
-  const currentData = walletSession.wallet ? walletData : null;
+  const currentData = walletSession.wallet ? walletDataByWallet[walletSession.wallet] ?? null : null;
   const walletLabel = walletSession.wallet ? shortAddress(walletSession.wallet) : "Not connected";
-  const chartData = useMemo(() => (walletSession.wallet ? walletData?.claims ?? [] : []).map((claim) => ({
+  const chartData = useMemo(() => (currentData?.claims ?? []).map((claim) => ({
     name: `${claim.rewardSymbol} / ${claim.launchSymbol}`,
     amount: Number(formatAtomic(claim.amountAtomic, claim.rewardDecimals)),
-  })).filter((item) => Number.isFinite(item.amount)), [walletData, walletSession.wallet]);
+  })).filter((item) => Number.isFinite(item.amount)), [currentData]);
   const lifecycle = [
     { icon: Coins, title: "Earning", copy: protocol?.capabilities.holderIndexerEnabled ? "Finalized holder indexing enabled" : "Holder indexer locked" },
     { icon: Clock3, title: "Allocating", copy: protocol ? `${protocol.counts.rewardEpochs} recorded reward epochs` : "Reading epoch ledger" },
@@ -167,7 +183,7 @@ export function RewardDashboard() {
     <div className="reward-summary-grid">
       <div className="reward-summary-primary"><span>Wallet-linked reward data</span><strong>{walletLabel}</strong><small>{walletSession.wallet ? "Finalized positions and funded allocations for this verified wallet." : "Verify your Solana wallet to load real holder data."}</small></div>
       <div><span>Chiliz payout wallet</span><strong>{currentData?.evmWallet ? shortAddress(currentData.evmWallet.address) : "Not linked"}</strong><small>MetaMask and compatible EVM wallets</small></div>
-      <div><span>Confirmed payouts</span><strong>{protocol?.counts.confirmedClaims ?? "Unavailable"}</strong><small>Onchain receipts only</small></div>
+      <div><span>Platform payouts</span><strong>{protocol?.counts.confirmedClaims ?? "Unavailable"}</strong><small>Confirmed onchain claims across SportPad</small></div>
       <div><span>Claim gas</span><strong>Planned</strong><small>SportPad treasury would pay CHZ gas when claims are enabled</small></div>
     </div>
 
@@ -181,7 +197,7 @@ export function RewardDashboard() {
     {notice ? <p className="reward-action-notice" role="status">{notice}</p> : null}
 
     {chartData.length ? <div className="reward-wallet-chart">
-      <div><strong>Rewards allocated to this wallet</strong><small>Finalized allocations grouped by Fan Token and launch, not yet paid.</small></div>
+      <div><strong>Rewards allocated to this wallet</strong><small>Finalized allocations grouped by Fan Token and launch, including paid claims.</small></div>
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={chartData} margin={{ top: 18, right: 18, left: 0, bottom: 12 }}>
           <CartesianGrid stroke="rgba(255,255,255,.08)" vertical={false} />

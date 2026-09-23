@@ -77,7 +77,7 @@ async function api(body) {
   return payload;
 }
 
-async function buyAndBurn(payload, arm) {
+async function buyAndBurn(payload, arm, jobId) {
   if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_durable_recovery");
   if (!buyback) throw new Error("buyback_signer_not_configured");
   const mint = new PublicKey(payload.sportpadMint);
@@ -111,10 +111,26 @@ async function buyAndBurn(payload, arm) {
   const transaction = inspection.transaction;
   transaction.sign([buyback]);
   const expectedSignature = bs58.encode(transaction.signatures[0]);
+  const signedTransactionBase64 = Buffer.from(transaction.serialize()).toString("base64");
+  const prepared = await api({
+    action: "prepare_buyback_swap",
+    jobId,
+    workerId,
+    providerRequestId: quote.requestId,
+    unsignedTransactionBase64: quote.transaction,
+    signedTransactionBase64,
+    inputAmountLamports: payload.amountLamports,
+    outputMint: mint.toBase58(),
+    minimumOutputAtomic: inspection.minOutput.toString(),
+    lastValidBlockHeight: quote.lastValidBlockHeight,
+  });
+  if (!prepared.prepared || prepared.txSignature !== expectedSignature) {
+    throw new Error("buyback_order_intent_not_persisted");
+  }
   const executeResponse = await fetch(EXECUTE_URL, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": jupiterKey },
-    body: JSON.stringify({ signedTransaction: Buffer.from(transaction.serialize()).toString("base64"), requestId: quote.requestId, lastValidBlockHeight: quote.lastValidBlockHeight }),
+    body: JSON.stringify({ signedTransaction: signedTransactionBase64, requestId: quote.requestId, lastValidBlockHeight: quote.lastValidBlockHeight }),
     signal: AbortSignal.timeout(45_000),
   });
   const executed = await executeResponse.json().catch(() => ({}));
@@ -177,7 +193,7 @@ async function runOnce() {
   try {
     await assertPublishedTreasuries();
     const arm = async () => { await api({ action: "arm", jobId: job.id, workerId }); };
-    const result = job.type === "sportpad_buyback_burn" ? await buyAndBurn(job.payload, arm) : await paySolanaClaim(job.payload, arm);
+    const result = job.type === "sportpad_buyback_burn" ? await buyAndBurn(job.payload, arm, job.id) : await paySolanaClaim(job.payload, arm);
     await api({ action: "complete", jobId: job.id, workerId, ...result });
   } catch (error) {
     await api({ action: "fail", jobId: job.id, workerId, errorCode: errorCode(error), retryable: retryable(error) });

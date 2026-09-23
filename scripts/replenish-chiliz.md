@@ -17,6 +17,14 @@ destination from that mint. The CLI rechecks all exact identifiers each run.
 Only a fresh authenticated quote can establish whether a particular amount
 has an available route at a particular time.
 
+In the same read-only audit, the exact unauthenticated Value Transfer quote
+returned HTTP 401. Its quote, Solana build-step, and status endpoints require
+an API key. The older keyless Stargate quote endpoint returned HTTP 410 and is
+documented as deprecated. LayerZero's public OFT registry did not list this
+CHZ mint or a Chiliz CHZ peer, and Wormhole's published NTT network list did
+not include Chiliz. None of those observations establishes a direct SDK route
+around the Value Transfer API. No bridge transaction was signed or sent.
+
 The quote-only CLI accepts **public addresses** and one amount:
 
 ```text
@@ -86,7 +94,10 @@ this read-only route discovery succeeds.
 
 - [LayerZero Value Transfer API](https://docs.layerzero.network/v2/developers/value-transfer-api/start)
 - [LayerZero API reference](https://docs.layerzero.network/v2/developers/value-transfer-api/api-reference/overview)
+- [LayerZero token route directory](https://docs.layerzero.network/v2/developers/value-transfer-api/api-reference/tokens)
 - [LayerZero Solana transfer example](https://docs.layerzero.network/v2/developers/value-transfer-api/examples/solana)
 - [LayerZero direct Solana OFT SDK](https://docs.layerzero.network/v2/developers/solana/oft/sdk)
+- [Stargate legacy API status](https://docs.stargate.finance/developers/api-docs/transfer-quotes)
 - [Chiliz Bridge scope](https://docs.chiliz.com/learn/about-bridging/using-chiliz-bridge)
 - [Pump's Solana CHZ mint and Sunrise provenance](https://pump.fun/docs/custom-pairs)
+- [Wormhole NTT supported networks](https://wormhole.com/docs/products/token-transfers/native-token-transfers/reference/supported-networks/)

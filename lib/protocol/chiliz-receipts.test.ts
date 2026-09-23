@@ -35,7 +35,8 @@ function evidence(input: string, to: string, value: bigint, logs: ReturnType<typ
 
 const purchaseInput = encodeFunctionData({ abi: routerAbi, functionName: "swapExactETHForTokens",
   args: [99n, [WRAPPED_CHZ, fanToken], treasury, 1_800_000_000n] });
-const purchaseExpected = { txHash: hash, treasury, fanTokenContract: fanToken, outputAmountAtomic: "100" };
+const purchaseExpected = { txHash: hash, treasury, fanTokenContract: fanToken,
+  outputAmountAtomic: "100", maxSpendChzWei: "10" };
 
 test("a purchase credits only official V2 tokens actually transferred to the configured treasury", () => {
   const proof = evidence(purchaseInput, KAYEN_ROUTER, 10n, [transfer(fanToken, zero, treasury, 100n)]);
@@ -53,6 +54,7 @@ test("a purchase credits only official V2 tokens actually transferred to the con
   assert.throws(() => verifyChilizPurchaseReceipt({ ...proof, receipt: { ...proof.receipt,
     logs: [{ ...transfer(fanToken, zero, treasury, 100n), data: "0x01" }] } }, purchaseExpected), /chiliz_transfer_log_invalid/);
   assert.throws(() => verifyChilizPurchaseReceipt(proof, { ...purchaseExpected, outputAmountAtomic: "101" }), /chiliz_purchase_output_mismatch/);
+  assert.throws(() => verifyChilizPurchaseReceipt(proof, { ...purchaseExpected, maxSpendChzWei: "9" }), /chiliz_purchase_spend_cap_exceeded/);
 });
 
 test("purchase calldata must name the current V2 asset and treasury", () => {

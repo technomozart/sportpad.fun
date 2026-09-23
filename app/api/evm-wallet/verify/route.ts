@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAddress, verifyMessage } from "viem";
 import { z } from "zod";
 
+import { UPSERT_EVM_WALLET_LINK_SQL } from "@/lib/protocol/evm-wallet-auth";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 const inputSchema = z.object({
@@ -49,18 +50,10 @@ export async function POST(request: Request) {
     .bind(challenge.id, now).run();
   if (consumed.meta.changes !== 1) return Response.json({ error: "This wallet challenge was already used." }, { status: 409 });
   try {
-    await env.DB.prepare(`
-      INSERT INTO evm_wallet_links (owner_user_id, solana_wallet, evm_address, chain_id, verified_at, updated_at)
-      VALUES (?1, ?2, ?3, 88888, ?4, ?4)
-      ON CONFLICT(owner_user_id) DO UPDATE SET
-        solana_wallet = excluded.solana_wallet,
-        evm_address = excluded.evm_address,
-        chain_id = excluded.chain_id,
-        verified_at = excluded.verified_at,
-        updated_at = excluded.updated_at
-    `).bind(session.ownerUserId, session.walletAddress, address, now).run();
+    await env.DB.prepare(UPSERT_EVM_WALLET_LINK_SQL)
+      .bind(session.ownerUserId, session.walletAddress, address, now).run();
   } catch {
-    return Response.json({ error: "That Chiliz wallet is already linked to another SportPad account." }, { status: 409 });
+    return Response.json({ error: "The Chiliz wallet link could not be saved. Please retry verification." }, { status: 503 });
   }
   return Response.json({ linked: true, address, chainId: 88888 }, { headers: { "Cache-Control": "private, no-store" } });
 }

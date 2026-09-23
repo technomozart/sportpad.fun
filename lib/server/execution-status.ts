@@ -2,6 +2,7 @@ import "server-only";
 
 import { env } from "cloudflare:workers";
 import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
+import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
 
 import {
   DEFAULT_PROTOCOL_CONTROLS,
@@ -135,7 +136,7 @@ export async function getExecutionStatus() {
     return { ready: missing.length === 0, missing };
   };
   const automatedRewardWorkersActive = chilizActive && solanaActive;
-  const readiness = {
+  const configuredReadiness = {
     settlement: (chilizActive || solanaActive)
       ? without(execution.readiness.settlement, ["fee collector signer"])
       : execution.readiness.settlement,
@@ -148,6 +149,20 @@ export async function getExecutionStatus() {
     buyback: solanaActive
       ? without(execution.readiness.buyback, ["buyback signer", ...(sportpadSetting?.value ? ["SPORTPAD mint"] : [])])
       : execution.readiness.buyback,
+  };
+  const withStaticHolds = (lane: { ready: boolean; missing: string[] }, chilizRequired = false) => {
+    const missing = [
+      ...lane.missing,
+      ...(!FINANCIAL_LEDGER_VERIFIED ? ["financial-ledger verification"] : []),
+      ...(chilizRequired && !CHILIZ_ASSET_MIGRATION_VERIFIED ? ["Chiliz V2 execution verification"] : []),
+    ];
+    return { ready: lane.ready && missing.length === 0, missing };
+  };
+  const readiness = {
+    settlement: withStaticHolds(configuredReadiness.settlement),
+    rewards: withStaticHolds(configuredReadiness.rewards, true),
+    claims: withStaticHolds(configuredReadiness.claims, true),
+    buyback: withStaticHolds(configuredReadiness.buyback),
   };
   const launchReadiness = await readGlobalLaunchReadiness();
   const managedExecutionReady = FINANCIAL_LEDGER_VERIFIED && launchReadiness.ready

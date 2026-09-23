@@ -137,7 +137,7 @@ export async function verifyPersistedAutomaticBuybackIntent({
     reject("job_identity_mismatch");
   }
   if (!intent.provider_request_id || intent.provider_request_id.length > 200 ||
-    !/^[A-Za-z0-9:_-]+$/.test(intent.provider_request_id)) reject("provider_request_missing");
+    !/^[\x21-\x7e]+$/.test(intent.provider_request_id)) reject("provider_request_missing");
   if (intent.input_mint !== NATIVE_MINT.toBase58() ||
     intent.output_mint !== expected.sportpadMint ||
     intent.input_amount_atomic !== expected.inputAmountLamports ||

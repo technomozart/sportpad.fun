@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAddress } from "viem";
 
 import { buildEvmWalletChallenge, EVM_CHALLENGE_TTL_MS } from "@/lib/protocol/evm-wallet-auth";
+import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 export async function POST(request: Request) {
@@ -27,10 +28,21 @@ export async function POST(request: Request) {
     nonce: id,
     expiresAt,
   });
-  await env.DB.prepare(`
-    INSERT INTO evm_wallet_challenges
-      (id, owner_user_id, solana_wallet, evm_address, message, expires_at, created_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-  `).bind(id, session.ownerUserId, session.walletAddress, evmAddress, message, expiresAt, createdAt).run();
+  try {
+    const accountLimit = await consumeFixedWindow({ scope: "evm_wallet_challenge_account", subject: session.ownerUserId, limit: 10, windowSeconds: 600 });
+    if (!accountLimit.allowed) return rateLimitedJson("Too many Chiliz wallet challenges. Try again later.", accountLimit);
+    const addressLimit = await consumeFixedWindow({ scope: "evm_wallet_challenge_address", subject: evmAddress.toLowerCase(), limit: 5, windowSeconds: 600 });
+    if (!addressLimit.allowed) return rateLimitedJson("This Chiliz wallet has received too many challenges. Try again later.", addressLimit);
+    await env.DB.prepare("DELETE FROM evm_wallet_challenges WHERE expires_at < ?1")
+      .bind(createdAt).run();
+    await env.DB.prepare(`
+      INSERT INTO evm_wallet_challenges
+        (id, owner_user_id, solana_wallet, evm_address, message, expires_at, created_at)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    `).bind(id, session.ownerUserId, session.walletAddress, evmAddress, message, expiresAt, createdAt).run();
+  } catch (error) {
+    console.error("evm_wallet_challenge_create_failed", error instanceof Error ? error.message : "unknown");
+    return Response.json({ error: "Chiliz wallet verification is temporarily unavailable." }, { status: 503 });
+  }
   return Response.json({ challengeId: id, address: evmAddress, message, expiresAt }, { status: 201, headers: { "Cache-Control": "private, no-store" } });
 }

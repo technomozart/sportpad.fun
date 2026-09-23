@@ -19,8 +19,8 @@ The automation database needs one unique record per fee-derived buyback job,
 with immutable mint, treasury, SOL input cap, destination ATA, quote minimum
 output, and these monotonic stages:
 
-1. `prepared`: Persist the exact Jupiter order `requestId`, signed serialized
-   swap transaction, and its deterministic signature **before** `/execute`.
+1. `prepared`: Persist the exact Jupiter order `requestId`, unsigned message,
+   and its verified deterministic treasury signature **before** `/execute`.
 2. `swap_broadcast`: On timeout, query that signature on Solana and retry only
    the same signed transaction/request ID while it is valid. Never request a
    fresh order for this job after a possible broadcast.
@@ -49,11 +49,11 @@ job ledger, with a single worker lease and compare-and-swap update. A crash at
 every boundary above must be exercised in tests before a low-value canary.
 
 The existing generic `broadcasting` job state stops automatic re-lease after
-an ambiguous financial action. It does not yet persist the signed swap/burn
-transactions and stage receipts needed to resume this two-transaction flow.
-Keep `BUYBACK_EXECUTION_SAFE=false` until that ledger exists, its failure tests
-pass, settlement ordering is fixed, signer matching is verified in production,
-and a capped canary burn is observed end to end. The burn proof should use the
+an ambiguous financial action. The swap order and signature are now persisted,
+but swap/burn stage receipts and a pre-broadcast burn intent are still missing.
+Keep `BUYBACK_EXECUTION_SAFE=false` until recovery from every stage is tested,
+signer matching is verified in production, and a capped canary burn is
+observed end to end. The burn proof should use the
 burn transaction's own token-account delta: a global mint-supply before/after
 snapshot can be changed concurrently by unrelated mint or burn transactions.
 
@@ -64,14 +64,14 @@ record an automatic Jupiter order's exact message without a new migration:
 `settlement_id`, unique `idempotency_key`, `signer_address`,
 `provider_request_id`, `unsigned_transaction_base64`,
 `transaction_message_hash`, unique `tx_signature`, input/output mint and
-amount fields, and a minimum output. The automated worker does **not** write
-such an intent today. Therefore its reported swap signature is not yet bound
-to a persisted order, and the lane remains disabled.
+amount fields, and a minimum output. The automated worker and authenticated
+worker API now prepare this row before Jupiter `/execute`, but the lane remains
+disabled while crash recovery and canary validation are incomplete.
 
-Before the first `/execute` call, an authenticated worker API action must
-verify the current armed job and settlement snapshot, validate the Jupiter
-order with the pinned-route pre-sign inspector, verify the treasury signature
-over that exact unsigned message with
+Before the first `/execute` call, the worker validates the Jupiter order with
+the pinned-route pre-sign inspector. An authenticated worker API action then
+verifies the current armed job and settlement snapshot, verifies the treasury
+signature over the exact unsigned message with
 `inspectPreparedAutomaticBuybackOrder`, then durably insert one immutable
 `transaction_intents` row. Use action `sportpad_buyback_automation`,
 idempotency key `automation:buyback:swap:<settlementId>`, signer role
@@ -81,17 +81,21 @@ and quoted minimum output. A conflicting row must stop execution; it must
 never be overwritten with a newly requested order. Only after the database
 confirms this insert may the worker send `/execute`.
 
-At completion, fetch the row by that idempotency key. After the finalized
-swap/burn receipt checks, call `verifyPersistedAutomaticBuybackIntent` with
+At completion, the server fetches the row by that idempotency key. After the finalized
+swap/burn receipt checks, it calls `verifyPersistedAutomaticBuybackIntent` with
 the row, the settlement's immutable input terms, and the finalized swap
 receipt/status. This independently checks the on-chain transaction's exact
 message bytes and verified treasury signature against the pre-broadcast row,
 plus the minimum output. A missing row or mismatch requires reconciliation,
 not ledger credit. The Jupiter request ID correlates API calls but is not a
 cryptographic provider attestation; the signed message and finalized chain
-receipt are the authoritative proof. A crash-recovery loop must query the
-persisted signature and, if safe, re-sign/rebroadcast only that same message.
-This API action, completion wiring, and crash-recovery loop are still pending.
+receipt are the authoritative proof. The server does not yet independently
+repeat the full pre-sign instruction and account simulation, so a worker-key
+compromise could still spend funds. A crash-recovery loop must query the
+persisted signature and, if safe, rebroadcast only that same signed message.
+That crash-recovery loop and a durable, pre-broadcast burn intent are still
+pending. Never enable `BUYBACK_EXECUTION_SAFE` or the financial ledger gate
+based on swap-intent persistence alone.
 
 Primary references: [Jupiter V2 Order & Execute](https://developers.jup.ag/docs/swap/order-and-execute),
 [Solana versioned transactions and address lookup tables](https://solana.com/docs/core/transactions/versioned-transactions),

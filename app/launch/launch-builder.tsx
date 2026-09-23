@@ -111,7 +111,7 @@ export function LaunchBuilder() {
           reason: body.route.reason,
         });
         setRewardNotice(body.route.reason === "asset_migration_unverified"
-          ? "Chiliz Fan Tokens migrated to new contracts in 2026. Legacy routes are paused while current contracts and liquidity are verified."
+          ? "Current Chiliz V2 Fan Tokens can trade, but SportPad's automatic V2 purchase and payout route has not passed end-to-end verification. This reward selection is paused."
           : "");
       })
       .catch((caught) => {
@@ -220,7 +220,7 @@ export function LaunchBuilder() {
           ? `Wait for the live ${selected.route} route check to finish.`
           : rewardRoute.state === "unavailable"
             ? rewardRoute.reason === "asset_migration_unverified"
-              ? "Chiliz Fan Tokens migrated to new contracts in 2026. These legacy routes are paused while current contracts and liquidity are verified."
+              ? "SportPad has not verified automatic purchase and payout of this current Chiliz V2 Fan Token. Its reward selection is paused."
               : `${selected.symbol} has no live acquisition route on ${selected.route} right now. Choose a routed reward.`
             : `The live ${selected.route} route could not be verified. Retry or choose another reward.`,
     );

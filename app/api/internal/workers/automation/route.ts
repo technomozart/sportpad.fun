@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getMint, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getMint, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 import { createPublicClient, http, parseAbi } from "viem";
 import { z } from "zod";
@@ -16,9 +16,13 @@ import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBAC
   type AutomationLaneControls } from "@/lib/protocol/automation-safety";
 import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
 import { getRewardOption } from "@/lib/protocol/reward-options";
+import { quoteChilizPurchaseSpendCeiling } from "@/lib/server/chiliz-spend-bound";
 import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig, readWorkerToken } from "@/lib/server/execution-config";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { verifySolanaClaimPayoutReceipt, verifySportpadBuybackReceipts } from "@/lib/server/solana/automation-receipt";
+import { inspectPreparedAutomaticBuybackOrder, verifyPersistedAutomaticBuybackIntent,
+  type PersistedAutomaticBuybackIntent } from "@/lib/server/solana/buyback-intent-proof";
+import { INSERT_AUTOMATIC_BUYBACK_INTENT_SQL } from "@/lib/server/solana/buyback-order-sql";
 import { getMainnetConnection } from "@/lib/server/solana/devnet";
 import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth";
 
@@ -32,6 +36,18 @@ const requestSchema = z.discriminatedUnion("action", [
     action: z.literal("arm"),
     jobId: z.string().uuid(),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
+  }).strict(),
+  z.object({
+    action: z.literal("prepare_buyback_swap"),
+    jobId: z.string().uuid(),
+    workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
+    providerRequestId: z.string().min(1).max(200).regex(/^[\x21-\x7e]+$/),
+    unsignedTransactionBase64: z.string().min(1).max(20_000),
+    signedTransactionBase64: z.string().min(1).max(20_000),
+    inputAmountLamports: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    outputMint: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+    minimumOutputAtomic: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    lastValidBlockHeight: z.number().int().positive().safe(),
   }).strict(),
   z.object({
     action: z.literal("complete"),
@@ -381,6 +397,7 @@ async function verifiedChilizOutput(database: D1Database, job: AutomationRow, wo
   }
   const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
   let expectedPurchase: { txHash: string; treasury: string; fanTokenContract: string; outputAmountAtomic: string } | null = null;
+  let purchaseRewardAmountLamports: string | null = null;
   let expectedTransfer: { txHash: string; treasury: string; destination: string;
     fanTokenContract: string; amountAtomic: string } | null = null;
   if (job.job_type === "chiliz_reward_purchase") {
@@ -405,6 +422,7 @@ async function verifiedChilizOutput(database: D1Database, job: AutomationRow, wo
       !reportedOutput) throw new Error("chiliz_purchase_job_snapshot_mismatch");
     expectedPurchase = { txHash, treasury, fanTokenContract: asset.currentV2Contract,
       outputAmountAtomic: reportedOutput };
+    purchaseRewardAmountLamports = row.reward_amount_atomic;
   } else if (job.job_type === "chiliz_claim_unwrap") {
     // Keep the historical internal job type for DB compatibility. The V2
     // worker sends a direct ERC-20 transfer, never a legacy Kayen unwrap.
@@ -447,7 +465,13 @@ async function verifiedChilizOutput(database: D1Database, job: AutomationRow, wo
     abi: parseAbi(["function decimals() view returns (uint8)"]), functionName: "decimals",
     blockNumber: receipt.blockNumber });
   const evidence = { chainId, latestBlock, tokenDecimals, transaction, receipt };
-  if (expectedPurchase) return verifyChilizPurchaseReceipt(evidence, expectedPurchase).acquiredAtomic.toString();
+  if (expectedPurchase) {
+    const block = await client.getBlock({ blockNumber: receipt.blockNumber });
+    if (!purchaseRewardAmountLamports || !block.timestamp) throw new Error("chiliz_spend_receipt_time_unavailable");
+    const maxSpendChzWei = await quoteChilizPurchaseSpendCeiling(purchaseRewardAmountLamports,
+      Number(block.timestamp) * 1_000);
+    return verifyChilizPurchaseReceipt(evidence, { ...expectedPurchase, maxSpendChzWei }).acquiredAtomic.toString();
+  }
   verifyChilizTransferReceipt(evidence, expectedTransfer!);
   return undefined;
 }
@@ -544,7 +568,88 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
     inputAmountLamports: expected.inputAmountLamports!,
     purchasedAmountAtomic: expected.purchasedAmountAtomic!,
   });
+  const intent = await database.prepare(`
+    SELECT idempotency_key, settlement_id, signer_role, signer_address, action, state,
+      provider_request_id, unsigned_transaction_base64, transaction_message_hash,
+      tx_signature, input_mint, output_mint, input_amount_atomic,
+      minimum_output_atomic, maximum_spend_lamports, expected_mints_json,
+      expected_programs_json
+    FROM transaction_intents WHERE idempotency_key = ?1 LIMIT 1
+  `).bind(`automation:buyback:swap:${job.entity_id}`).first<PersistedAutomaticBuybackIntent>();
+  await verifyPersistedAutomaticBuybackIntent({
+    intent,
+    expected: { settlementId: job.entity_id, treasury: expected.treasury,
+      sportpadMint: expected.mint, inputAmountLamports: expected.inputAmountLamports!,
+      purchasedAmountAtomic: verified.boughtAndBurnedAtomic, swapSignature: sourceTxHash! },
+    swapReceipt: swap.receipt,
+    swapStatus: swap.status,
+  });
   return verified.boughtAndBurnedAtomic;
+}
+
+type PrepareBuybackRequest = Extract<z.infer<typeof requestSchema>, { action: "prepare_buyback_swap" }>;
+
+async function persistPreparedBuybackSwap(database: D1Database, job: AutomationRow, input: PrepareBuybackRequest) {
+  if (!FINANCIAL_LEDGER_VERIFIED || job.job_type !== "sportpad_buyback_burn" || job.chain !== "solana") {
+    throw new Error("buyback_automation_lane_closed");
+  }
+  const config = readMainnetConfig();
+  if (!config.buybackTreasury || input.workerId !== `solana:${config.buybackTreasury}`) {
+    throw new Error("buyback_worker_treasury_mismatch");
+  }
+  const [settlement, setting] = await Promise.all([
+    database.prepare(`
+      SELECT s.buyback_amount_atomic, s.state, f.launch_id, l.mainnet_mint,
+        l.mainnet_buyback_treasury
+      FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+      JOIN launch_drafts l ON l.id = f.launch_id
+      WHERE s.id = ?1 AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
+    `).bind(job.entity_id).first<{
+      buyback_amount_atomic: string; state: string; launch_id: string;
+      mainnet_mint: string | null; mainnet_buyback_treasury: string | null;
+    }>(),
+    database.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
+      .first<{ value: string }>(),
+  ]);
+  const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+  if (!settlement || !setting?.value || !settlement.mainnet_mint ||
+    settlement.mainnet_mint === setting.value ||
+    settlement.mainnet_buyback_treasury !== config.buybackTreasury ||
+    !["reconciled", "distributed", "reward_acquired"].includes(settlement.state) ||
+    payload.settlementId !== job.entity_id || payload.launchId !== settlement.launch_id ||
+    payload.sportpadMint !== setting.value || payload.amountLamports !== settlement.buyback_amount_atomic ||
+    input.outputMint !== setting.value || input.inputAmountLamports !== settlement.buyback_amount_atomic ||
+    (config.sportpadMint && config.sportpadMint !== setting.value) ||
+    BigInt(input.inputAmountLamports) > 100_000_000n ||
+    BigInt(input.minimumOutputAtomic) > 18_446_744_073_709_551_615n) {
+    throw new Error("buyback_order_job_snapshot_mismatch");
+  }
+  const controls = await readAutomationControls(database);
+  if (!laneAllowsJob(job.job_type, controls)) throw new Error("buyback_automation_lane_paused");
+  const currentHeight = await getMainnetConnection().getBlockHeight("confirmed");
+  if (input.lastValidBlockHeight <= currentHeight || input.lastValidBlockHeight > currentHeight + 300) {
+    throw new Error("buyback_order_blockhash_window_invalid");
+  }
+  const prepared = await inspectPreparedAutomaticBuybackOrder({
+    unsignedTransactionBase64: input.unsignedTransactionBase64,
+    signedTransactionBase64: input.signedTransactionBase64,
+    treasury: config.buybackTreasury,
+  });
+  const intentId = crypto.randomUUID();
+  const idempotencyKey = `automation:buyback:swap:${job.entity_id}`;
+  const expiresAt = new Date(Date.now() + 90_000).toISOString();
+  const inserted = await database.prepare(INSERT_AUTOMATIC_BUYBACK_INTENT_SQL).bind(
+    intentId, idempotencyKey, job.entity_id, config.buybackTreasury,
+    JSON.stringify(["jupiter_v2_metis_pinned"]),
+    JSON.stringify([NATIVE_MINT.toBase58(), setting.value]),
+    input.inputAmountLamports, input.providerRequestId,
+    input.unsignedTransactionBase64, prepared.transactionMessageHash,
+    input.lastValidBlockHeight, NATIVE_MINT.toBase58(), setting.value,
+    input.inputAmountLamports, input.minimumOutputAtomic,
+    prepared.txSignature, expiresAt, job.id, `broadcasting:${input.workerId}`,
+  ).run();
+  if (inserted.meta.changes !== 1) throw new Error("buyback_order_intent_conflict_or_paused");
+  return { intentId, txSignature: prepared.txSignature };
 }
 
 export async function POST(request: Request) {
@@ -585,7 +690,9 @@ export async function POST(request: Request) {
   }
   const ownedLease = ownsActiveLease(job, input.workerId, Date.now());
   const ownedBroadcast = ownsBroadcast(job, input.workerId);
-  if (!job || (input.action === "arm" ? !ownedLease : input.action === "complete" ? !ownedBroadcast : !ownedLease && !ownedBroadcast)) {
+  if (!job || (input.action === "arm" ? !ownedLease :
+    input.action === "complete" || input.action === "prepare_buyback_swap" ? !ownedBroadcast :
+      !ownedLease && !ownedBroadcast)) {
     return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
   }
   if (input.action === "arm") {
@@ -606,6 +713,17 @@ export async function POST(request: Request) {
     `).bind(job.id, `leased:${input.workerId}`, `broadcasting:${input.workerId}`, Date.now()).run();
     if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
     return Response.json({ armed: true });
+  }
+  if (input.action === "prepare_buyback_swap") {
+    try {
+      const prepared = await persistPreparedBuybackSwap(env.DB, job, input);
+      return Response.json({ prepared: true, ...prepared });
+    } catch (error) {
+      // A duplicate, paused, expired, or unverifiable order is never executed.
+      // The worker must reconcile the armed job rather than obtain a new order.
+      console.error("buyback_order_prepare_failed", error instanceof Error ? error.message : "unknown");
+      return Response.json({ error: "Buyback order could not be durably prepared." }, { status: 409 });
+    }
   }
   if (input.action === "complete") {
     if (!FINANCIAL_LEDGER_VERIFIED ||

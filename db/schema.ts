@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const launchDrafts = sqliteTable(
   "launch_drafts",
@@ -121,7 +121,7 @@ export const evmWalletChallenges = sqliteTable(
 export const evmWalletLinks = sqliteTable(
   "evm_wallet_links",
   {
-    ownerUserId: text("owner_user_id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
     solanaWallet: text("solana_wallet").notNull(),
     evmAddress: text("evm_address").notNull(),
     chainId: integer("chain_id").notNull().default(88888),
@@ -129,7 +129,8 @@ export const evmWalletLinks = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("idx_evm_links_address").on(table.evmAddress),
+    primaryKey({ columns: [table.ownerUserId, table.solanaWallet] }),
+    index("idx_evm_links_address").on(table.evmAddress),
     index("idx_evm_links_solana_wallet").on(table.solanaWallet),
   ],
 );

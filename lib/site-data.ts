@@ -139,8 +139,8 @@ export const faqItems = [
     answer: "The method uses eligible token-seconds: a wallet's time-weighted balance divided by all eligible time-weighted balances, multiplied by the official Fan Tokens funded for that epoch.",
   },
   {
-    question: "Can a creator choose any Fan Token?",
-    answer: "A creator can draft a selection from 78 Kayen-listed Chiliz Fan Tokens, plus AFC and ARG on Solana. Mainnet preparation still requires a current executable quote and operational reward and buyback workers. A listed market is not a funded reward or a guarantee that a launch can proceed.",
+    question: "Can Chiliz Fan Tokens trade, and can creators select them?",
+    answer: "Current V2 Fan Tokens can trade on Chiliz markets where liquidity exists. That does not make SportPad's automatic purchase and claim route live. The 78 current Chiliz contracts are catalogued but are paused for new reward selections; AFC and ARG are the two Solana options. All new mainnet launches remain paused until funded reward and buyback execution passes verification.",
   },
   {
     question: "Does SportPad custody my launch tokens?",
@@ -148,7 +148,7 @@ export const faqItems = [
   },
   {
     question: "Who pays the Chiliz claim gas?",
-    answer: "The planned claim worker sponsors CHZ gas for the unwrap and payout transaction, so a holder should not need CHZ merely to claim when that service is active. Chiliz payouts are not yet enabled or funded.",
+    answer: "The planned claim worker would pay CHZ gas to transfer the current V2 Fan Token directly to a holder's verified 0x address. A holder should not need CHZ merely to claim once that service is active. Chiliz payouts are not yet enabled or funded.",
   },
 ];
 
