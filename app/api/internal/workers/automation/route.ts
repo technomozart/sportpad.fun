@@ -45,6 +45,9 @@ import { inspectPreparedAutomaticBuybackBurn, verifyPersistedAutomaticBuybackBur
 import { proveExpiredBuybackBurnAbsent } from "@/lib/server/solana/buyback-expiry-proof";
 import { proveExpiredSwapAbsent } from "@/lib/server/solana/swap-expiry-proof";
 import { ARCHIVE_EXPIRED_SWAP_INTENT_SQL } from "@/lib/server/solana/swap-replacement-sql";
+import { ARCHIVE_FINALIZED_FAILED_REWARD_BATCH_INTENT_SQL,
+  REARM_PROVEN_FAILED_REWARD_BATCH_JOB_SQL } from
+  "@/lib/server/solana/reward-batch-failure-sql";
 import { COMPLETE_AUTOMATIC_BUYBACK_BURN_INTENT_SQL } from "@/lib/server/solana/buyback-burn-intent-sql";
 import { ADVANCE_AUTOMATIC_BUYBACK_SETTLEMENT_SQL, automaticBuybackChunkKey,
   ARCHIVE_EXPIRED_BUYBACK_CHUNK_BURN_INTENT_SQL,
@@ -66,6 +69,7 @@ import { ADVANCE_REWARD_BATCH_SETTLEMENTS_SQL, ADVANCE_REWARD_BATCH_TOTAL_SQL,
   UPDATE_QUEUED_REWARD_BATCH_PAYLOAD_SQL, VERIFY_REWARD_BATCH_SOURCES_SQL,
 } from "@/lib/server/solana/reward-batch-sql";
 import { getMainnetConnection } from "@/lib/server/solana/devnet";
+import { proveFinalizedFailedRewardSwap } from "@/lib/server/solana/reward-swap-failure-proof";
 import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth";
 
 const requestSchema = z.discriminatedUnion("action", [
@@ -1481,6 +1485,76 @@ async function provePersistedSwapExpired(database: D1Database,
   });
 }
 
+async function proveFailedRewardBatchForRetry(database: D1Database, job: AutomationRow,
+  intent: PersistedAutomaticBuybackIntent | null, treasury: string,
+  evidence: Pick<Parameters<typeof proveFinalizedFailedRewardSwap>[0], "receipt" | "status">) {
+  if (job.job_type !== "solana_reward_purchase" || job.entity_type !== "reward_swap_batch" ||
+    job.chain !== "solana" || job.tx_hash !== null) {
+    throw new Error("reward_batch_failure_job_invalid");
+  }
+  const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+  const canonicalKey = rewardBatchIntentKey(job.entity_id);
+  const batch = await database.prepare(`
+    SELECT b.input_amount_atomic, b.reward_mint, b.treasury,
+      b.launch_id, b.state, b.tx_signature, l.reward_symbol,
+      l.reward_chain, l.mainnet_reward_treasury, l.status AS launch_status,
+      (SELECT COUNT(*) FROM reward_swap_batch_sources src
+        WHERE src.batch_id = b.id) AS source_count,
+      (SELECT SUM(CAST(src.input_amount_atomic AS INTEGER)) FROM reward_swap_batch_sources src
+        WHERE src.batch_id = b.id AND src.state = 'reserved') AS source_sum,
+      (SELECT COUNT(*) FROM reward_swap_batch_sources src
+        LEFT JOIN settlements s ON s.id = src.settlement_id
+        WHERE src.batch_id = b.id AND (src.state <> 'reserved'
+          OR src.verified_signature IS NOT NULL OR s.id IS NULL
+          OR s.reward_spent_atomic <> src.offset_atomic
+          OR s.reward_amount_atomic <> src.total_atomic
+          OR s.reward_swap_signature IS NOT NULL
+          OR s.state NOT IN ('reconciled', 'distributed', 'buyback_burned'))) AS changed_count,
+      (SELECT COUNT(*) FROM transaction_intents prior
+        WHERE prior.idempotency_key LIKE ?2 || ':failed:%') AS failed_predecessors,
+      (SELECT COUNT(*) FROM solana_reward_purchase_canary c
+        WHERE c.reward_batch_id = b.id) AS canary_reservations
+    FROM reward_swap_batches b JOIN launch_drafts l ON l.id = b.launch_id
+    WHERE b.id = ?1
+  `).bind(job.entity_id, canonicalKey).first<{
+    input_amount_atomic: string; reward_mint: string; treasury: string;
+    launch_id: string; state: string; tx_signature: string | null;
+    reward_symbol: string; reward_chain: string; mainnet_reward_treasury: string | null;
+    launch_status: string; source_count: number; source_sum: number | null;
+    changed_count: number; failed_predecessors: number; canary_reservations: number;
+  }>();
+  const inputAmount = batch && /^[1-9][0-9]*$/.test(batch.input_amount_atomic)
+    ? BigInt(batch.input_amount_atomic) : 0n;
+  if (!batch || inputAmount < 1_000_000n || inputAmount > 100_000_000n ||
+    batch.state !== "broadcasting" || batch.tx_signature !== null ||
+    batch.treasury !== treasury || batch.mainnet_reward_treasury !== treasury ||
+    batch.reward_chain !== "solana" || batch.launch_status !== "mainnet_published" ||
+    getRewardOption("solana", batch.reward_symbol)?.tokenAddress !== batch.reward_mint ||
+    batch.source_count < 1 || batch.source_sum?.toString() !== batch.input_amount_atomic ||
+    batch.changed_count !== 0 || batch.failed_predecessors !== 0 ||
+    batch.canary_reservations !== 0 ||
+    payload.batchId !== job.entity_id || payload.launchId !== batch.launch_id ||
+    payload.rewardMint !== batch.reward_mint || payload.rewardSymbol !== batch.reward_symbol ||
+    payload.rewardAmountLamports !== batch.input_amount_atomic ||
+    intent?.idempotency_key !== canonicalKey || intent.reward_batch_id !== job.entity_id) {
+    throw new Error("reward_batch_failure_snapshot_mismatch_or_retry_exhausted");
+  }
+  const rpc = getMainnetConnection();
+  const mint = new PublicKey(batch.reward_mint);
+  const mintAccount = await rpc.getAccountInfo(mint, "finalized");
+  if (!mintAccount || (!mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
+    !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID))) {
+    throw new Error("reward_batch_failure_mint_unverified");
+  }
+  const mintState = await getMint(rpc, mint, "finalized", mintAccount.owner);
+  return proveFinalizedFailedRewardSwap({
+    intent, expected: { idempotencyKey: canonicalKey, treasury,
+      rewardMint: batch.reward_mint, inputAmountLamports: batch.input_amount_atomic,
+      rewardBatchId: job.entity_id, tokenProgram: mintAccount.owner.toBase58(),
+      decimals: mintState.decimals }, ...evidence,
+  });
+}
+
 async function replacementSwapArchive(database: D1Database, job: AutomationRow,
   options: {
     canonicalKey: string; replacesSignature: string | undefined;
@@ -1518,6 +1592,24 @@ async function replacementSwapArchive(database: D1Database, job: AutomationRow,
       });
   if (prepared.txSignature !== options.replacesSignature ||
     !intent.transaction_message_hash) throw new Error("swap_replacement_message_mismatch");
+  if (job.entity_type === "reward_swap_batch") {
+    const rpc = getMainnetConnection();
+    const [receipt, statuses] = await Promise.all([
+      rpc.getTransaction(prepared.txSignature,
+        { commitment: "finalized", maxSupportedTransactionVersion: 0 }),
+      rpc.getSignatureStatuses([prepared.txSignature], { searchTransactionHistory: true }),
+    ]);
+    const status = statuses.value[0] ?? null;
+    if (status?.err != null || receipt?.meta?.err != null) {
+      const proof = await proveFailedRewardBatchForRetry(database, job, intent,
+        options.treasury, { receipt, status });
+      return database.prepare(ARCHIVE_FINALIZED_FAILED_REWARD_BATCH_INTENT_SQL).bind(
+        options.canonicalKey, proof.signature, intent.transaction_message_hash,
+        options.treasury, job.id, job.entity_id,
+        `broadcasting:solana:${options.treasury}`, proof.feeLamports, proof.slot.toString(),
+      );
+    }
+  }
   await provePersistedSwapExpired(database, job.entity_type, job.entity_id,
     options.treasury, prepared);
   return database.prepare(ARCHIVE_EXPIRED_SWAP_INTENT_SQL).bind(
@@ -1783,6 +1875,38 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
       rpc.getSignatureStatuses([row.prepared_signature], { searchTransactionHistory: true }),
     ]);
     const status = statuses.value[0] ?? null;
+    if (row.entity_type === "reward_swap_batch" &&
+      (status?.err != null || receipt?.meta?.err != null)) {
+      if (!mayBroadcast) {
+        await defer();
+        return { reconciled: false };
+      }
+      const idempotencyKey = rewardBatchIntentKey(row.entity_id);
+      const intent = await database.prepare(`
+        SELECT idempotency_key, settlement_id, reward_batch_id, signer_role,
+          signer_address, action, state, provider_request_id,
+          unsigned_transaction_base64, transaction_message_hash,
+          last_valid_block_height, tx_signature, input_mint, output_mint,
+          input_amount_atomic, minimum_output_atomic, maximum_spend_lamports,
+          expected_mints_json, expected_programs_json
+        FROM transaction_intents WHERE idempotency_key = ?1 LIMIT 1
+      `).bind(idempotencyKey).first<PersistedAutomaticBuybackIntent>();
+      const proof = await proveFailedRewardBatchForRetry(database, row, intent,
+        config.rewardTreasury, { receipt, status });
+      if (proof.signature !== row.prepared_signature) {
+        throw new Error("reward_batch_failure_signature_mismatch");
+      }
+      const restored = await database.prepare(REARM_PROVEN_FAILED_REWARD_BATCH_JOB_SQL)
+        .bind(row.id, `broadcasting:${workerId}`, Date.now() + 30_000,
+        row.state, row.error_code, row.entity_id, idempotencyKey,
+        row.prepared_signature).run();
+      if (restored.meta.changes !== 1) throw new Error("reward_batch_failure_rearm_conflict");
+      return { reconciled: false, orderRequired: {
+        jobId: row.id, entityId: row.entity_id,
+        payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+        replacesSwapSignature: proof.signature,
+      } };
+    }
     if (!receipt || !status || status.confirmationStatus !== "finalized" ||
       status.err !== null) {
       // A pause blocks replay and replacement, but it cannot undo a finalized

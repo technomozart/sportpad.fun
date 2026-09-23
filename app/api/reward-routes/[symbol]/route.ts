@@ -22,8 +22,8 @@ export async function GET(request: Request, context: RouteContext) {
     // advertise this reward as claimable. Keep route.available false.
     const market = await checkChilizV2Market(asset.tokenAddress);
     return Response.json({ symbol: asset.symbol, chain, tokenAddress: asset.tokenAddress,
-      route: { available: false, checkedAt: new Date().toISOString(), inputAmountWei: "0",
-        outputAmountAtomic: null, router: "Kayen", reason: "asset_migration_unverified" },
+      route: { available: false, checkedAt: market.checkedAt, inputAmountWei: "0",
+        outputAmountAtomic: null, router: "Kayen", reason: "sportpad_execution_unverified" },
       market },
     { headers: { "Cache-Control": "no-store" } });
   }

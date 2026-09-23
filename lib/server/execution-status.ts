@@ -3,6 +3,7 @@ import "server-only";
 import { env } from "cloudflare:workers";
 import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
+import { evaluateClaimReadinessByChain } from "@/lib/protocol/claim-readiness";
 
 import {
   DEFAULT_PROTOCOL_CONTROLS,
@@ -10,6 +11,10 @@ import {
   type ProtocolControls,
 } from "@/lib/server/execution-config";
 import { readGlobalLaunchReadiness } from "@/lib/server/launch-automation-readiness";
+
+// Must remain closed until a funded mainnet claim/recovery canary is verified
+// and the API and Solana worker execution holds are deliberately released.
+const SOLANA_CLAIM_PAYOUT_VERIFIED = false;
 
 type CountRow = { count: number };
 type ControlRow = {
@@ -143,9 +148,6 @@ export async function getExecutionStatus() {
     rewards: automatedRewardWorkersActive
       ? without(execution.readiness.rewards, ["reward vault signer"])
       : execution.readiness.rewards,
-    claims: automatedRewardWorkersActive
-      ? without(execution.readiness.claims, ["reward vault signer"])
-      : execution.readiness.claims,
     buyback: solanaActive
       ? without(execution.readiness.buyback, ["buyback signer", ...(sportpadSetting?.value ? ["SPORTPAD mint"] : [])])
       : execution.readiness.buyback,
@@ -158,10 +160,24 @@ export async function getExecutionStatus() {
     ];
     return { ready: lane.ready && missing.length === 0, missing };
   };
+  const claimsByChain = evaluateClaimReadinessByChain({
+    configuredClaims: execution.readiness.claims,
+    heartbeats,
+    solanaRewardTreasury: execution.mainnet.rewardTreasury,
+    chilizTreasury: env.CHILIZ_TREASURY_ADDRESS?.trim() ?? null,
+    financialLedgerVerified: FINANCIAL_LEDGER_VERIFIED,
+    solanaPayoutVerified: SOLANA_CLAIM_PAYOUT_VERIFIED,
+    chilizMigrationVerified: CHILIZ_ASSET_MIGRATION_VERIFIED,
+  });
   const readiness = {
     settlement: withStaticHolds(configuredReadiness.settlement),
     rewards: withStaticHolds(configuredReadiness.rewards, true),
-    claims: withStaticHolds(configuredReadiness.claims, true),
+    // The aggregate remains conservative for system-wide status displays.
+    claims: {
+      ready: claimsByChain.solana.ready && claimsByChain.chiliz.ready,
+      missing: [...new Set([...claimsByChain.solana.missing, ...claimsByChain.chiliz.missing])],
+    },
+    claimsByChain,
     buyback: withStaticHolds(configuredReadiness.buyback),
   };
   const launchReadiness = await readGlobalLaunchReadiness();

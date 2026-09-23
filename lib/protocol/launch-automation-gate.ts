@@ -51,10 +51,9 @@ export function evaluateLaunchAutomationReadiness(
   requireBuybackExecution = true,
 ): LaunchAutomationReadiness {
   const missing: string[] = [];
-  const chilizHeartbeat = rows.some((row) =>
-    /^automation:chiliz:0x[0-9a-f]{40}$/i.test(row.key) && freshHeartbeat(row, nowMs)
-  );
-  if (!chilizHeartbeat) missing.push("active maintenance worker");
+  // Successful, fresh maintenance receipts prove indexing is actually running.
+  // A Chiliz wallet heartbeat is not evidence of Solana maintenance and must
+  // not block a Solana-only launch when the same maintenance jobs are healthy.
   for (const requirement of [
     { worker: "pump_fee_indexer", label: "recent successful fee indexing", maxAgeMs: 2 * 60 * 1_000 },
     { worker: "holder_epoch_indexer", label: "recent successful holder indexing", maxAgeMs: 2 * 60 * 1_000 },

@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { launchDraftPayloadSchema } from "./launch-draft-input.ts";
+import { getRewardOption } from "./reward-options.ts";
 
 function readProjectFile(...segments: string[]) {
   return readFileSync(path.join(process.cwd(), ...segments), "utf8");
@@ -89,6 +90,29 @@ test("private drafts can be listed and resumed only through the authenticated ow
   assert.match(routeSource, /Cache-Control": "private, no-store"/);
   assert.match(accountRouteSource, /getLaunchDraftOwner\(request\)/);
   assert.doesNotMatch(accountRouteSource, /ownerUserId/);
+});
+
+test("official Chiliz V2 rewards are private-draft selections, not mainnet approvals", () => {
+  const draftRoute = readProjectFile("app", "api", "launch-drafts", "route.ts");
+  const mainnetRoute = readProjectFile("app", "api", "launch-drafts", "[id]", "mainnet", "route.ts");
+  const builder = readProjectFile("app", "launch", "launch-builder.tsx");
+  const routeAudit = readProjectFile("app", "api", "reward-routes", "[symbol]", "route.ts");
+  const bar = getRewardOption("chiliz", "BAR");
+
+  assert.ok(bar);
+  assert.equal(bar.routeStatus, "legacy_unverified");
+  assert.equal(bar.tokenAddress, "0x1589248b4B61ed472cc21CA1F2114d93ab6910D5");
+  assert.match(draftRoute, /getRewardOption\(payload\.rewardChain, payload\.rewardSymbol\)/);
+  assert.doesNotMatch(draftRoute, /rewardAsset\.routeStatus !== "current_verified"/);
+  assert.match(draftRoute, /draft_only_execution_unverified/);
+  assert.match(mainnetRoute, /rewardChain === "chiliz" && rewardAsset\.routeStatus !== "current_verified"/);
+  assert.match(mainnetRoute, /if \(!rewardRoute\.available\)/);
+  assert.match(routeAudit, /available: false/);
+  assert.match(routeAudit, /sportpad_execution_unverified/);
+  assert.match(builder, /market\?\.quoteAvailable/);
+  assert.match(builder, /depthImpactBps/);
+  assert.doesNotMatch(builder, /quote checked/);
+  assert.doesNotMatch(builder.match(/const canContinue = ([^;]+);/)?.[1] ?? "", /rewardRoute\.state === "available"/);
 });
 
 test("devnet launch records signed evidence before broadcast and finalizes with database guards", () => {

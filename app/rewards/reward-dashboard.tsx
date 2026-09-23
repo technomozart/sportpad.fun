@@ -15,7 +15,14 @@ type EthereumProvider = {
 declare global { interface Window { ethereum?: EthereumProvider } }
 
 type RewardProtocolStatus = {
-  readiness: { rewards: { ready: boolean; missing: string[] }; claims: { ready: boolean; missing: string[] } };
+  readiness: {
+    rewards: { ready: boolean; missing: string[] };
+    claims: { ready: boolean; missing: string[] };
+    claimsByChain?: {
+      solana: { ready: boolean; missing: string[] };
+      chiliz: { ready: boolean; missing: string[] };
+    };
+  };
   capabilities: { holderIndexerEnabled: boolean };
   counts: { rewardEpochs: number; confirmedClaims: number; rewardVaults: number };
 };
@@ -56,6 +63,10 @@ function payoutState(state: string) {
   if (state === "submission_unknown") return "Reconciliation pending";
   if (state === "submitting" || state === "submitted") return "Submitting";
   return "Ready to claim";
+}
+function claimLaneReady(protocol: RewardProtocolStatus | null, chain: RewardClaim["rewardChain"]) {
+  // Older status responses have no chain-specific assessment and fail closed.
+  return protocol?.readiness.claimsByChain?.[chain]?.ready === true;
 }
 function textToHex(value: string) {
   return `0x${[...new TextEncoder().encode(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -155,6 +166,10 @@ export function RewardDashboard() {
   }
 
   async function claimReward(claim: RewardClaim) {
+    if (!claimLaneReady(protocol, claim.rewardChain)) {
+      setNotice(`${claim.rewardChain === "chiliz" ? "Chiliz" : "Solana"} claims are paused until this reward lane is verified.`);
+      return;
+    }
     setBusy(claim.id); setNotice("");
     try {
       const queueClaim = () => fetch("/api/rewards", {
@@ -239,9 +254,9 @@ export function RewardDashboard() {
         <span><strong>${claim.launchSymbol}</strong><small>{claim.launchName}</small></span><span>Epoch closed</span>
         <strong>${claim.rewardSymbol}</strong><span>{claim.rewardChain === "chiliz" ? "Chiliz" : "Solana"}</span>
         <strong>{formatAtomic(claim.amountAtomic, claim.rewardDecimals)} ${claim.rewardSymbol}</strong>
-        <span className="claim-status">{claim.state === "claimable" && !protocol?.readiness.claims.ready ? "Claim paused" : payoutState(claim.state)}</span>
+        <span className="claim-status">{claim.state === "claimable" && !claimLaneReady(protocol, claim.rewardChain) ? "Claim paused" : payoutState(claim.state)}</span>
         {claim.signature ? <a href={claim.rewardChain === "chiliz" ? `${CHILIZ_CHAIN.explorerUrl}/tx/${claim.signature}` : `https://solscan.io/tx/${claim.signature}`} target="_blank" rel="noopener noreferrer" aria-label="Open payout receipt"><ExternalLink /></a>
-          : claim.state === "claimable" ? <Button size="sm" onClick={() => void claimReward(claim)} disabled={Boolean(busy) || !protocol?.readiness.claims.ready || (claim.rewardChain === "chiliz" && !currentData.evmWallet)}>{busy === claim.id ? "Queueing" : "Claim"}</Button> : <span />}
+          : claim.state === "claimable" ? <Button size="sm" onClick={() => void claimReward(claim)} disabled={Boolean(busy) || !claimLaneReady(protocol, claim.rewardChain) || (claim.rewardChain === "chiliz" && !currentData.evmWallet)}>{busy === claim.id ? "Queueing" : "Claim"}</Button> : <span />}
       </div>)}
       {!currentData || (!currentData.positions.length && !currentData.claims.length) ? <div className="empty-state"><Wallet /><h2>No reward positions to show.</h2><p>{walletSession.wallet ? "This wallet has no finalized SportPad holder position yet." : "Verify your Solana wallet to load its real indexed positions and allocations."}</p></div> : null}
     </div>

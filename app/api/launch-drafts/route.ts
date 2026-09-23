@@ -169,9 +169,9 @@ export async function POST(request: Request) {
   if (!rewardAsset) {
     return privateJson({ error: "Choose a verified reward asset." }, 400);
   }
-  if (rewardAsset.chain === "chiliz" && rewardAsset.routeStatus !== "current_verified") {
-    return privateJson({ error: "Chiliz Fan Token drafts are paused while current V2 purchase and payout routes are verified. Choose a Solana reward option for now." }, 409);
-  }
+  // A private plan may name an official Chiliz V2 contract even when no
+  // executable purchase or payout route exists. Mainnet prepare independently
+  // rejects those unverified routes before any metadata upload or signature.
   if (!env.BUCKET) {
     return privateJson({ error: "Image storage is unavailable. Please retry shortly." }, 503);
   }
@@ -216,7 +216,7 @@ export async function POST(request: Request) {
     return privateJson(
       {
         draft: serializeDraft(draft),
-        executionStatus: "route_checked_at_launch",
+        executionStatus: "draft_only_execution_unverified",
         imageStored: true,
       },
       201,

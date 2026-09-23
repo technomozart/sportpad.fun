@@ -32,7 +32,7 @@ test("a launch requires fresh chain-specific reward capabilities and the configu
 });
 
 test("pre-mint Solana launches can accrue the 20% share without a buyback worker", () => {
-  const withoutBuyback = fullWorkers.slice(1);
+  const withoutBuyback = [fullWorkers[1]];
   assert.deepEqual(evaluateLaunchAutomationReadiness(
     withoutBuyback, successfulMaintenance, "solana", buybackTreasury,
     rewardTreasury, now, false,
@@ -41,6 +41,15 @@ test("pre-mint Solana launches can accrue the 20% share without a buyback worker
     withoutBuyback, successfulMaintenance, "solana", buybackTreasury,
     rewardTreasury, now, true,
   ).ready, false);
+});
+
+test("Solana rewards do not require a Chiliz heartbeat when the maintenance receipts are fresh", () => {
+  assert.deepEqual(evaluateLaunchAutomationReadiness(
+    fullWorkers.slice(0, 2), successfulMaintenance, "solana", buybackTreasury, rewardTreasury, now,
+  ), { ready: true, missing: [] });
+  assert.ok(evaluateLaunchAutomationReadiness(
+    fullWorkers.slice(0, 2), successfulMaintenance.slice(1), "solana", buybackTreasury, rewardTreasury, now,
+  ).missing.includes("recent successful fee indexing"));
 });
 
 test("stale, malformed, and capability-incomplete worker heartbeats fail closed", () => {
@@ -59,7 +68,7 @@ test("stale, malformed, and capability-incomplete worker heartbeats fail closed"
   assert.equal(evaluateLaunchAutomationReadiness(fullWorkers, successfulMaintenance, "chiliz", null, rewardTreasury, now).ready, false);
 });
 
-test("every launch needs a fresh maintenance heartbeat and the latest successful maintenance receipts", () => {
+test("every launch needs the latest successful maintenance receipts", () => {
   assert.equal(evaluateLaunchAutomationReadiness(fullWorkers.slice(0, 1), successfulMaintenance, "solana", buybackTreasury, rewardTreasury, now).ready, false);
   assert.equal(evaluateLaunchAutomationReadiness(fullWorkers, successfulMaintenance.slice(0, 2), "solana", buybackTreasury, rewardTreasury, now).ready, false);
   assert.equal(evaluateLaunchAutomationReadiness(fullWorkers, [

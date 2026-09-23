@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const launchDrafts = sqliteTable(
   "launch_drafts",
@@ -263,6 +263,31 @@ export const rewardSwapBatchSources = sqliteTable(
     uniqueIndex("idx_reward_swap_sources_active_settlement")
       .on(table.settlementId).where(sql`${table.state} = 'reserved'`),
     index("idx_reward_swap_sources_batch_state").on(table.batchId, table.state),
+  ],
+);
+
+/** A single, operator-armed mainnet purchase canary. This does not enable
+ * public launches, claims, or any other financial action. Its one immutable
+ * batch reservation is counted before a signed purchase intent is stored. */
+export const solanaRewardPurchaseCanary = sqliteTable(
+  "solana_reward_purchase_canary",
+  {
+    key: text("key").primaryKey(),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    settlementId: text("settlement_id").notNull().references(() => settlements.id),
+    maxInputLamports: integer("max_input_lamports").notNull(),
+    reservedInputLamports: integer("reserved_input_lamports").notNull().default(0),
+    rewardBatchId: text("reward_batch_id").references(() => rewardSwapBatches.id),
+    state: text("state").notNull().default("paused"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("chk_solana_reward_canary_singleton", sql`${table.key} = 'initial'`),
+    check("chk_solana_reward_canary_cap", sql`${table.maxInputLamports} BETWEEN 1000000 AND 100000000`),
+    check("chk_solana_reward_canary_spend", sql`${table.reservedInputLamports} BETWEEN 0 AND ${table.maxInputLamports}`),
+    check("chk_solana_reward_canary_batch_reservation", sql`(${table.rewardBatchId} IS NULL AND ${table.reservedInputLamports} = 0) OR (${table.rewardBatchId} IS NOT NULL AND ${table.reservedInputLamports} > 0)`),
+    check("chk_solana_reward_canary_state", sql`${table.state} IN ('paused', 'armed')`),
   ],
 );
 

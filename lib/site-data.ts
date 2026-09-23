@@ -140,7 +140,7 @@ export const faqItems = [
   },
   {
     question: "Can Chiliz Fan Tokens trade, and can creators select them?",
-    answer: "Current V2 Fan Tokens can trade on Chiliz markets where liquidity exists. That does not make SportPad's automatic purchase and claim route live. The 78 current Chiliz contracts are catalogued but are paused for new reward selections; AFC and ARG are the two Solana options. All new mainnet launches remain paused until funded reward and buyback execution passes verification.",
+    answer: "Creators can select any of the 78 official Chiliz V2 Fan Tokens in a private launch draft. A read-only market quote may be shown where liquidity exists, but it does not verify SportPad's automatic purchase or claim execution. Chiliz reward drafts cannot launch on mainnet yet. AFC and ARG remain the two Solana reward options, and all new mainnet launches remain paused pending financial verification. The community coin would trade against SOL on Pump; the selected Fan Token is a planned reward, not its market pair.",
   },
   {
     question: "Does SportPad custody my launch tokens?",
