@@ -5,6 +5,7 @@ import {
   assertFreshQuote,
   assertOfficialV2Asset,
   chzSpendFromSolanaQuote,
+  normalizeChilizTreasuryPrivateKey,
   positiveAtomic,
   validateKayenQuote,
 } from "../lib/protocol/chiliz-worker-safety.mjs";
@@ -42,8 +43,7 @@ function required(name) {
 
 const baseUrl = required("SPORTPAD_BASE_URL").replace(/\/$/, "");
 const workerToken = required("SPORTPAD_WORKER_TOKEN");
-const privateKey = required("CHILIZ_TREASURY_PRIVATE_KEY");
-if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new Error("CHILIZ_TREASURY_PRIVATE_KEY must be a 0x-prefixed private key.");
+const privateKey = normalizeChilizTreasuryPrivateKey(required("CHILIZ_TREASURY_PRIVATE_KEY"));
 const account = privateKeyToAccount(privateKey);
 const transport = http(CHILIZ.rpcUrls.default.http[0], { timeout: 20_000, retryCount: 2 });
 const publicClient = createPublicClient({ chain: CHILIZ, transport });
