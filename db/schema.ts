@@ -558,6 +558,9 @@ export const transactionIntents = sqliteTable(
     settlementId: text("settlement_id").references(() => settlements.id),
     rewardBatchId: text("reward_batch_id").references(() => rewardSwapBatches.id),
     claimId: text("claim_id").references(() => rewardClaims.id),
+    // A finalized signature on the source token account, captured before a
+    // signed claim is broadcast. Recovery scans back through this anchor.
+    claimHistoryAnchorSignature: text("claim_history_anchor_signature"),
     signerRole: text("signer_role").notNull(),
     signerAddress: text("signer_address"),
     action: text("action").notNull(),

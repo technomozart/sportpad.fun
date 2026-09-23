@@ -60,3 +60,18 @@ test("a malformed or failing replay never opens another purchase lease", async (
     throw new Error("broadcast_unknown");
   }), /broadcast_unknown/);
 });
+
+test("a proven-expired reward order requires an explicit replacement callback", async () => {
+  const orderRequired = { jobId: "job-1", entityId: "step-1",
+    payload: { rewardAmountLamports: "1000000" }, replacesSwapSignature: "A".repeat(64) };
+  await assert.rejects(reconcileRewardPurchases(async () => ({
+    reconciled: false, pending: true, orderRequired,
+  }), "solana:reward-treasury", true, async () => {}), /reward_replacement_payload_invalid/);
+  const replaced = [];
+  const recovery = await reconcileRewardPurchases(async () => ({
+    reconciled: false, pending: true, orderRequired,
+  }), "solana:reward-treasury", true, async () => {},
+  async (stage) => replaced.push(stage));
+  assert.deepEqual(replaced, [orderRequired]);
+  assert.deepEqual(recovery, { reconciled: true, pending: true });
+});

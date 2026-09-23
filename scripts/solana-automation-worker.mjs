@@ -264,11 +264,25 @@ async function reconcileBuybackJobs() {
   const recovery = await api({ action: "reconcile_buyback", workerId: buybackWorkerId });
   if (!recovery || typeof recovery.reconciled !== "boolean" ||
     typeof recovery.pending !== "boolean" ||
-    [recovery.swapPrepared, recovery.burnRequired, recovery.burnPrepared]
+    [recovery.swapPrepared, recovery.swapRequired, recovery.burnRequired, recovery.burnPrepared]
       .filter(Boolean).length > 1) {
     throw new Error("buyback_recovery_response_invalid");
   }
   if (recovery.reconciled) return { reconciled: true, pending: recovery.pending };
+  if (recovery.swapRequired) {
+    const stage = recovery.swapRequired;
+    if (!recovery.pending || typeof stage.jobId !== "string" ||
+      !stage.payload || typeof stage.payload !== "object" ||
+      !/^[1-9A-HJ-NP-Za-km-z]{64,96}$/.test(stage.replacesSwapSignature ?? "")) {
+      throw new Error("buyback_recovery_new_swap_stage_invalid");
+    }
+    await assertPublishedTreasuries();
+    const result = await buyAndBurn(stage.payload, async () => {}, stage.jobId,
+      buybackWorkerId, stage.payload.stepId, stage.replacesSwapSignature);
+    await api({ action: "complete", jobId: stage.jobId,
+      workerId: buybackWorkerId, ...result });
+    return { reconciled: true, pending: true };
+  }
   if (recovery.swapPrepared) {
     if (!recovery.pending || !recovery.swapPrepared.payload ||
       typeof recovery.swapPrepared.signature !== "string") {
@@ -304,7 +318,8 @@ async function reconcileBuybackJobs() {
   return { reconciled: true, pending: true };
 }
 
-async function buyAndBurn(payload, arm, jobId, workerId, entityId) {
+async function buyAndBurn(payload, arm, jobId, workerId, entityId,
+  replacesSwapSignature) {
   if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_durable_recovery");
   if (!buyback) throw new Error("buyback_signer_not_configured");
   validateBuybackChunkPayload(payload, entityId);
@@ -350,6 +365,7 @@ async function buyAndBurn(payload, arm, jobId, workerId, entityId) {
     outputMint: mint.toBase58(),
     minimumOutputAtomic: inspection.minOutput.toString(),
     lastValidBlockHeight: quote.lastValidBlockHeight,
+    ...(replacesSwapSignature ? { replacesSwapSignature } : {}),
   });
   if (!prepared.prepared || prepared.txSignature !== expectedSignature) {
     throw new Error("buyback_order_intent_not_persisted");
@@ -376,7 +392,8 @@ async function buyAndBurn(payload, arm, jobId, workerId, entityId) {
   return burnPurchasedBuybackTokens(payload, jobId, workerId, executed.signature, purchased);
 }
 
-async function buyRewards(payload, arm, jobId, workerId, entityId) {
+async function buyRewards(payload, arm, jobId, workerId, entityId,
+  replacesSwapSignature) {
   if (!REWARD_PURCHASE_EXECUTION_SAFE) throw new Error("reward_purchase_execution_disabled_pending_funded_canary");
   if (!rewards) throw new Error("reward_signer_not_configured");
   const canonicalPositive = /^[1-9][0-9]*$/;
@@ -441,6 +458,7 @@ async function buyRewards(payload, arm, jobId, workerId, entityId) {
     outputMint: mint.toBase58(),
     minimumOutputAtomic: inspection.minOutput.toString(),
     lastValidBlockHeight: quote.lastValidBlockHeight,
+    ...(replacesSwapSignature ? { replacesSwapSignature } : {}),
   });
   if (!prepared.prepared || prepared.txSignature !== expectedSignature) {
     throw new Error("reward_order_intent_not_persisted");
@@ -596,7 +614,13 @@ async function runOnce() {
   // Recovery may rebroadcast only the exact persisted signature while its
   // original blockhash is live. Finalization remains server-verified.
   const recovery = await reconcileRewardPurchases(api, rewardWorkerId,
-    REWARD_PURCHASE_EXECUTION_SAFE, replayPreparedRewardSwap);
+    REWARD_PURCHASE_EXECUTION_SAFE, replayPreparedRewardSwap, async (stage) => {
+      await assertPublishedTreasuries();
+      const result = await buyRewards(stage.payload, async () => {}, stage.jobId,
+        rewardWorkerId, stage.entityId, stage.replacesSwapSignature);
+      await api({ action: "complete", jobId: stage.jobId,
+        workerId: rewardWorkerId, ...result });
+    });
   if (recovery.reconciled) return true;
   const claimRecovery = await reconcileSolanaClaims();
   if (claimRecovery.reconciled) return true;

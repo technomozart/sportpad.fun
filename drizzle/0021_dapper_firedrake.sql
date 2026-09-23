@@ -1,0 +1,1 @@
+ALTER TABLE `transaction_intents` ADD `claim_history_anchor_signature` text;

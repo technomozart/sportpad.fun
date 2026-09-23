@@ -16,6 +16,7 @@ export type PersistedAutomaticClaimIntent = {
   unsigned_transaction_base64: string | null;
   transaction_message_hash: string | null;
   last_valid_block_height: number | null;
+  claim_history_anchor_signature: string | null;
   input_mint: string | null; input_amount_atomic: string | null;
   tx_signature: string | null;
 };
@@ -101,6 +102,7 @@ export async function verifyPersistedAutomaticClaimIntent({ intent, expected, re
     intent.signer_address !== expected.treasury || intent.action !== "solana_claim_payout_automation" ||
     !["prepared", "broadcasting", "submitted", "submission_unknown"].includes(intent.state) ||
     intent.input_mint !== expected.mint || intent.input_amount_atomic !== expected.amountAtomic ||
+    !intent.claim_history_anchor_signature ||
     intent.tx_signature !== expected.signature ||
     intent.expected_programs_json !== JSON.stringify([expected.tokenProgram]) ||
     intent.expected_mints_json !== JSON.stringify([expected.mint]) ||

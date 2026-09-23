@@ -60,6 +60,7 @@ test("completion requires the persisted claim signature and finalized on-chain m
     maximum_spend_lamports: "500000", provider_request_id: transaction.recentBlockhash!,
     unsigned_transaction_base64: signed, transaction_message_hash: prepared.transactionMessageHash,
     last_valid_block_height: 1234, input_mint: terms.mint,
+    claim_history_anchor_signature: "finalized-prior-source-transfer",
     input_amount_atomic: "100", tx_signature: signature,
   };
   const receipt = { slot: 42, transaction: { signatures: [signature],

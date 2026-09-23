@@ -34,11 +34,17 @@ import { inspectPersistedPreparedBuybackSwap, inspectPersistedPreparedRewardSwap
   type PersistedAutomaticBuybackIntent } from "@/lib/server/solana/buyback-intent-proof";
 import { inspectPreparedAutomaticClaimPayout, verifyPersistedAutomaticClaimIntent,
   type PersistedAutomaticClaimIntent } from "@/lib/server/solana/claim-intent-proof";
-import { COMPLETE_AUTOMATIC_CLAIM_INTENT_SQL, INSERT_AUTOMATIC_CLAIM_INTENT_SQL,
-  REQUEUE_UNPREPARED_CLAIM_JOB_SQL } from "@/lib/server/solana/claim-intent-sql";
+import { captureClaimHistoryAnchor, proveExpiredClaimTransferAbsent } from
+  "@/lib/server/solana/claim-expiry-proof";
+import { ARCHIVE_PROVEN_ABSENT_CLAIM_INTENT_SQL,
+  COMPLETE_AUTOMATIC_CLAIM_INTENT_SQL, INSERT_AUTOMATIC_CLAIM_INTENT_SQL,
+  REQUEUE_PROVEN_ABSENT_CLAIM_JOB_SQL, REQUEUE_UNPREPARED_CLAIM_JOB_SQL } from
+  "@/lib/server/solana/claim-intent-sql";
 import { inspectPreparedAutomaticBuybackBurn, verifyPersistedAutomaticBuybackBurnIntent,
   type PersistedAutomaticBurnIntent } from "@/lib/server/solana/buyback-burn-intent-proof";
 import { proveExpiredBuybackBurnAbsent } from "@/lib/server/solana/buyback-expiry-proof";
+import { proveExpiredSwapAbsent } from "@/lib/server/solana/swap-expiry-proof";
+import { ARCHIVE_EXPIRED_SWAP_INTENT_SQL } from "@/lib/server/solana/swap-replacement-sql";
 import { COMPLETE_AUTOMATIC_BUYBACK_BURN_INTENT_SQL } from "@/lib/server/solana/buyback-burn-intent-sql";
 import { ADVANCE_AUTOMATIC_BUYBACK_SETTLEMENT_SQL, automaticBuybackChunkKey,
   ARCHIVE_EXPIRED_BUYBACK_CHUNK_BURN_INTENT_SQL,
@@ -96,6 +102,7 @@ const requestSchema = z.discriminatedUnion("action", [
     outputMint: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
     minimumOutputAtomic: z.string().regex(/^[1-9][0-9]{0,19}$/),
     lastValidBlockHeight: z.number().int().positive().safe(),
+    replacesSwapSignature: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,96}$/).optional(),
   }).strict(),
   z.object({
     action: z.literal("prepare_reward_swap"),
@@ -108,6 +115,7 @@ const requestSchema = z.discriminatedUnion("action", [
     outputMint: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
     minimumOutputAtomic: z.string().regex(/^[1-9][0-9]{0,19}$/),
     lastValidBlockHeight: z.number().int().positive().safe(),
+    replacesSwapSignature: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{64,96}$/).optional(),
   }).strict(),
   z.object({
     action: z.literal("prepare_buyback_burn"),
@@ -1235,7 +1243,8 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
       SELECT idempotency_key, claim_id, signer_role, signer_address, action, state,
         expected_programs_json, expected_mints_json, maximum_spend_lamports,
         provider_request_id, unsigned_transaction_base64, transaction_message_hash,
-        last_valid_block_height, input_mint, input_amount_atomic, tx_signature
+        last_valid_block_height, claim_history_anchor_signature,
+        input_mint, input_amount_atomic, tx_signature
       FROM transaction_intents WHERE idempotency_key = ?1 LIMIT 1
     `).bind(`automation:claim:payout:${job.id}:${job.attempt}`)
       .first<PersistedAutomaticClaimIntent>();
@@ -1438,6 +1447,85 @@ async function recordVerifiedBuybackSwap(database: D1Database, job: AutomationRo
   return verified;
 }
 
+async function swapFeeAnchor(database: D1Database, entityType: string, entityId: string) {
+  const row = entityType === "reward_swap_batch"
+    ? await database.prepare(`
+        SELECT f.source_signature, f.source_slot FROM reward_swap_batch_sources src
+        JOIN settlements s ON s.id = src.settlement_id
+        JOIN fee_events f ON f.id = s.fee_event_id
+        WHERE src.batch_id = ?1 AND src.state = 'reserved' AND f.state = 'reconciled'
+        ORDER BY f.source_slot DESC, f.source_signature DESC LIMIT 1
+      `).bind(entityId).first<{ source_signature: string; source_slot: number }>()
+    : await database.prepare(`
+        SELECT f.source_signature, f.source_slot FROM settlement_steps step
+        JOIN settlements s ON s.id = step.settlement_id
+        JOIN fee_events f ON f.id = s.fee_event_id
+        WHERE step.id = ?1 AND step.state = 'planned' AND f.state = 'reconciled'
+        LIMIT 1
+      `).bind(entityId).first<{ source_signature: string; source_slot: number }>();
+  if (!row?.source_signature || !Number.isSafeInteger(row.source_slot) ||
+    row.source_slot <= 0) throw new Error("swap_fee_anchor_unavailable");
+  return row;
+}
+
+async function provePersistedSwapExpired(database: D1Database,
+  entityType: string, entityId: string, treasury: string,
+  prepared: { txSignature: string; blockhash: string; lastValidBlockHeight: number }) {
+  const anchor = await swapFeeAnchor(database, entityType, entityId);
+  await proveExpiredSwapAbsent(getMainnetConnection(), {
+    treasury: new PublicKey(treasury),
+    sourceFeeSignature: anchor.source_signature, sourceFeeSlot: anchor.source_slot,
+    swapSignature: prepared.txSignature, swapBlockhash: prepared.blockhash,
+    lastValidBlockHeight: prepared.lastValidBlockHeight,
+  });
+}
+
+async function replacementSwapArchive(database: D1Database, job: AutomationRow,
+  options: {
+    canonicalKey: string; replacesSignature: string | undefined;
+    newSignature: string; treasury: string; outputMint: string;
+    inputAmountLamports: string; settlementId?: string;
+  }): Promise<D1PreparedStatement | null> {
+  if (!options.replacesSignature) return null;
+  if (job.state !== "broadcasting" || job.tx_hash ||
+    options.replacesSignature === options.newSignature) {
+    throw new Error("swap_replacement_job_or_signature_invalid");
+  }
+  const intent = await database.prepare(`
+    SELECT idempotency_key, settlement_id, reward_batch_id, signer_role,
+      signer_address, action, state, provider_request_id,
+      unsigned_transaction_base64, transaction_message_hash,
+      last_valid_block_height, tx_signature, input_mint, output_mint,
+      input_amount_atomic, minimum_output_atomic, maximum_spend_lamports,
+      expected_mints_json, expected_programs_json
+    FROM transaction_intents WHERE idempotency_key = ?1 LIMIT 1
+  `).bind(options.canonicalKey).first<PersistedAutomaticBuybackIntent>();
+  if (!intent || intent.tx_signature !== options.replacesSignature ||
+    (options.settlementId && intent.settlement_id !== options.settlementId)) {
+    throw new Error("swap_replacement_intent_mismatch");
+  }
+  const prepared = job.job_type === "sportpad_buyback_burn"
+    ? await inspectPersistedPreparedBuybackSwap(intent, {
+        settlementId: options.settlementId!, stepId: job.entity_id,
+        treasury: options.treasury, sportpadMint: options.outputMint,
+        inputAmountLamports: options.inputAmountLamports,
+      })
+    : await inspectPersistedPreparedRewardSwap(intent, {
+        idempotencyKey: options.canonicalKey, treasury: options.treasury,
+        rewardMint: options.outputMint, inputAmountLamports: options.inputAmountLamports,
+        rewardBatchId: job.entity_type === "reward_swap_batch" ? job.entity_id : null,
+      });
+  if (prepared.txSignature !== options.replacesSignature ||
+    !intent.transaction_message_hash) throw new Error("swap_replacement_message_mismatch");
+  await provePersistedSwapExpired(database, job.entity_type, job.entity_id,
+    options.treasury, prepared);
+  return database.prepare(ARCHIVE_EXPIRED_SWAP_INTENT_SQL).bind(
+    options.canonicalKey, options.replacesSignature, intent.transaction_message_hash,
+    options.treasury, intent.action, job.id, job.entity_type, job.entity_id,
+    job.job_type, `broadcasting:solana:${options.treasury}`,
+  );
+}
+
 async function reconcilePreparedBuyback(database: D1Database, workerId: string) {
   const config = readMainnetConfig();
   if (!config.buybackTreasury || workerId !== `solana:${config.buybackTreasury}`) {
@@ -1511,7 +1599,21 @@ async function reconcilePreparedBuyback(database: D1Database, workerId: string) 
         if (currentHeight > prepared.lastValidBlockHeight ||
           !(await rpc.isBlockhashValid(prepared.blockhash,
             { commitment: "confirmed" })).value) {
-          throw new Error("buyback_recovery_swap_expired_or_ambiguous");
+          await provePersistedSwapExpired(database, row.entity_type, row.entity_id,
+            config.buybackTreasury, prepared);
+          if (row.tx_hash) throw new Error("buyback_recovery_swap_hash_ambiguous");
+          if (row.state === "reconciliation_required") {
+            const reset = await database.prepare(`
+              UPDATE automation_jobs SET state = 'broadcasting', error_code = ?2,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?1 AND state = 'reconciliation_required' AND tx_hash IS NULL
+            `).bind(row.id, `broadcasting:${workerId}`).run();
+            if (reset.meta.changes !== 1) throw new Error("buyback_recovery_swap_rearm_conflict");
+          }
+          await defer();
+          return { reconciled: false, swapRequired: {
+            jobId: row.id, payload, replacesSwapSignature: prepared.txSignature,
+          } };
         }
         if (row.state === "reconciliation_required") {
           const reset = await database.prepare(`
@@ -1708,8 +1810,23 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
       const valid = await rpc.isBlockhashValid(prepared.blockhash,
         { commitment: "confirmed" });
       if (height > prepared.lastValidBlockHeight || !valid.value) {
+        await provePersistedSwapExpired(database, row.entity_type, row.entity_id,
+          config.rewardTreasury, prepared);
+        if (row.tx_hash) throw new Error("reward_recovery_swap_hash_ambiguous");
+        if (row.state === "reconciliation_required") {
+          const reset = await database.prepare(`
+            UPDATE automation_jobs SET state = 'broadcasting', error_code = ?2,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1 AND state = 'reconciliation_required' AND tx_hash IS NULL
+          `).bind(row.id, `broadcasting:${workerId}`).run();
+          if (reset.meta.changes !== 1) throw new Error("reward_recovery_rearm_conflict");
+        }
         await defer();
-        return { reconciled: false };
+        return { reconciled: false, orderRequired: {
+          jobId: row.id, entityId: row.entity_id,
+          payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+          replacesSwapSignature: prepared.txSignature,
+        } };
       }
       await defer();
       return { reconciled: false, prepared: {
@@ -1816,7 +1933,13 @@ async function persistPreparedBuybackSwap(database: D1Database, job: AutomationR
   const intentId = crypto.randomUUID();
   const idempotencyKey = `automation:buyback:swap:${job.entity_id}`;
   const expiresAt = new Date(Date.now() + 90_000).toISOString();
-  const inserted = await database.prepare(INSERT_AUTOMATIC_BUYBACK_CHUNK_SWAP_INTENT_SQL).bind(
+  const archive = await replacementSwapArchive(database, job, {
+    canonicalKey: idempotencyKey, replacesSignature: input.replacesSwapSignature,
+    newSignature: prepared.txSignature, treasury: config.buybackTreasury,
+    outputMint: setting.value, inputAmountLamports: input.inputAmountLamports,
+    settlementId: step.settlement_id,
+  });
+  const insert = database.prepare(INSERT_AUTOMATIC_BUYBACK_CHUNK_SWAP_INTENT_SQL).bind(
     intentId, idempotencyKey, step.settlement_id, config.buybackTreasury,
     JSON.stringify(["jupiter_v2_metis_pinned"]),
     JSON.stringify([NATIVE_MINT.toBase58(), setting.value]),
@@ -1825,8 +1948,14 @@ async function persistPreparedBuybackSwap(database: D1Database, job: AutomationR
     input.lastValidBlockHeight, NATIVE_MINT.toBase58(), setting.value,
     input.inputAmountLamports, input.minimumOutputAtomic,
     prepared.txSignature, expiresAt, job.id, `broadcasting:${input.workerId}`, job.entity_id,
-  ).run();
-  if (inserted.meta.changes !== 1) throw new Error("buyback_order_intent_conflict_or_paused");
+  );
+  if (archive) {
+    await database.batch([archive, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      insert, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL)]);
+  } else {
+    const inserted = await insert.run();
+    if (inserted.meta.changes !== 1) throw new Error("buyback_order_intent_conflict_or_paused");
+  }
   return { intentId, txSignature: prepared.txSignature };
 }
 
@@ -2007,8 +2136,15 @@ async function persistPreparedRewardSwap(database: D1Database, job: AutomationRo
     treasury: config.rewardTreasury,
   });
   const intentId = crypto.randomUUID();
-  const inserted = await database.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_INTENT_SQL).bind(
-    intentId, `automation:reward:swap:${job.entity_id}`, step.settlement_id, config.rewardTreasury,
+  const idempotencyKey = `automation:reward:swap:${job.entity_id}`;
+  const archive = await replacementSwapArchive(database, job, {
+    canonicalKey: idempotencyKey, replacesSignature: input.replacesSwapSignature,
+    newSignature: prepared.txSignature, treasury: config.rewardTreasury,
+    outputMint: step.reward_mint, inputAmountLamports: input.inputAmountLamports,
+    settlementId: step.settlement_id,
+  });
+  const insert = database.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_INTENT_SQL).bind(
+    intentId, idempotencyKey, step.settlement_id, config.rewardTreasury,
     JSON.stringify(["jupiter_v2_metis_pinned"]),
     JSON.stringify([NATIVE_MINT.toBase58(), step.reward_mint]),
     input.inputAmountLamports, input.providerRequestId,
@@ -2017,8 +2153,14 @@ async function persistPreparedRewardSwap(database: D1Database, job: AutomationRo
     input.inputAmountLamports, input.minimumOutputAtomic,
     prepared.txSignature, new Date(Date.now() + 90_000).toISOString(),
     job.id, `broadcasting:${input.workerId}`, job.entity_id, config.sportpadMint ?? null,
-  ).run();
-  if (inserted.meta.changes !== 1) throw new Error("reward_purchase_order_intent_conflict_or_paused");
+  );
+  if (archive) {
+    await database.batch([archive, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      insert, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL)]);
+  } else {
+    const inserted = await insert.run();
+    if (inserted.meta.changes !== 1) throw new Error("reward_purchase_order_intent_conflict_or_paused");
+  }
   return { intentId, txSignature: prepared.txSignature };
 }
 
@@ -2077,8 +2219,14 @@ async function persistPreparedRewardBatch(database: D1Database, job: AutomationR
     treasury: config.rewardTreasury,
   });
   const intentId = crypto.randomUUID();
-  const inserted = await database.prepare(INSERT_REWARD_BATCH_INTENT_SQL).bind(
-    intentId, rewardBatchIntentKey(job.entity_id), null, config.rewardTreasury,
+  const idempotencyKey = rewardBatchIntentKey(job.entity_id);
+  const archive = await replacementSwapArchive(database, job, {
+    canonicalKey: idempotencyKey, replacesSignature: input.replacesSwapSignature,
+    newSignature: prepared.txSignature, treasury: config.rewardTreasury,
+    outputMint: batch.reward_mint, inputAmountLamports: input.inputAmountLamports,
+  });
+  const insert = database.prepare(INSERT_REWARD_BATCH_INTENT_SQL).bind(
+    intentId, idempotencyKey, null, config.rewardTreasury,
     JSON.stringify(["jupiter_v2_metis_pinned"]),
     JSON.stringify([NATIVE_MINT.toBase58(), batch.reward_mint]),
     input.inputAmountLamports, input.providerRequestId,
@@ -2087,8 +2235,14 @@ async function persistPreparedRewardBatch(database: D1Database, job: AutomationR
     input.inputAmountLamports, input.minimumOutputAtomic,
     prepared.txSignature, new Date(Date.now() + 90_000).toISOString(),
     job.id, `broadcasting:${input.workerId}`, job.entity_id, config.sportpadMint ?? null,
-  ).run();
-  if (inserted.meta.changes !== 1) throw new Error("reward_batch_intent_conflict_or_paused");
+  );
+  if (archive) {
+    await database.batch([archive, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      insert, database.prepare(ASSERT_ONE_ROW_CHANGED_SQL)]);
+  } else {
+    const inserted = await insert.run();
+    if (inserted.meta.changes !== 1) throw new Error("reward_batch_intent_conflict_or_paused");
+  }
   return { intentId, txSignature: prepared.txSignature };
 }
 
@@ -2150,6 +2304,9 @@ async function persistPreparedSolanaClaim(database: D1Database, job: AutomationR
     recipient: claim.destination_address, amountAtomic: claim.amount_atomic,
     decimals: mintState.decimals, tokenProgram: mintAccount.owner.toBase58(),
   });
+  const sourceAta = getAssociatedTokenAddressSync(mint,
+    new PublicKey(config.rewardTreasury), false, mintAccount.owner);
+  const historyAnchorSignature = await captureClaimHistoryAnchor(rpc, sourceAta);
   const intentId = crypto.randomUUID();
   const inserted = await database.prepare(INSERT_AUTOMATIC_CLAIM_INTENT_SQL).bind(
     intentId, `automation:claim:payout:${job.id}:${job.attempt}`, job.entity_id,
@@ -2159,6 +2316,7 @@ async function persistPreparedSolanaClaim(database: D1Database, job: AutomationR
     input.lastValidBlockHeight, claim.reward_mint, claim.amount_atomic,
     prepared.txSignature, new Date(Date.now() + 90_000).toISOString(),
     job.id, `broadcasting:${input.workerId}`, claim.destination_address,
+    historyAnchorSignature,
   ).run();
   if (inserted.meta.changes !== 1) throw new Error("claim_payout_intent_conflict_or_paused");
   return { intentId, txSignature: prepared.txSignature };
@@ -2180,7 +2338,8 @@ async function reconcilePreparedSolanaClaim(database: D1Database, workerId: stri
       i.state AS intent_state, i.expected_programs_json, i.expected_mints_json,
       i.maximum_spend_lamports, i.provider_request_id,
       i.unsigned_transaction_base64, i.transaction_message_hash,
-      i.last_valid_block_height, i.input_mint, i.input_amount_atomic,
+      i.last_valid_block_height, i.claim_history_anchor_signature,
+      i.input_mint, i.input_amount_atomic,
       i.tx_signature
     FROM automation_jobs j JOIN transaction_intents i
       ON i.idempotency_key = 'automation:claim:payout:' || j.id || ':' || j.attempt
@@ -2213,15 +2372,15 @@ async function reconcilePreparedSolanaClaim(database: D1Database, workerId: stri
       await completeJob(database, row, workerId, row.tx_signature);
       return { reconciled: true };
     }
-    // Finalized failures, missing archival evidence and expired blockhashes
-    // cannot be re-signed automatically. They remain reserved for audit.
+    // Finalized failures or ambiguous archival evidence remain reserved for
+    // audit. Only a separate complete source-history proof may requeue an
+    // expired, unlanded transfer below.
     if (!allowReplay || status?.err || status?.confirmationStatus === "finalized" || receipt?.meta?.err) {
       await defer();
       return { reconciled: false };
     }
-    const currentHeight = await rpc.getBlockHeight("finalized");
     if (!Number.isSafeInteger(row.last_valid_block_height) ||
-      !row.last_valid_block_height || currentHeight > row.last_valid_block_height) {
+      !row.last_valid_block_height) {
       await defer();
       return { reconciled: false };
     }
@@ -2272,6 +2431,30 @@ async function reconcilePreparedSolanaClaim(database: D1Database, workerId: stri
       prepared.transactionMessageHash !== row.transaction_message_hash ||
       prepared.blockhash !== row.provider_request_id) {
       throw new Error("claim_reconciliation_intent_mismatch");
+    }
+    if (await rpc.getBlockHeight("finalized") > row.last_valid_block_height) {
+      if (!row.claim_history_anchor_signature || row.tx_hash) {
+        throw new Error("claim_reconciliation_anchor_or_hash_ambiguous");
+      }
+      const sourceAta = getAssociatedTokenAddressSync(mint,
+        new PublicKey(config.rewardTreasury), false, mintAccount.owner);
+      await proveExpiredClaimTransferAbsent(rpc, {
+        sourceAta, anchorSignature: row.claim_history_anchor_signature,
+        claimSignature: row.tx_signature, claimBlockhash: prepared.blockhash,
+        lastValidBlockHeight: row.last_valid_block_height,
+      });
+      await database.batch([
+        database.prepare(ARCHIVE_PROVEN_ABSENT_CLAIM_INTENT_SQL).bind(
+          row.idempotency_key, row.entity_id, row.tx_signature,
+          row.claim_history_anchor_signature, row.id, row.attempt,
+          `broadcasting:${workerId}`),
+        database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+        database.prepare(REQUEUE_PROVEN_ABSENT_CLAIM_JOB_SQL).bind(
+          Date.now(), row.id, row.attempt, `broadcasting:${workerId}`,
+          row.tx_signature, row.idempotency_key),
+        database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      ]);
+      return { reconciled: true };
     }
     if (row.state === "reconciliation_required") {
       const restored = await database.prepare(`
@@ -2365,6 +2548,7 @@ export async function POST(request: Request) {
       reconciled: reconciled.reconciled || batchRequeued || Number(requeued.meta.changes ?? 0) > 0,
       pending: Number(pending?.count ?? 0) > 0,
       ...(reconciled.prepared ? { prepared: reconciled.prepared } : {}),
+      ...(reconciled.orderRequired ? { orderRequired: reconciled.orderRequired } : {}),
     }, { headers: { "Cache-Control": "no-store" } });
   }
   if (input.action === "reconcile_claim") {
@@ -2418,6 +2602,7 @@ export async function POST(request: Request) {
       ...(outcome.burnRequired ? { burnRequired: outcome.burnRequired } : {}),
       ...(outcome.burnPrepared ? { burnPrepared: outcome.burnPrepared } : {}),
       ...(outcome.swapPrepared ? { swapPrepared: outcome.swapPrepared } : {}),
+      ...(outcome.swapRequired ? { swapRequired: outcome.swapRequired } : {}),
     }, { headers: { "Cache-Control": "no-store" } });
   }
   if (input.action === "lease") {
