@@ -805,7 +805,8 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
     if (!step || !chunk || job.entity_type !== "settlement_step" ||
       step.state !== "planned" || step.reward_swap_signature !== null ||
       !["reconciled", "distributed", "buyback_burned"].includes(step.settlement_state) ||
-      step.launch_status !== "mainnet_published" || step.reward_chain !== "solana" ||
+      !["mainnet_published", "mainnet_suspended"].includes(step.launch_status) ||
+      step.reward_chain !== "solana" ||
       step.mainnet_reward_treasury !== owner || step.reward_mint !== payload.rewardMint ||
       step.output_mint !== payload.rewardMint || step.launch_id !== payload.launchId ||
       step.settlement_id !== payload.settlementId || payload.stepId !== job.entity_id ||
@@ -1154,7 +1155,7 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
       row.reward_chain !== "solana" || asset.tokenAddress !== row.reward_mint ||
       !row.mainnet_mint || (platformMint && row.mainnet_mint === platformMint) ||
       row.mainnet_reward_treasury !== config.rewardTreasury ||
-      row.launch_status !== "mainnet_published" ||
+      !["mainnet_published", "mainnet_suspended"].includes(row.launch_status) ||
       payload.settlementId !== row.settlement_id || payload.stepId !== job.entity_id ||
       payload.launchId !== row.launch_id ||
       payload.rewardAmountLamports !== chunk.inputAmountLamports ||

@@ -90,7 +90,8 @@ function insertChunk(db: DatabaseSync, stepId: string) {
 }
 
 function completeChunk(db: DatabaseSync, stepId: string, signature: string,
-  plan: NonNullable<ReturnType<typeof planAutomaticRewardChunk>>, vaultConflict = false) {
+  plan: NonNullable<ReturnType<typeof planAutomaticRewardChunk>>, vaultConflict = false,
+  beforeCommit?: () => void) {
   const intentKey = `automation:reward:swap:${stepId}`;
   db.prepare(`INSERT INTO transaction_intents
     (id,idempotency_key,settlement_id,action,tx_signature,input_amount_atomic,output_mint)
@@ -101,6 +102,7 @@ function completeChunk(db: DatabaseSync, stepId: string, signature: string,
   );
   db.prepare("UPDATE automation_jobs SET state='complete',tx_hash=? WHERE id=?")
     .run(signature, `job-${stepId}`);
+  beforeCommit?.();
   atomic(db, [
     () => { db.prepare(COMPLETE_AUTOMATIC_REWARD_CHUNK_SQL).run(
       stepId, signature, "12345", 123, plan.inputAmountLamports, "FAN",
@@ -249,15 +251,27 @@ test("a stale vault write rolls back both chunk verification and settlement prog
   } finally { db.close(); }
 });
 
-test("a suspension between receipt verification and ledger commit leaves the chunk uncredited", () => {
+test("a signed purchase credits exactly once after suspension but cannot start another order", () => {
   const db = fixture();
   try {
     const plan = insertChunk(db, "suspended-step");
-    db.exec("UPDATE launch_drafts SET status = 'mainnet_suspended'");
-    assert.throws(() => completeChunk(db, "suspended-step", "suspended-sig", plan), /malformed JSON/);
-    assert.equal(db.prepare("SELECT reward_spent_atomic FROM settlements").get()?.reward_spent_atomic, "0");
-    assert.equal(db.prepare("SELECT state FROM settlement_steps").get()?.state, "planned");
-    assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "0");
+    completeChunk(db, "suspended-step", "suspended-sig", plan, false,
+      () => db.exec("UPDATE launch_drafts SET status = 'mainnet_suspended'"));
+    assert.equal(db.prepare("SELECT reward_spent_atomic FROM settlements").get()?.reward_spent_atomic,
+      "100000000");
+    assert.equal(db.prepare("SELECT state FROM settlement_steps").get()?.state, "verified");
+    assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic,
+      "12345");
+    assert.throws(() => completeChunk(db, "suspended-step", "suspended-sig", plan));
+    assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic,
+      "12345");
+    const next = planAutomaticRewardChunk("250000001", "100000000");
+    assert.ok(next);
+    assert.equal(db.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_SQL).run(
+      "new-suspended-step", automaticRewardChunkKey(settlementId, next.offsetAtomic),
+      next.inputAmountLamports, settlementId, next.offsetAtomic, "250000001",
+      "reward-treasury", null,
+    ).changes, 0);
   } finally { db.close(); }
 });
 

@@ -208,7 +208,8 @@ export const ADVANCE_AUTOMATIC_REWARD_SETTLEMENT_SQL = `
     AND EXISTS (SELECT 1 FROM fee_events f JOIN launch_drafts l ON l.id = f.launch_id
       LEFT JOIN protocol_settings p ON p.key = 'sportpad_mint'
       WHERE f.id = settlements.fee_event_id AND l.reward_chain = 'solana'
-        AND l.status = 'mainnet_published'
+        -- A suspension stops new orders, but cannot erase a finalized purchase.
+        AND l.status IN ('mainnet_published', 'mainnet_suspended')
         AND l.mainnet_mint IS NOT NULL
         AND (p.value IS NULL OR l.mainnet_mint <> p.value)
         AND (?8 IS NULL OR l.mainnet_mint <> ?8)
