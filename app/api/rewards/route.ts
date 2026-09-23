@@ -1,10 +1,14 @@
 import { env } from "cloudflare:workers";
+import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, unpackAccount } from "@solana/spl-token";
+import { PublicKey } from "@solana/web3.js";
 import { z } from "zod";
 
 import { getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
 import { ASSERT_ONE_ROW_CHANGED_SQL, FINANCIAL_LEDGER_VERIFIED, QUEUE_CLAIM_JOB_SQL,
   QUEUE_CLAIM_TRANSITION_SQL } from "@/lib/protocol/automation-safety";
+import { getRewardOption } from "@/lib/protocol/reward-options";
+import { getMainnetConnection } from "@/lib/server/solana/devnet";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type ClaimRow = {
@@ -70,7 +74,7 @@ export async function GET(request: Request) {
   return json({
     wallet: walletSession.walletAddress,
     evmWallet: evmLink ? { address: evmLink.evm_address, chainId: evmLink.chain_id, verifiedAt: evmLink.verified_at } : null,
-    gasPolicy: "protocol_sponsored",
+    gasPolicy: "claimant_sol_account_setup_protocol_payout",
     claims: claims.results.map((claim) => ({
       id: claim.id, epochId: claim.epoch_id, amountAtomic: claim.amount_atomic,
       feeAtomic: claim.claim_fee_atomic, signature: claim.claim_signature, state: claim.state,
@@ -109,6 +113,39 @@ export async function POST(request: Request) {
   `).bind(input.claimId).first<ClaimRequestRow>();
   if (!claim || claim.solana_wallet !== session.walletAddress) return json({ error: "Reward claim not found." }, 404);
   if (claim.state !== "claimable") return json({ error: "This reward is already queued or paid." }, 409);
+  if (claim.reward_chain === "solana") {
+    const asset = getRewardOption("solana", claim.reward_symbol);
+    if (!asset || asset.tokenAddress !== claim.reward_mint) {
+      return json({ error: "The official Solana reward mint could not be verified." }, 409);
+    }
+    try {
+      const rpc = getMainnetConnection();
+      const mint = new PublicKey(claim.reward_mint);
+      const owner = new PublicKey(session.walletAddress);
+      const mintAccount = await rpc.getAccountInfo(mint, "finalized");
+      const tokenProgram = mintAccount?.owner;
+      if (!tokenProgram || (!tokenProgram.equals(TOKEN_PROGRAM_ID) &&
+        !tokenProgram.equals(TOKEN_2022_PROGRAM_ID))) {
+        return json({ error: "The Solana reward mint is unavailable." }, 503);
+      }
+      const ata = getAssociatedTokenAddressSync(mint, owner, false, tokenProgram);
+      const accountInfo = await rpc.getAccountInfo(ata, "finalized");
+      if (!accountInfo) {
+        return json({
+          error: "Your wallet needs a Fan Token account before this claim. Approve its one-time Solana setup transaction, then retry.",
+          needsTokenAccount: true,
+          rewardMint: claim.reward_mint,
+          wallet: session.walletAddress,
+        }, 409);
+      }
+      const account = unpackAccount(ata, accountInfo, tokenProgram);
+      if (!account.owner.equals(owner) || !account.mint.equals(mint)) {
+        return json({ error: "The reward destination token account does not match this wallet." }, 409);
+      }
+    } catch {
+      return json({ error: "The Solana reward destination could not be verified. Please retry." }, 503);
+    }
+  }
   let destinationAddress = session.walletAddress;
   let jobType = "solana_claim_payout";
   let payload: Record<string, string> = {

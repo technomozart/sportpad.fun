@@ -6,6 +6,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { useSolanaWalletSession } from "@/components/solana-wallet-session";
 import { Button } from "@/components/ui/button";
+import { ensureSolanaRewardTokenAccount } from "@/lib/client/solana-reward-account";
 import { CHILIZ_CHAIN } from "@/lib/protocol/chiliz-reward-assets";
 
 type EthereumProvider = {
@@ -21,12 +22,13 @@ type RewardProtocolStatus = {
 type RewardClaim = {
   id: string; epochId: string; amountAtomic: string; feeAtomic: string; signature: string | null; state: string;
   destinationChain: string; destinationAddress: string | null; rewardChain: "chiliz" | "solana";
-  launchName: string; launchSymbol: string; rewardSymbol: string; rewardDecimals: number; cutoffSlot: number | null;
+  launchName: string; launchSymbol: string; rewardSymbol: string; rewardMint: string;
+  rewardDecimals: number; cutoffSlot: number | null;
 };
 type WalletRewardData = {
   wallet: string;
   evmWallet: { address: string; chainId: number; verifiedAt: number } | null;
-  gasPolicy: "protocol_sponsored";
+  gasPolicy: "claimant_sol_account_setup_protocol_payout";
   claims: RewardClaim[];
   positions: Array<{
     epochId: string; launchName: string; launchSymbol: string; rewardSymbol: string; rewardChain: "chiliz" | "solana";
@@ -155,10 +157,26 @@ export function RewardDashboard() {
   async function claimReward(claim: RewardClaim) {
     setBusy(claim.id); setNotice("");
     try {
-      const response = await fetch("/api/rewards", {
+      const queueClaim = () => fetch("/api/rewards", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ claimId: claim.id }),
       });
-      const body = await response.json() as { error?: string };
+      let response = await queueClaim();
+      let body = await response.json() as {
+        error?: string; needsTokenAccount?: boolean; rewardMint?: string; wallet?: string;
+      };
+      if (response.status === 409 && body.needsTokenAccount && claim.rewardChain === "solana") {
+        if (body.rewardMint !== claim.rewardMint || body.wallet !== walletSession.wallet) {
+          throw new Error("The Fan Token account request did not match this claim and wallet.");
+        }
+        setNotice("Approve the one-time Fan Token account setup in your Solana wallet. Your wallet pays the network rent and fee.");
+        await ensureSolanaRewardTokenAccount({
+          walletAddress: walletSession.wallet,
+          rewardMint: claim.rewardMint,
+          signTransaction: walletSession.signTransaction,
+        });
+        response = await queueClaim();
+        body = await response.json() as typeof body;
+      }
       if (!response.ok) throw new Error(body.error ?? "Reward claim could not be queued.");
       await loadRewards();
       setNotice(`${claim.rewardSymbol} payout queued to your verified ${claim.rewardChain === "chiliz" ? "Chiliz" : "Solana"} wallet.`);
@@ -187,7 +205,7 @@ export function RewardDashboard() {
       <div><span>Claim gas</span><strong>Planned</strong><small>SportPad treasury would pay CHZ gas when claims are enabled</small></div>
     </div>
 
-    <div className="dashboard-notice"><ShieldCheck /><span>SportPad shows only indexed positions and funded allocations. Linking MetaMask signs a verification message only and never approves token spending.</span></div>
+    <div className="dashboard-notice"><ShieldCheck /><span>SportPad shows only indexed positions and funded allocations. Linking MetaMask signs a verification message only and never approves token spending. For a Solana Fan Token claim, your wallet may first need to pay the one-time token-account rent and network fee; the payout itself is sent by the reward treasury.</span></div>
     <div className="dashboard-toolbar">
       <div><Wallet /><span>Verified Solana wallet <code>{walletLabel}</code></span></div>
       {!walletSession.wallet

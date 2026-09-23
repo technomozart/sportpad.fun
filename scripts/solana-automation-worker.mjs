@@ -1,6 +1,7 @@
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
+  getAccount,
   getAssociatedTokenAddress,
   getMint,
   getOrCreateAssociatedTokenAccount,
@@ -531,10 +532,15 @@ async function paySolanaClaim(payload, arm, jobId, workerId) {
   const amount = BigInt(payload.amountAtomic);
   const sourceBalance = BigInt((await connection.getTokenAccountBalance(source, "confirmed")).value.amount);
   if (sourceBalance < amount) throw new Error("reward_inventory_underfunded");
+  // The claimant creates their own associated token account before queueing.
+  // A treasury-paid ATA creation here would be a separate, unrecorded SOL
+  // spend before the durable claim-transfer intent is written.
+  const destinationAta = await getAssociatedTokenAddress(mint, destination, false, tokenProgram);
+  const destinationAccount = await getAccount(connection, destinationAta, "finalized", tokenProgram);
+  if (!destinationAccount.owner.equals(destination) || !destinationAccount.mint.equals(mint)) {
+    throw new Error("reward_destination_ata_mismatch");
+  }
   await arm();
-  const destinationAccount = await getOrCreateAssociatedTokenAccount(
-    connection, rewards, mint, destination, false, "confirmed", undefined, tokenProgram,
-  );
   const latest = await connection.getLatestBlockhash("confirmed");
   const signed = signSolanaClaimTransfer({ signer: rewards, mint,
     destinationAddress: destination, tokenProgram, amountAtomic: amount,
