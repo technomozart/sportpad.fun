@@ -3,7 +3,8 @@ import test from "node:test";
 import { encodeFunctionData, parseAbi } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { CHILIZ_CHAIN_ID, KAYEN_ROUTER, WRAPPED_CHZ } from "./chiliz-receipts.ts";
-import { createChilizSignedIntent, reconcileChilizSignedIntent, verifyPersistedChilizSignedIntent,
+import { createChilizSignedIntent, reconcileChilizSignedIntent, verifyChilizPurchasePrincipal,
+  verifyPersistedChilizSignedIntent,
   type ChilizReconciliationEvidence, type ChilizSignedIntentRequest } from "./chiliz-signed-intent.ts";
 
 const account = privateKeyToAccount(generatePrivateKey());
@@ -15,6 +16,15 @@ const routerAbi = parseAbi([
   "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
 ]);
 const erc20Abi = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
+
+test("a Chiliz purchase must fund nearly the full independently quoted 80% amount", () => {
+  assert.equal(verifyChilizPurchasePrincipal("990", "990", "1000"), 990n);
+  assert.equal(verifyChilizPurchasePrincipal("980", "980", "1000"), 980n);
+  assert.throws(() => verifyChilizPurchasePrincipal("1", "1", "1000"), /not_fully_funded/);
+  assert.throws(() => verifyChilizPurchasePrincipal("979", "979", "1000"), /not_fully_funded/);
+  assert.throws(() => verifyChilizPurchasePrincipal("1001", "1001", "1000"), /not_fully_funded/);
+  assert.throws(() => verifyChilizPurchasePrincipal("900", "990", "1000"), /not_fully_funded/);
+});
 
 async function purchase(overrides: Record<string, unknown> = {}): Promise<ChilizSignedIntentRequest & { kind: "purchase" }> {
   const signedAtEpochSeconds = 1_800_000_000;

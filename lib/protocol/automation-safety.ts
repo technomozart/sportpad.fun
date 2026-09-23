@@ -154,6 +154,7 @@ export const COMPLETE_PURCHASE_VAULT_SQL = `
     state = 'funded', owner_address = excluded.owner_address,
     updated_at = CURRENT_TIMESTAMP
   WHERE reward_vaults.chain = 'chiliz' AND reward_vaults.inventory_atomic = ?6
+    AND lower(reward_vaults.owner_address) = lower(?4)
 `;
 
 export const COMPLETE_SOLANA_PURCHASE_VAULT_SQL = `

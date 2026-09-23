@@ -8,6 +8,9 @@ import { allocateEpochRewards } from "@/lib/protocol/accounting";
 import { CHILIZ_CHAIN, getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED, verifyChilizPurchaseReceipt,
   verifyChilizTransferReceipt } from "@/lib/protocol/chiliz-receipts";
+import { createChilizSignedIntent, reconcileChilizSignedIntent,
+  verifyChilizPurchasePrincipal,
+  type ChilizSignedIntent } from "@/lib/protocol/chiliz-signed-intent";
 import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_CLAIM_SQL,
   COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
   COMPLETE_RECONCILED_JOB_SQL,
@@ -22,6 +25,15 @@ import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
 import { COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL } from "@/lib/protocol/holder-indexer-sql";
 import { getRewardOption } from "@/lib/protocol/reward-options";
 import { quoteChilizPurchaseSpendCeiling } from "@/lib/server/chiliz-spend-bound";
+import { verifyChilizDualRpcFinality } from "@/lib/server/chiliz-finality";
+import { FINALIZE_CHILIZ_INTENT_SQL, FINALIZE_REVERTED_CHILIZ_JOB_SQL,
+  INSERT_CHILIZ_SIGNED_INTENT_SQL,
+  MARK_CHILIZ_INTENT_BROADCAST_SQL,
+  REQUEUE_UNPREPARED_CHILIZ_JOB_SQL,
+  REQUEUE_STALE_UNPREPARED_CHILIZ_BROADCAST_SQL,
+  RESERVE_CHILIZ_INTENT_POLICY_SQL,
+  SELECT_CHILIZ_SIGNED_INTENT_SQL, chilizSignedIntentInsertBindings,
+  parsePersistedChilizSignedIntent, type PersistedChilizIntentRow } from "@/lib/server/chiliz-intent-sql";
 import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig, readWorkerToken } from "@/lib/server/execution-config";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { observedSolanaRewardPurchaseOutput, verifySolanaClaimPayoutReceipt,
@@ -91,9 +103,36 @@ const requestSchema = z.discriminatedUnion("action", [
     workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   }).strict(),
   z.object({
+    action: z.literal("reconcile_chiliz_intent"),
+    workerId: z.string().regex(/^chiliz:0x[0-9a-fA-F]{40}$/),
+  }).strict(),
+  z.object({
     action: z.literal("arm"),
     jobId: z.string().uuid(),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
+  }).strict(),
+  z.object({
+    action: z.literal("prepare_chiliz_intent"),
+    jobId: z.string().uuid(),
+    workerId: z.string().regex(/^chiliz:0x[0-9a-fA-F]{40}$/),
+    kind: z.enum(["purchase", "claim"]),
+    attempt: z.literal(1),
+    treasury: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    rawTransaction: z.string().regex(/^0x[0-9a-fA-F]+$/).max(10_000),
+    gasFeeCeilingWei: z.string().regex(/^[1-9][0-9]*$/).max(40),
+    fanTokenContract: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    maxPrincipalWei: z.string().regex(/^[1-9][0-9]*$/).max(40).optional(),
+    minimumOutputAtomic: z.string().regex(/^[1-9][0-9]*$/).max(78).optional(),
+    deadlineEpochSeconds: z.number().int().positive().safe().optional(),
+    signedAtEpochSeconds: z.number().int().positive().safe().optional(),
+    destination: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    amountAtomic: z.string().regex(/^[1-9][0-9]*$/).max(78).optional(),
+  }).strict(),
+  z.object({
+    action: z.literal("mark_chiliz_broadcast"),
+    jobId: z.string().uuid(),
+    workerId: z.string().regex(/^chiliz:0x[0-9a-fA-F]{40}$/),
+    txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
   }).strict(),
   z.object({
     action: z.literal("prepare_buyback_swap"),
@@ -539,8 +578,21 @@ async function leaseJob(database: D1Database, workerId: string, jobTypes: string
   return null;
 }
 
+type VerifiedChilizFinalization = {
+  outputAmountAtomic?: string;
+  receiptBlockHash: string;
+  receiptBlockNumber: string;
+  finalizedBlockNumber: string;
+  gasUsed: string;
+  effectiveGasPriceWei: string;
+  networkFeeWei: string;
+  principalSpentWei: string;
+  totalSpentWei: string;
+};
+
 async function completeJob(database: D1Database, job: AutomationRow, workerId: string, txHash: string,
-  outputAmountAtomic?: string, sourceTxHash?: string, verifiedSlot?: number) {
+  outputAmountAtomic?: string, sourceTxHash?: string, verifiedSlot?: number,
+  chilizFinalization?: VerifiedChilizFinalization) {
   // Claim the completion first, then apply every ledger effect in the same D1
   // transaction. Each zero-row compare-and-swap must throw so D1 rolls back.
   const statements: D1PreparedStatement[] = [
@@ -953,6 +1005,18 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
   } else {
     throw new Error("automation_job_type_invalid");
   }
+  if (job.chain === "chiliz") {
+    if (!chilizFinalization) throw new Error("chiliz_finalized_intent_proof_missing");
+    statements.push(database.prepare(FINALIZE_CHILIZ_INTENT_SQL).bind(
+      job.id, txHash.toLowerCase(), "finalized_success", "success",
+      chilizFinalization.receiptBlockHash, chilizFinalization.receiptBlockNumber,
+      chilizFinalization.receiptBlockHash, chilizFinalization.finalizedBlockNumber,
+      chilizFinalization.gasUsed, chilizFinalization.effectiveGasPriceWei,
+      chilizFinalization.networkFeeWei, chilizFinalization.principalSpentWei,
+      chilizFinalization.totalSpentWei, JSON.stringify(chilizFinalization),
+    ));
+    statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
+  }
   await database.batch(statements);
 }
 
@@ -965,6 +1029,15 @@ async function verifiedChilizOutput(database: D1Database, job: AutomationRow, wo
   if (!treasury || !/^0x[0-9a-fA-F]{40}$/.test(treasury) ||
     workerId.toLowerCase() !== `chiliz:${treasury.toLowerCase()}`) {
     throw new Error("chiliz_treasury_unconfigured_or_mismatched");
+  }
+  const signedRow = await database.prepare(SELECT_CHILIZ_SIGNED_INTENT_SQL)
+    .bind(job.id).first<PersistedChilizIntentRow>();
+  if (!signedRow) throw new Error("chiliz_signed_intent_missing");
+  const signedIntent = await parsePersistedChilizSignedIntent(signedRow);
+  if (signedIntent.txHash.toLowerCase() !== txHash.toLowerCase() ||
+    signedIntent.treasury.toLowerCase() !== treasury.toLowerCase() ||
+    signedIntent.kind !== (job.job_type === "chiliz_reward_purchase" ? "purchase" : "claim")) {
+    throw new Error("chiliz_signed_intent_job_mismatch");
   }
   const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
   let expectedPurchase: { txHash: string; treasury: string; fanTokenContract: string; outputAmountAtomic: string } | null = null;
@@ -1024,27 +1097,123 @@ async function verifiedChilizOutput(database: D1Database, job: AutomationRow, wo
   } else {
     throw new Error("chiliz_job_type_invalid");
   }
-  const client = createPublicClient({ transport: http(env.CHILIZ_RPC_URL?.trim() || CHILIZ_CHAIN.rpcUrl,
+  const primaryRpcUrl = env.CHILIZ_RPC_URL?.trim() || CHILIZ_CHAIN.rpcUrl;
+  const secondaryRpcUrl = new URL(primaryRpcUrl).hostname === "rpc.ankr.com"
+    ? "https://chiliz-rpc.publicnode.com" : "https://rpc.ankr.com/chiliz";
+  const client = createPublicClient({ transport: http(primaryRpcUrl,
     { timeout: 12_000, retryCount: 1 }) });
   const [chainId, latestBlock, transaction, receipt] = await Promise.all([
     client.getChainId(), client.getBlockNumber(),
     client.getTransaction({ hash: txHash as `0x${string}` }),
     client.getTransactionReceipt({ hash: txHash as `0x${string}` }),
   ]);
+  const finalityProof = await verifyChilizDualRpcFinality({ primaryRpcUrl, secondaryRpcUrl,
+    receipt: { transactionHash: receipt.transactionHash, blockHash: receipt.blockHash,
+      blockNumber: receipt.blockNumber, status: receipt.status } });
+  const finalization = await reconcileChilizSignedIntent(signedIntent, {
+    chainId,
+    transaction: {
+      hash: transaction.hash, from: transaction.from, to: transaction.to,
+      input: transaction.input, value: transaction.value, chainId: transaction.chainId,
+      nonce: transaction.nonce, gas: transaction.gas,
+      maxFeePerGas: transaction.maxFeePerGas ?? null,
+      maxPriorityFeePerGas: transaction.maxPriorityFeePerGas ?? null,
+      type: transaction.type, blockHash: transaction.blockHash,
+      blockNumber: transaction.blockNumber,
+    },
+    receipt: {
+      transactionHash: receipt.transactionHash, status: receipt.status,
+      blockHash: receipt.blockHash, blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed, effectiveGasPrice: receipt.effectiveGasPrice,
+    },
+    canonicalReceiptBlockHash: finalityProof.canonicalBlockHash,
+    finalizedBlockNumber: finalityProof.finalizedBlockNumber,
+  });
+  if (finalization.state !== "finalized_success") {
+    throw new Error("chiliz_signed_intent_not_finalized_successfully");
+  }
   const tokenContract = (expectedPurchase?.fanTokenContract ?? expectedTransfer?.fanTokenContract) as `0x${string}`;
   const tokenDecimals = await client.readContract({ address: tokenContract,
     abi: parseAbi(["function decimals() view returns (uint8)"]), functionName: "decimals",
     blockNumber: receipt.blockNumber });
   const evidence = { chainId, latestBlock, tokenDecimals, transaction, receipt };
+  const verifiedFinalization: VerifiedChilizFinalization = {
+    receiptBlockHash: receipt.blockHash,
+    receiptBlockNumber: receipt.blockNumber.toString(),
+    finalizedBlockNumber: finalityProof.finalizedBlockNumber.toString(),
+    gasUsed: receipt.gasUsed.toString(),
+    effectiveGasPriceWei: receipt.effectiveGasPrice.toString(),
+    networkFeeWei: finalization.networkFeeWei,
+    principalSpentWei: finalization.principalSpentWei,
+    totalSpentWei: finalization.totalSpentWei,
+  };
   if (expectedPurchase) {
-    const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-    if (!purchaseRewardAmountLamports || !block.timestamp) throw new Error("chiliz_spend_receipt_time_unavailable");
-    const maxSpendChzWei = await quoteChilizPurchaseSpendCeiling(purchaseRewardAmountLamports,
-      Number(block.timestamp) * 1_000);
-    return verifyChilizPurchaseReceipt(evidence, { ...expectedPurchase, maxSpendChzWei }).acquiredAtomic.toString();
+    if (!purchaseRewardAmountLamports || signedIntent.kind !== "purchase") {
+      throw new Error("chiliz_purchase_signed_intent_invalid");
+    }
+    return { ...verifiedFinalization, outputAmountAtomic:
+      verifyChilizPurchaseReceipt(evidence, { ...expectedPurchase,
+        maxSpendChzWei: signedIntent.maxPrincipalWei }).acquiredAtomic.toString() };
   }
   verifyChilizTransferReceipt(evidence, expectedTransfer!);
-  return undefined;
+  return verifiedFinalization;
+}
+
+/** A finalized revert spends gas but acquires or pays no Fan Tokens. Record it
+ * as a terminal loss without discharging the settlement or claim liability. */
+async function finalizeRevertedChilizIntent(database: D1Database, jobId: string,
+  intent: ChilizSignedIntent): Promise<boolean> {
+  const primaryRpcUrl = env.CHILIZ_RPC_URL?.trim() || CHILIZ_CHAIN.rpcUrl;
+  const secondaryRpcUrl = new URL(primaryRpcUrl).hostname === "rpc.ankr.com"
+    ? "https://chiliz-rpc.publicnode.com" : "https://rpc.ankr.com/chiliz";
+  const client = createPublicClient({ transport: http(primaryRpcUrl,
+    { timeout: 12_000, retryCount: 1 }) });
+  let receipt: Awaited<ReturnType<typeof client.getTransactionReceipt>>;
+  try { receipt = await client.getTransactionReceipt({ hash: intent.txHash }); }
+  catch { return false; }
+  if (receipt.status !== "reverted") return false;
+  const [chainId, transaction] = await Promise.all([
+    client.getChainId(), client.getTransaction({ hash: intent.txHash }),
+  ]);
+  const proof = await verifyChilizDualRpcFinality({ primaryRpcUrl, secondaryRpcUrl,
+    receipt: { transactionHash: receipt.transactionHash, blockHash: receipt.blockHash,
+      blockNumber: receipt.blockNumber, status: "reverted" } });
+  const result = await reconcileChilizSignedIntent(intent, {
+    chainId,
+    transaction: { hash: transaction.hash, from: transaction.from, to: transaction.to,
+      input: transaction.input, value: transaction.value, chainId: transaction.chainId,
+      nonce: transaction.nonce, gas: transaction.gas,
+      maxFeePerGas: transaction.maxFeePerGas ?? null,
+      maxPriorityFeePerGas: transaction.maxPriorityFeePerGas ?? null,
+      type: transaction.type, blockHash: transaction.blockHash,
+      blockNumber: transaction.blockNumber },
+    receipt: { transactionHash: receipt.transactionHash, status: receipt.status,
+      blockHash: receipt.blockHash, blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed, effectiveGasPrice: receipt.effectiveGasPrice },
+    canonicalReceiptBlockHash: proof.canonicalBlockHash,
+    finalizedBlockNumber: proof.finalizedBlockNumber,
+  });
+  if (result.state !== "finalized_reverted" || result.principalSpentWei !== "0") {
+    throw new Error("chiliz_revert_finality_unverified");
+  }
+  const evidence = { txHash: intent.txHash, receiptBlockHash: receipt.blockHash,
+    receiptBlockNumber: receipt.blockNumber.toString(),
+    finalizedBlockNumber: proof.finalizedBlockNumber.toString(),
+    networkFeeWei: result.networkFeeWei, principalSpentWei: "0",
+    totalSpentWei: result.totalSpentWei, state: "finalized_reverted" };
+  await database.batch([
+    database.prepare(FINALIZE_CHILIZ_INTENT_SQL).bind(jobId, intent.txHash.toLowerCase(),
+      "finalized_reverted", "reverted", receipt.blockHash,
+      receipt.blockNumber.toString(), proof.canonicalBlockHash,
+      proof.finalizedBlockNumber.toString(), receipt.gasUsed.toString(),
+      receipt.effectiveGasPrice.toString(), result.networkFeeWei, "0",
+      result.totalSpentWei, JSON.stringify(evidence)),
+    database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+    database.prepare(FINALIZE_REVERTED_CHILIZ_JOB_SQL)
+      .bind(jobId, intent.txHash.toLowerCase(), JSON.stringify(evidence)),
+    database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+  ]);
+  return true;
 }
 
 async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
@@ -2623,6 +2792,136 @@ async function reconcilePreparedSolanaClaim(database: D1Database, workerId: stri
   }
 }
 
+type PrepareChilizRequest = Extract<z.infer<typeof requestSchema>, { action: "prepare_chiliz_intent" }>;
+
+async function inspectChilizSignedOrder(database: D1Database, job: AutomationRow,
+  input: PrepareChilizRequest): Promise<ChilizSignedIntent> {
+  const treasury = env.CHILIZ_TREASURY_ADDRESS?.trim();
+  if (!treasury || !/^0x[0-9a-fA-F]{40}$/.test(treasury) ||
+    input.workerId.toLowerCase() !== `chiliz:${treasury.toLowerCase()}` ||
+    input.treasury.toLowerCase() !== treasury.toLowerCase() ||
+    job.chain !== "chiliz" || job.attempt !== 1 || input.attempt !== 1 ||
+    job.state !== "broadcasting" || job.error_code !== `broadcasting:${input.workerId}`) {
+    throw new Error("chiliz_intent_worker_or_job_invalid");
+  }
+  const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+  if (input.kind === "purchase") {
+    const row = await database.prepare(`
+      SELECT s.reward_amount_atomic, f.launch_id, l.reward_symbol, l.reward_chain,
+        l.reward_mint, l.reward_wrapped_contract, l.status, l.mainnet_mint,
+        l.mainnet_reward_treasury
+      FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+      JOIN launch_drafts l ON l.id = f.launch_id
+      WHERE s.id = ?1 AND s.reward_swap_signature IS NULL
+        AND s.state IN ('reconciled', 'distributed', 'buyback_burned')
+    `).bind(job.entity_id).first<{
+      reward_amount_atomic: string; launch_id: string; reward_symbol: string;
+      reward_chain: string; reward_mint: string; reward_wrapped_contract: string | null;
+      status: string; mainnet_mint: string | null; mainnet_reward_treasury: string | null;
+    }>();
+    const asset = row && getChilizRewardAsset(row.reward_symbol);
+    const config = readMainnetConfig();
+    const now = Math.floor(Date.now() / 1_000);
+    if (!row || !asset || job.job_type !== "chiliz_reward_purchase" ||
+      job.entity_type !== "settlement" || row.reward_chain !== "chiliz" ||
+      row.status !== "mainnet_published" || !row.mainnet_mint ||
+      !config.rewardTreasury || row.mainnet_reward_treasury !== config.rewardTreasury ||
+      (config.sportpadMint && row.mainnet_mint === config.sportpadMint) ||
+      row.reward_wrapped_contract !== null || asset.routeStatus !== "current_verified" ||
+      row.reward_mint.toLowerCase() !== asset.currentV2Contract.toLowerCase() ||
+      input.fanTokenContract.toLowerCase() !== asset.currentV2Contract.toLowerCase() ||
+      payload.settlementId !== job.entity_id || payload.launchId !== row.launch_id ||
+      payload.rewardAmountLamports !== row.reward_amount_atomic ||
+      payload.rewardSymbol !== row.reward_symbol ||
+      payload.fanTokenContract?.toString().toLowerCase() !== asset.currentV2Contract.toLowerCase() ||
+      !input.maxPrincipalWei || !input.minimumOutputAtomic ||
+      !input.signedAtEpochSeconds || !input.deadlineEpochSeconds ||
+      Math.abs(input.signedAtEpochSeconds - now) > 30 ||
+      input.deadlineEpochSeconds < now + 20 || input.deadlineEpochSeconds > now + 150) {
+      throw new Error("chiliz_intent_purchase_snapshot_invalid");
+    }
+    const independentCeiling = await quoteChilizPurchaseSpendCeiling(row.reward_amount_atomic, Date.now());
+    const intent = await createChilizSignedIntent({
+      jobId: job.id, attempt: 1, kind: "purchase", treasury,
+      rawTransaction: input.rawTransaction as `0x${string}`,
+      gasFeeCeilingWei: input.gasFeeCeilingWei,
+      fanTokenContract: asset.currentV2Contract, maxPrincipalWei: input.maxPrincipalWei,
+      minimumOutputAtomic: input.minimumOutputAtomic,
+      signedAtEpochSeconds: input.signedAtEpochSeconds,
+      deadlineEpochSeconds: input.deadlineEpochSeconds,
+    });
+    if (intent.kind !== "purchase") throw new Error("chiliz_intent_kind_invalid");
+    verifyChilizPurchasePrincipal(intent.valueWei, input.maxPrincipalWei, independentCeiling);
+    // The worker's quote is not spend authority. Check the exact signed size
+    // against a fresh independent Kayen quote before persisting the raw tx.
+    const client = createPublicClient({ transport: http(env.CHILIZ_RPC_URL?.trim() || CHILIZ_CHAIN.rpcUrl,
+      { timeout: 12_000, retryCount: 1 }) });
+    const spend = BigInt(intent.valueWei);
+    const probe = spend / 10n;
+    if (probe <= 0n) throw new Error("chiliz_intent_purchase_probe_too_small");
+    const quoteAbi = parseAbi(["function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"]);
+    const path = ["0x677F7e16C7Dd57be1D4C8aD1244883214953DC47", asset.currentV2Contract] as const;
+    const [small, full] = await Promise.all([
+      client.readContract({ address: "0x1918EbB39492C8b98865c5E53219c3f1AE79e76F", abi: quoteAbi,
+        functionName: "getAmountsOut", args: [probe, path] }),
+      client.readContract({ address: "0x1918EbB39492C8b98865c5E53219c3f1AE79e76F", abi: quoteAbi,
+        functionName: "getAmountsOut", args: [spend, path] }),
+    ]);
+    const minimum = BigInt(intent.minimumOutputAtomic);
+    if (small.length !== 2 || full.length !== 2 || small[0] !== probe || full[0] !== spend ||
+      small[1] <= 0n || full[1] <= 0n || minimum < full[1] * 99n / 100n ||
+      minimum > full[1] || full[1] * probe * 10_000n < small[1] * spend * 9_500n) {
+      throw new Error("chiliz_intent_purchase_market_unverified");
+    }
+    return intent;
+  }
+  const row = await database.prepare(`
+    SELECT c.amount_atomic, c.destination_address, c.destination_chain,
+      e.launch_id, l.reward_symbol, l.reward_chain, l.reward_mint,
+      l.reward_wrapped_contract, l.status
+    FROM reward_claims c JOIN reward_epochs e ON e.id = c.epoch_id
+    JOIN launch_drafts l ON l.id = e.launch_id
+    WHERE c.id = ?1 AND c.state = 'queued'
+  `).bind(job.entity_id).first<{
+    amount_atomic: string; destination_address: string; destination_chain: string;
+    launch_id: string; reward_symbol: string; reward_chain: string;
+    reward_mint: string; reward_wrapped_contract: string | null; status: string;
+  }>();
+  const asset = row && getChilizRewardAsset(row.reward_symbol);
+  if (!row || !asset || job.job_type !== "chiliz_claim_unwrap" ||
+    job.entity_type !== "reward_claim" || row.reward_chain !== "chiliz" ||
+    row.destination_chain !== "chiliz" || row.status !== "mainnet_published" ||
+    row.reward_wrapped_contract !== null || asset.routeStatus !== "current_verified" ||
+    row.reward_mint.toLowerCase() !== asset.currentV2Contract.toLowerCase() ||
+    input.fanTokenContract.toLowerCase() !== asset.currentV2Contract.toLowerCase() ||
+    !/^0x[0-9a-fA-F]{40}$/.test(row.destination_address) ||
+    !input.destination || input.destination.toLowerCase() !== row.destination_address.toLowerCase() ||
+    !input.amountAtomic || input.amountAtomic !== row.amount_atomic ||
+    payload.claimId !== job.entity_id || payload.amountAtomic !== row.amount_atomic ||
+    payload.rewardSymbol !== row.reward_symbol ||
+    payload.destinationAddress?.toString().toLowerCase() !== row.destination_address.toLowerCase() ||
+    payload.fanTokenContract?.toString().toLowerCase() !== asset.currentV2Contract.toLowerCase()) {
+    throw new Error("chiliz_intent_claim_snapshot_invalid");
+  }
+  const vault = await database.prepare(`
+    SELECT inventory_atomic, reserved_atomic FROM reward_vaults
+    WHERE launch_id = ?1 AND reward_mint = ?2 AND chain = 'chiliz'
+  `).bind(row.launch_id, asset.currentV2Contract).first<{
+    inventory_atomic: string; reserved_atomic: string;
+  }>();
+  if (!vault || BigInt(vault.inventory_atomic) < BigInt(row.amount_atomic) ||
+    BigInt(vault.reserved_atomic) < BigInt(row.amount_atomic)) {
+    throw new Error("chiliz_intent_claim_inventory_unfunded");
+  }
+  return createChilizSignedIntent({
+    jobId: job.id, attempt: 1, kind: "claim", treasury,
+    rawTransaction: input.rawTransaction as `0x${string}`,
+    gasFeeCeilingWei: input.gasFeeCeilingWei,
+    fanTokenContract: asset.currentV2Contract,
+    destination: row.destination_address, amountAtomic: row.amount_atomic,
+  });
+}
+
 export async function POST(request: Request) {
   if (!env.DB) return Response.json({ error: "Automation database is unavailable." }, { status: 503 });
   if (!(await authorize(request))) return workerUnauthorized();
@@ -2754,6 +3053,118 @@ export async function POST(request: Request) {
       ...(outcome.swapRequired ? { swapRequired: outcome.swapRequired } : {}),
     }, { headers: { "Cache-Control": "no-store" } });
   }
+  if (input.action === "reconcile_chiliz_intent") {
+    const treasury = env.CHILIZ_TREASURY_ADDRESS?.trim();
+    if (!treasury || !/^0x[0-9a-fA-F]{40}$/.test(treasury) ||
+      input.workerId.toLowerCase() !== `chiliz:${treasury.toLowerCase()}`) {
+      return Response.json({ error: "Chiliz worker identity is unavailable." }, { status: 409 });
+    }
+    const controls = await readAutomationControls(env.DB);
+    // An armed first attempt with no persisted signature and no tx hash cannot
+    // have reached the only broadcast path. Restore just that aged job to its
+    // first lease attempt; any signed or ambiguous transaction stays held.
+    let requeued = false;
+    if (FINANCIAL_LEDGER_VERIFIED && CHILIZ_ASSET_MIGRATION_VERIFIED) {
+      const staleBroadcast = await env.DB.prepare(`
+        SELECT j.id, j.job_type FROM automation_jobs j
+        WHERE j.chain = 'chiliz' AND j.state = 'broadcasting'
+          AND j.attempt = 1 AND j.error_code = ?1
+          AND j.tx_hash IS NULL AND j.leased_until IS NULL
+          AND j.updated_at < datetime('now', '-5 minutes')
+          AND NOT EXISTS (SELECT 1 FROM chiliz_signed_intents i WHERE i.job_id = j.id)
+          AND EXISTS (SELECT 1 FROM chiliz_intent_policy p
+            WHERE p.authorized_job_id = j.id AND p.reserved_intent_id IS NULL
+              AND p.key = CASE WHEN j.job_type = 'chiliz_reward_purchase'
+                THEN 'purchase_canary' ELSE 'claim_canary' END)
+        ORDER BY j.updated_at ASC LIMIT 1
+      `).bind(`broadcasting:${input.workerId}`).first<{ id: string; job_type: string }>();
+      if (staleBroadcast && laneAllowsJob(staleBroadcast.job_type, controls)) {
+        const result = await env.DB.prepare(REQUEUE_STALE_UNPREPARED_CHILIZ_BROADCAST_SQL)
+          .bind(staleBroadcast.id, input.workerId, Date.now()).run();
+        requeued = result.meta.changes === 1;
+      }
+      const unprepared = await env.DB.prepare(`
+        SELECT j.id, j.error_code, j.job_type FROM automation_jobs j
+        WHERE j.chain = 'chiliz' AND j.state = 'reconciliation_required'
+          AND j.attempt = 1 AND j.tx_hash IS NULL AND j.leased_until IS NULL
+          AND j.updated_at < datetime('now', '-5 minutes')
+          AND NOT EXISTS (SELECT 1 FROM chiliz_signed_intents i WHERE i.job_id = j.id)
+          AND EXISTS (SELECT 1 FROM chiliz_intent_policy p
+            WHERE p.authorized_job_id = j.id AND p.reserved_intent_id IS NULL
+              AND p.key = CASE WHEN j.job_type = 'chiliz_reward_purchase'
+                THEN 'purchase_canary' ELSE 'claim_canary' END)
+        ORDER BY j.updated_at ASC LIMIT 1
+      `).first<{ id: string; error_code: string | null; job_type: string }>();
+      if (unprepared && unprepared.error_code && laneAllowsJob(unprepared.job_type, controls)) {
+        const result = await env.DB.prepare(REQUEUE_UNPREPARED_CHILIZ_JOB_SQL)
+          .bind(unprepared.id, unprepared.error_code, Date.now()).run();
+        requeued = requeued || result.meta.changes === 1;
+      }
+    }
+    const pending = await env.DB.prepare(`
+      SELECT j.id, j.job_type, j.payload_json, j.state AS job_state,
+        j.tx_hash,
+        i.state AS intent_state
+      FROM automation_jobs j JOIN chiliz_signed_intents i ON i.job_id = j.id
+      WHERE j.chain = 'chiliz' AND j.job_type IN ('chiliz_reward_purchase', 'chiliz_claim_unwrap')
+        AND j.state IN ('broadcasting', 'reconciliation_required')
+        AND i.state IN ('prepared', 'broadcast_attempted')
+        AND i.treasury_address = ?1
+      ORDER BY j.updated_at ASC LIMIT 1
+    `).bind(treasury.toLowerCase()).first<{
+      id: string; job_type: string; payload_json: string;
+      job_state: string; intent_state: string; tx_hash: string | null;
+    }>();
+    if (!pending) return Response.json({ prepared: null, requeued },
+      { headers: { "Cache-Control": "no-store" } });
+    const row = await env.DB.prepare(SELECT_CHILIZ_SIGNED_INTENT_SQL)
+      .bind(pending.id).first<PersistedChilizIntentRow>();
+    if (!row) return Response.json({ error: "Persisted Chiliz intent is missing." }, { status: 409 });
+    let intent: ChilizSignedIntent;
+    try { intent = await parsePersistedChilizSignedIntent(row); }
+    catch { return Response.json({ error: "Persisted Chiliz intent is invalid." }, { status: 409 }); }
+    if (pending.tx_hash && pending.tx_hash.toLowerCase() !== intent.txHash.toLowerCase()) {
+      return Response.json({ error: "Chiliz reconciliation hash does not match signed intent." }, { status: 409 });
+    }
+    try {
+      if (await finalizeRevertedChilizIntent(env.DB, pending.id, intent)) {
+        return Response.json({ prepared: null, reconciled: "finalized_reverted" },
+          { headers: { "Cache-Control": "no-store" } });
+      }
+    } catch (error) {
+      console.error("chiliz_revert_reconciliation_failed",
+        error instanceof Error ? error.message : "unknown");
+      return Response.json({ error: "Chiliz reverted receipt could not be reconciled." }, { status: 409 });
+    }
+    const policy = await env.DB.prepare(`
+      SELECT state, reserved_intent_id FROM chiliz_intent_policy
+      WHERE authorized_job_id = ?1 LIMIT 1
+    `).bind(pending.id).first<{ state: string; reserved_intent_id: string | null }>();
+    const maySettle = FINANCIAL_LEDGER_VERIFIED && CHILIZ_ASSET_MIGRATION_VERIFIED &&
+      policy?.reserved_intent_id === row.id;
+    if (maySettle && pending.job_state === "reconciliation_required") {
+      // Restore the same signed job for receipt completion. Its unique
+      // persisted nonce/raw transaction forbids a replacement signature.
+      const restored = await env.DB.prepare(`
+        UPDATE automation_jobs SET state = 'broadcasting', error_code = ?2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?1 AND chain = 'chiliz' AND state = 'reconciliation_required'
+          AND (tx_hash IS NULL OR lower(tx_hash) = ?3)
+          AND EXISTS (SELECT 1 FROM chiliz_signed_intents i
+            WHERE i.job_id = automation_jobs.id AND i.tx_hash = ?3)
+      `).bind(pending.id, `broadcasting:${input.workerId}`, intent.txHash.toLowerCase()).run();
+      if (restored.meta.changes !== 1) {
+        return Response.json({ error: "Chiliz reconciliation state changed." }, { status: 409 });
+      }
+    }
+    const mayBroadcast = maySettle && laneAllowsJob(pending.job_type, controls) &&
+      policy?.state === "reserved" &&
+      ["prepared", "broadcast_attempted"].includes(row.state) &&
+      (intent.kind !== "purchase" || intent.deadlineEpochSeconds > Math.floor(Date.now() / 1_000) + 15);
+    return Response.json({ prepared: { jobId: pending.id, intent,
+      job: { type: pending.job_type, payload: JSON.parse(pending.payload_json) } },
+      mayBroadcast }, { headers: { "Cache-Control": "no-store" } });
+  }
   if (input.action === "lease") {
     const controls = await readAutomationControls(env.DB);
     const allowedJobTypes = FINANCIAL_LEDGER_VERIFIED
@@ -2793,7 +3204,8 @@ export async function POST(request: Request) {
   const ownedLease = ownsActiveLease(job, input.workerId, Date.now());
   const ownedBroadcast = ownsBroadcast(job, input.workerId);
   if (!job || (input.action === "arm" ? !ownedLease :
-    input.action === "complete" || input.action === "prepare_buyback_swap" ||
+    input.action === "complete" || input.action === "prepare_chiliz_intent" ||
+      input.action === "mark_chiliz_broadcast" || input.action === "prepare_buyback_swap" ||
       input.action === "prepare_buyback_burn" ||
       input.action === "prepare_reward_swap" || input.action === "prepare_solana_claim_payout"
       ? !ownedBroadcast :
@@ -2915,6 +3327,73 @@ export async function POST(request: Request) {
     if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
     return Response.json({ armed: true });
   }
+  if (input.action === "prepare_chiliz_intent") {
+    try {
+      const controls = await readAutomationControls(env.DB);
+      if (!FINANCIAL_LEDGER_VERIFIED || !CHILIZ_ASSET_MIGRATION_VERIFIED ||
+        !laneAllowsJob(job.job_type, controls)) {
+        throw new Error("chiliz_intent_lane_closed");
+      }
+      const existing = await env.DB.prepare(SELECT_CHILIZ_SIGNED_INTENT_SQL)
+        .bind(job.id).first<PersistedChilizIntentRow>();
+      if (existing) {
+        const persisted = await parsePersistedChilizSignedIntent(existing);
+        if (persisted.rawTransaction.toLowerCase() !== input.rawTransaction.toLowerCase() ||
+          persisted.treasury.toLowerCase() !== input.treasury.toLowerCase() ||
+          persisted.kind !== input.kind || persisted.fanTokenContract.toLowerCase() !==
+            input.fanTokenContract.toLowerCase()) {
+          throw new Error("chiliz_intent_replacement_forbidden");
+        }
+        return Response.json({ prepared: true, txHash: persisted.txHash,
+          rawTransaction: persisted.rawTransaction });
+      }
+      const intent = await inspectChilizSignedOrder(env.DB, job, input);
+      const intentId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(INSERT_CHILIZ_SIGNED_INTENT_SQL)
+          .bind(...chilizSignedIntentInsertBindings(intent, input.workerId, intentId)),
+        env.DB.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+        env.DB.prepare(RESERVE_CHILIZ_INTENT_POLICY_SQL).bind(intent.jobId, intentId),
+        env.DB.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      ]);
+      return Response.json({ prepared: true, txHash: intent.txHash,
+        rawTransaction: intent.rawTransaction });
+    } catch (error) {
+      console.error("chiliz_intent_prepare_failed", error instanceof Error ? error.message : "unknown");
+      return Response.json({ error: "Chiliz signed order could not be durably prepared." }, { status: 409 });
+    }
+  }
+  if (input.action === "mark_chiliz_broadcast") {
+    try {
+      const controls = await readAutomationControls(env.DB);
+      if (!FINANCIAL_LEDGER_VERIFIED || !CHILIZ_ASSET_MIGRATION_VERIFIED ||
+        !laneAllowsJob(job.job_type, controls)) throw new Error("chiliz_broadcast_lane_closed");
+      const row = await env.DB.prepare(SELECT_CHILIZ_SIGNED_INTENT_SQL)
+        .bind(job.id).first<PersistedChilizIntentRow>();
+      if (!row) throw new Error("chiliz_broadcast_intent_missing");
+      const policy = await env.DB.prepare(`
+        SELECT state, reserved_intent_id FROM chiliz_intent_policy
+        WHERE authorized_job_id = ?1 LIMIT 1
+      `).bind(job.id).first<{ state: string; reserved_intent_id: string | null }>();
+      if (policy?.state !== "reserved" || policy.reserved_intent_id !== row.id) {
+        throw new Error("chiliz_broadcast_policy_paused");
+      }
+      const intent = await parsePersistedChilizSignedIntent(row);
+      if (intent.txHash.toLowerCase() !== input.txHash.toLowerCase() ||
+        intent.treasury.toLowerCase() !== input.workerId.slice("chiliz:".length).toLowerCase() ||
+        (intent.kind === "purchase" && intent.deadlineEpochSeconds <= Math.floor(Date.now() / 1_000) + 15)) {
+        throw new Error("chiliz_broadcast_intent_mismatch");
+      }
+      if (row.state === "broadcast_attempted") return Response.json({ marked: true });
+      const marked = await env.DB.prepare(MARK_CHILIZ_INTENT_BROADCAST_SQL)
+        .bind(job.id, intent.txHash, Date.now()).run();
+      if (marked.meta.changes !== 1) throw new Error("chiliz_broadcast_intent_changed");
+      return Response.json({ marked: true });
+    } catch (error) {
+      console.error("chiliz_broadcast_mark_failed", error instanceof Error ? error.message : "unknown");
+      return Response.json({ error: "Chiliz broadcast could not be authorized." }, { status: 409 });
+    }
+  }
   if (input.action === "prepare_buyback_swap") {
     try {
       const prepared = await persistPreparedBuybackSwap(env.DB, job, input);
@@ -2971,9 +3450,12 @@ export async function POST(request: Request) {
     }
     let verifiedOutput = input.outputAmountAtomic;
     let verifiedSlot: number | undefined;
+    let chilizFinalization: VerifiedChilizFinalization | undefined;
     if (job.job_type === "chiliz_reward_purchase" || job.job_type === "chiliz_claim_unwrap") {
       try {
-        verifiedOutput = await verifiedChilizOutput(env.DB, job, input.workerId, input.txHash, input.outputAmountAtomic);
+        chilizFinalization = await verifiedChilizOutput(env.DB, job, input.workerId,
+          input.txHash, input.outputAmountAtomic);
+        verifiedOutput = chilizFinalization.outputAmountAtomic;
       } catch (error) {
         // Never credit a vault or discharge a claim from a worker-supplied hash.
         // Preserve the hash for a human to reconcile without rebroadcasting.
@@ -3014,7 +3496,7 @@ export async function POST(request: Request) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await completeJob(env.DB, job, input.workerId, input.txHash,
-          verifiedOutput, input.sourceTxHash, verifiedSlot);
+          verifiedOutput, input.sourceTxHash, verifiedSlot, chilizFinalization);
         return Response.json({ completed: true });
       } catch (error) {
         // A concurrent purchase or claim may have changed a vault snapshot.

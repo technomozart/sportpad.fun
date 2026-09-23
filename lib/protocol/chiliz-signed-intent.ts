@@ -53,7 +53,7 @@ export type ChilizReconciliationEvidence = {
   };
   /** Hash of the canonical block fetched independently at receipt.blockNumber. */
   canonicalReceiptBlockHash?: string | null;
-  /** Number obtained from the chain's finalized block tag, not latest/safe. */
+  /** Number verified through Chiliz's validator-finalized RPC method, never latest/safe. */
   finalizedBlockNumber?: bigint | null;
 };
 
@@ -71,6 +71,18 @@ function equalAddress(a: string | null | undefined, b: string): boolean {
 }
 function equalHex(a: string | null | undefined, b: string): boolean {
   return Boolean(a && /^0x[0-9a-fA-F]+$/.test(a) && a.toLowerCase() === b.toLowerCase());
+}
+
+/** A full settlement cannot be discharged by a dust-sized CHZ purchase. */
+export function verifyChilizPurchasePrincipal(signedValueWei: string,
+  requestedPrincipalWei: string, freshQuoteWei: string): bigint {
+  const signed = atomic(signedValueWei, "chiliz_principal_signed_invalid");
+  const requested = atomic(requestedPrincipalWei, "chiliz_principal_requested_invalid");
+  const quoted = atomic(freshQuoteWei, "chiliz_principal_quote_invalid");
+  if (signed !== requested || requested > quoted || requested * 100n < quoted * 98n) {
+    fail("chiliz_principal_not_fully_funded");
+  }
+  return signed;
 }
 
 export async function createChilizSignedIntent(request: ChilizSignedIntentRequest): Promise<ChilizSignedIntent> {

@@ -473,6 +473,83 @@ export const automationJobs = sqliteTable(
   ],
 );
 
+/** Two independently armed, one-shot Chiliz canaries: purchase <=9 CHZ and
+ * claim <=1 CHZ, including gas. No row is seeded by migration. Pausing after
+ * reservation cannot erase a signed transaction. */
+export const chilizIntentPolicy = sqliteTable(
+  "chiliz_intent_policy",
+  {
+    key: text("key").primaryKey(),
+    authorizedJobId: text("authorized_job_id").references(() => automationJobs.id),
+    reservedIntentId: text("reserved_intent_id"),
+    maxTotalSpendWei: text("max_total_spend_wei").notNull(),
+    state: text("state").notNull().default("paused"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_policy_authorized_job").on(table.authorizedJobId)
+      .where(sql`${table.authorizedJobId} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_policy_reserved_intent").on(table.reservedIntentId)
+      .where(sql`${table.reservedIntentId} IS NOT NULL`),
+    check("chk_chiliz_policy_slots", sql`${table.key} IN ('purchase_canary', 'claim_canary')`),
+    check("chk_chiliz_policy_state", sql`${table.state} IN ('paused', 'armed', 'reserved')`),
+    check("chk_chiliz_policy_reservation", sql`${table.state} <> 'reserved' OR (${table.authorizedJobId} IS NOT NULL AND ${table.reservedIntentId} IS NOT NULL)`),
+    check("chk_chiliz_policy_arm", sql`${table.state} <> 'armed' OR (${table.authorizedJobId} IS NOT NULL AND ${table.reservedIntentId} IS NULL)`),
+    check("chk_chiliz_policy_cap", sql`${table.maxTotalSpendWei} GLOB '[1-9]*' AND ${table.maxTotalSpendWei} NOT GLOB '*[^0-9]*' AND (length(${table.maxTotalSpendWei}) < 19 OR (length(${table.maxTotalSpendWei}) = 19 AND ((${table.key} = 'purchase_canary' AND ${table.maxTotalSpendWei} <= '9000000000000000000') OR (${table.key} = 'claim_canary' AND ${table.maxTotalSpendWei} <= '1000000000000000000'))))`),
+  ],
+);
+
+/** Signed raw EVM transactions are bearer-spend material; this table is only
+ * accessed by internal worker routes. Each job and treasury nonce is frozen
+ * to one immutable signed transaction, including after a reverted receipt. */
+export const chilizSignedIntents = sqliteTable(
+  "chiliz_signed_intents",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id").notNull().references(() => automationJobs.id),
+    attempt: integer("attempt").notNull(),
+    chainId: integer("chain_id").notNull(),
+    treasuryAddress: text("treasury_address").notNull(),
+    nonce: integer("nonce").notNull(),
+    kind: text("kind").notNull(),
+    fanTokenContract: text("fan_token_contract").notNull(),
+    txHash: text("tx_hash").notNull(),
+    rawTransaction: text("raw_transaction").notNull(),
+    intentJson: text("intent_json").notNull(),
+    maximumPrincipalWei: text("maximum_principal_wei").notNull(),
+    maximumNetworkFeeWei: text("maximum_network_fee_wei").notNull(),
+    maximumTotalSpendWei: text("maximum_total_spend_wei").notNull(),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAt: integer("broadcast_attempted_at"),
+    receiptStatus: text("receipt_status"),
+    receiptBlockHash: text("receipt_block_hash"),
+    receiptBlockNumber: integer("receipt_block_number"),
+    canonicalReceiptBlockHash: text("canonical_receipt_block_hash"),
+    finalizedBlockNumber: integer("finalized_block_number"),
+    gasUsed: text("gas_used"),
+    effectiveGasPriceWei: text("effective_gas_price_wei"),
+    networkFeeWei: text("network_fee_wei"),
+    principalSpentWei: text("principal_spent_wei"),
+    totalSpentWei: text("total_spent_wei"),
+    evidenceJson: text("evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_intent_job").on(table.jobId),
+    uniqueIndex("idx_chiliz_intent_job_attempt").on(table.jobId, table.attempt),
+    uniqueIndex("idx_chiliz_intent_treasury_nonce").on(table.treasuryAddress, table.nonce),
+    uniqueIndex("idx_chiliz_intent_tx_hash").on(table.txHash),
+    index("idx_chiliz_intent_state").on(table.state),
+    check("chk_chiliz_intent_chain", sql`${table.chainId} = 88888`),
+    check("chk_chiliz_intent_attempt", sql`${table.attempt} = 1`),
+    check("chk_chiliz_intent_nonce", sql`${table.nonce} >= 0`),
+    check("chk_chiliz_intent_kind", sql`${table.kind} IN ('purchase', 'claim')`),
+    check("chk_chiliz_intent_state", sql`${table.state} IN ('prepared', 'broadcast_attempted', 'finalized_success', 'finalized_reverted')`),
+  ],
+);
+
 export const protocolSettings = sqliteTable("protocol_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

@@ -148,6 +148,9 @@ test("two purchase completions cannot lose a vault increment or partially commit
     () => assertOne(db),
   ]);
   complete("job-a", "settlement-a", "0xtx-a", "10000000000000000000", "14000000000000000000");
+  assert.equal(db.prepare(COMPLETE_PURCHASE_VAULT_SQL).run("wrong-owner", "launch", "v2-token",
+    "0xrotated", "16000000000000000000", "14000000000000000000").changes, 0);
+  assert.equal(db.prepare("SELECT owner_address FROM reward_vaults").get()?.owner_address, "0xowner");
   assert.throws(() => complete("job-b", "settlement-b", "0xtx-b", "10000000000000000000", "16000000000000000000"), /malformed JSON/);
   assert.equal(db.prepare("SELECT state FROM automation_jobs WHERE id = 'job-b'").get()?.state, "broadcasting");
   assert.equal(db.prepare("SELECT reward_swap_signature FROM settlements WHERE id = 'settlement-b'").get()?.reward_swap_signature, null);
