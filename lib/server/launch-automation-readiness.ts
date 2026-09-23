@@ -31,6 +31,7 @@ export async function readLaunchAutomationReadiness(
   database: D1Database,
   rewardChain: RewardChain,
   buybackTreasury: string | null,
+  rewardTreasury: string | null,
 ): Promise<LaunchAutomationReadiness> {
   const [heartbeats, controlsRow, ...maintenanceRuns] = await Promise.all([
     database.prepare(`
@@ -60,6 +61,7 @@ export async function readLaunchAutomationReadiness(
     maintenanceRuns.filter((run): run is MaintenanceRun => Boolean(run)),
     rewardChain,
     buybackTreasury,
+    rewardTreasury,
   );
   const missing = [...workers.missing];
   if (!execution.workerTokenConfigured) missing.push("worker authentication");
@@ -83,8 +85,8 @@ export async function readGlobalLaunchReadiness(): Promise<LaunchAutomationReadi
   if (!env.DB) return { ready: false, missing: [...config.missing, "automation status unavailable"] };
   try {
     const [chiliz, solana] = await Promise.all([
-      readLaunchAutomationReadiness(env.DB, "chiliz", config.buybackTreasury),
-      readLaunchAutomationReadiness(env.DB, "solana", config.buybackTreasury),
+      readLaunchAutomationReadiness(env.DB, "chiliz", config.buybackTreasury, config.rewardTreasury),
+      readLaunchAutomationReadiness(env.DB, "solana", config.buybackTreasury, config.rewardTreasury),
     ]);
     const missing = [...new Set([...config.missing, ...chiliz.missing, ...solana.missing])];
     return { ready: missing.length === 0, missing };

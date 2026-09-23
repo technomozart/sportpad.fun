@@ -29,16 +29,17 @@ export type PersistedAutomaticBuybackIntent = {
   expected_programs_json: string;
 };
 
-type ExpectedBuybackSwap = {
+export type PersistedAutomaticRewardIntent = PersistedAutomaticBuybackIntent;
+
+type ExpectedAutomaticSwap = {
   settlementId: string;
   treasury: string;
-  sportpadMint: string;
+  outputMint: string;
   inputAmountLamports: string;
   purchasedAmountAtomic: string;
   swapSignature: string;
 };
 
-const ACTION = "sportpad_buyback_automation";
 const PROGRAM_POLICY = "jupiter_v2_metis_pinned";
 const MAX_INPUT_LAMPORTS = 100_000_000n;
 
@@ -116,35 +117,41 @@ export async function inspectPreparedAutomaticBuybackOrder({
  * Call this *after* verifySportpadBuybackReceipts has checked actual SOL/token
  * deltas and the linked burn. No such persisted intent currently exists for
  * the disabled automation worker, so missing records MUST fail closed. */
-export async function verifyPersistedAutomaticBuybackIntent({
+async function verifyPersistedAutomaticSwapIntent({
   intent,
   expected,
   swapReceipt,
   swapStatus,
+  action,
+  signerRole,
+  idempotencyKey,
 }: {
   intent: PersistedAutomaticBuybackIntent | null;
-  expected: ExpectedBuybackSwap;
+  expected: ExpectedAutomaticSwap;
   swapReceipt: SolanaAutomationReceipt | null;
   swapStatus: SignatureStatus | null;
+  action: string;
+  signerRole: string;
+  idempotencyKey: string;
 }) {
   if (!intent) reject("not_persisted_before_broadcast");
   let signer: PublicKey;
   try { signer = new PublicKey(expected.treasury); } catch { return reject("treasury_invalid"); }
-  if (intent.idempotency_key !== `automation:buyback:swap:${expected.settlementId}` ||
-    intent.settlement_id !== expected.settlementId || intent.signer_role !== "buyback_treasury" ||
-    intent.signer_address !== signer.toBase58() || intent.action !== ACTION ||
+  if (intent.idempotency_key !== idempotencyKey ||
+    intent.settlement_id !== expected.settlementId || intent.signer_role !== signerRole ||
+    intent.signer_address !== signer.toBase58() || intent.action !== action ||
     !["prepared", "broadcasting", "submitted", "submission_unknown"].includes(intent.state)) {
     reject("job_identity_mismatch");
   }
   if (!intent.provider_request_id || intent.provider_request_id.length > 200 ||
     !/^[\x21-\x7e]+$/.test(intent.provider_request_id)) reject("provider_request_missing");
   if (intent.input_mint !== NATIVE_MINT.toBase58() ||
-    intent.output_mint !== expected.sportpadMint ||
+    intent.output_mint !== expected.outputMint ||
     intent.input_amount_atomic !== expected.inputAmountLamports ||
     positive(intent.maximum_spend_lamports, "spend_cap_invalid") !==
       positive(expected.inputAmountLamports, "input_amount_invalid") ||
     BigInt(expected.inputAmountLamports) > MAX_INPUT_LAMPORTS) reject("swap_terms_mismatch");
-  parseExactArray(intent.expected_mints_json, [NATIVE_MINT.toBase58(), expected.sportpadMint], "mint_policy_mismatch");
+  parseExactArray(intent.expected_mints_json, [NATIVE_MINT.toBase58(), expected.outputMint], "mint_policy_mismatch");
   parseExactArray(intent.expected_programs_json, [PROGRAM_POLICY], "program_policy_mismatch");
   const minimum = positive(intent.minimum_output_atomic, "minimum_output_invalid");
   if (minimum > positive(expected.purchasedAmountAtomic, "purchased_amount_invalid")) reject("output_below_persisted_minimum");
@@ -164,4 +171,34 @@ export async function verifyPersistedAutomaticBuybackIntent({
   if (!ed25519.verify(signatureBytes, message, signer.toBytes())) reject("treasury_signature_invalid");
   return { txSignature: expected.swapSignature, transactionMessageHash: intent.transaction_message_hash,
     providerRequestId: intent.provider_request_id, minimumOutputAtomic: minimum.toString() };
+}
+
+export function verifyPersistedAutomaticBuybackIntent(input: {
+  intent: PersistedAutomaticBuybackIntent | null;
+  expected: Omit<ExpectedAutomaticSwap, "outputMint"> & { sportpadMint: string };
+  swapReceipt: SolanaAutomationReceipt | null;
+  swapStatus: SignatureStatus | null;
+}) {
+  return verifyPersistedAutomaticSwapIntent({
+    ...input,
+    expected: { ...input.expected, outputMint: input.expected.sportpadMint },
+    action: "sportpad_buyback_automation",
+    signerRole: "buyback_treasury",
+    idempotencyKey: `automation:buyback:swap:${input.expected.settlementId}`,
+  });
+}
+
+export function verifyPersistedAutomaticRewardIntent(input: {
+  intent: PersistedAutomaticRewardIntent | null;
+  expected: Omit<ExpectedAutomaticSwap, "outputMint"> & { rewardMint: string };
+  swapReceipt: SolanaAutomationReceipt | null;
+  swapStatus: SignatureStatus | null;
+}) {
+  return verifyPersistedAutomaticSwapIntent({
+    ...input,
+    expected: { ...input.expected, outputMint: input.expected.rewardMint },
+    action: "solana_reward_purchase_automation",
+    signerRole: "reward_treasury",
+    idempotencyKey: `automation:reward:swap:${input.expected.settlementId}`,
+  });
 }

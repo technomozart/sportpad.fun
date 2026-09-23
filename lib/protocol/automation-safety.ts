@@ -22,6 +22,30 @@ export const COMPLETE_BROADCAST_JOB_SQL = `
   WHERE id = ?1 AND state = 'broadcasting' AND error_code = ?3
 `;
 
+export const COMPLETE_RECONCILED_JOB_SQL = `
+  UPDATE automation_jobs SET state = 'complete', tx_hash = ?2, error_code = NULL,
+    leased_until = NULL, updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?1 AND state = 'reconciliation_required'
+    AND (tx_hash IS NULL OR tx_hash = ?2)
+    AND job_type = 'solana_reward_purchase'
+`;
+
+// Arming may precede ATA creation and quote acquisition. If no order was ever
+// persisted and no hash was reported, the compliant worker could not have
+// broadcast a reward swap. Requeue only that provably pre-broadcast state.
+export const REQUEUE_UNPREPARED_REWARD_JOB_SQL = `
+  UPDATE automation_jobs SET state = 'queued', error_code = NULL,
+    leased_until = NULL, available_at = ?1, updated_at = CURRENT_TIMESTAMP
+  WHERE job_type = 'solana_reward_purchase'
+    AND state IN ('broadcasting', 'reconciliation_required')
+    AND (state = 'reconciliation_required' OR error_code = ?2)
+    AND tx_hash IS NULL
+    AND updated_at < datetime('now', '-5 minutes')
+    AND NOT EXISTS (SELECT 1 FROM transaction_intents i
+      WHERE i.settlement_id = automation_jobs.entity_id
+        AND i.action = 'solana_reward_purchase_automation')
+`;
+
 export const COMPLETE_CLAIM_VAULT_SQL = `
   UPDATE reward_vaults SET inventory_atomic = ?3, reserved_atomic = ?4,
     claimed_atomic = ?5, updated_at = CURRENT_TIMESTAMP
@@ -47,6 +71,29 @@ export const COMPLETE_PURCHASE_SETTLEMENT_SQL = `
       WHERE f.id = settlements.fee_event_id AND f.launch_id = ?3
         AND l.reward_chain = 'chiliz' AND l.reward_mint = ?4
         AND l.reward_wrapped_contract IS NULL
+    )
+`;
+
+export const COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL = `
+  UPDATE settlements SET reward_swap_signature = ?2,
+    state = CASE WHEN buyback_swap_signature IS NOT NULL AND burn_signature IS NOT NULL
+      THEN 'complete' ELSE 'reward_acquired' END,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?1 AND reward_swap_signature IS NULL
+    AND state IN ('reconciled', 'distributed', 'buyback_burned')
+    AND reward_amount_atomic = ?6
+    AND EXISTS (
+      SELECT 1 FROM fee_events f JOIN launch_drafts l ON l.id = f.launch_id
+      JOIN protocol_settings p ON p.key = 'sportpad_mint'
+      WHERE f.id = settlements.fee_event_id AND f.launch_id = ?3
+        AND l.reward_chain = 'solana' AND l.reward_mint = ?4
+        AND l.status = 'mainnet_published'
+        AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+        AND l.mainnet_reward_treasury = ?5
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM settlements other
+      WHERE other.id <> ?1 AND other.reward_swap_signature = ?2
     )
 `;
 
@@ -95,10 +142,29 @@ export const COMPLETE_PURCHASE_VAULT_SQL = `
   WHERE reward_vaults.chain = 'chiliz' AND reward_vaults.inventory_atomic = ?6
 `;
 
+export const COMPLETE_SOLANA_PURCHASE_VAULT_SQL = `
+  INSERT INTO reward_vaults
+    (id, launch_id, reward_mint, chain, owner_address, token_account, state,
+     inventory_atomic, last_observed_slot, updated_at)
+  VALUES (?1, ?2, ?3, 'solana', ?4, ?5, 'funded', ?6, ?7, CURRENT_TIMESTAMP)
+  ON CONFLICT(launch_id, reward_mint) DO UPDATE SET
+    inventory_atomic = excluded.inventory_atomic,
+    state = 'funded', owner_address = excluded.owner_address,
+    token_account = excluded.token_account,
+    last_observed_slot = excluded.last_observed_slot,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE reward_vaults.chain = 'solana' AND reward_vaults.inventory_atomic = ?8
+    AND reward_vaults.owner_address = ?4
+    AND (reward_vaults.token_account IS NULL OR reward_vaults.token_account = ?5)
+`;
+
 export const FENCE_CHILIZ_EPOCH_SQL = `
   UPDATE reward_epochs SET state = 'allocating', updated_at = CURRENT_TIMESTAMP
   WHERE id = ?1 AND state = 'accruing' AND funded_amount_atomic = ?2
-    AND ends_at <= CURRENT_TIMESTAMP
+    AND datetime(ends_at) <= CURRENT_TIMESTAMP
+    AND EXISTS (SELECT 1 FROM holder_snapshot_checkpoints c
+      WHERE c.epoch_id = reward_epochs.id
+        AND c.last_observed_at >= CAST(strftime('%s', reward_epochs.ends_at) AS INTEGER))
 `;
 
 export const DEFER_CHILIZ_EPOCH_SQL = `
@@ -107,7 +173,8 @@ export const DEFER_CHILIZ_EPOCH_SQL = `
   WHERE id = ?1 AND state = 'allocating' AND funded_amount_atomic = ?2
 `;
 
-export type AutomationJobType = "chiliz_reward_purchase" | "chiliz_claim_unwrap" | "solana_claim_payout" | "sportpad_buyback_burn";
+export type AutomationJobType = "chiliz_reward_purchase" | "chiliz_claim_unwrap" |
+  "solana_reward_purchase" | "solana_claim_payout" | "sportpad_buyback_burn";
 
 export type AutomationLaneControls = {
   mainnetEnabled: boolean;
@@ -124,6 +191,7 @@ export function laneAllowsJob(jobType: string, controls: AutomationLaneControls)
   if (!controls.mainnetEnabled) return false;
   switch (jobType) {
     case "chiliz_reward_purchase":
+    case "solana_reward_purchase":
       return controls.settlementEnabled && controls.rewardsEnabled
         && !controls.settlementPaused && !controls.rewardsPaused;
     case "chiliz_claim_unwrap":
@@ -139,7 +207,8 @@ export function laneAllowsJob(jobType: string, controls: AutomationLaneControls)
 
 export function pauseConditionSql(jobType: string) {
   switch (jobType) {
-    case "chiliz_reward_purchase": return "settlement_paused = 0 AND rewards_paused = 0";
+    case "chiliz_reward_purchase":
+    case "solana_reward_purchase": return "settlement_paused = 0 AND rewards_paused = 0";
     case "chiliz_claim_unwrap":
     case "solana_claim_payout": return "rewards_paused = 0";
     case "sportpad_buyback_burn": return "settlement_paused = 0 AND buyback_paused = 0";

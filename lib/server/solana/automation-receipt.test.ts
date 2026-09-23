@@ -19,7 +19,9 @@ import {
 } from "@solana/spl-token";
 
 import {
+  observedSolanaRewardPurchaseOutput,
   verifySolanaClaimPayoutReceipt,
+  verifySolanaRewardPurchaseReceipt,
   verifySportpadBuybackReceipts,
   type SolanaAutomationReceipt,
 } from "./automation-receipt.ts";
@@ -187,6 +189,31 @@ test("rejects worker-reported buyback output or input that differs from the chai
   assert.throws(() => verifySportpadBuybackReceipts({ ...buyback(), purchasedAmountAtomic: "995001" }), /swap_output_delta_mismatch/);
   assert.throws(() => verifySportpadBuybackReceipts({ ...buyback(), inputAmountLamports: "49999999" }), /swap_route_or_input_mismatch/);
   assert.throws(() => verifySportpadBuybackReceipts({ ...buyback(), treasury: recipient.toBase58() }), /unexpected_signer/);
+});
+
+test("credits a Solana Fan Token purchase only from the finalized treasury delta", () => {
+  const input = buyback();
+  assert.equal(observedSolanaRewardPurchaseOutput({
+    ...input.swap, mint: input.mint, tokenProgram: input.tokenProgram,
+    decimals: input.decimals, treasury: input.treasury,
+  }), "995000");
+  const result = verifySolanaRewardPurchaseReceipt({
+    ...input, ...input.swap, minimumOutputAtomic: "990000",
+  });
+  assert.equal(result.purchasedAmountAtomic, "995000");
+  assert.equal(result.inputDebitLamports, "50010000");
+  assert.equal(result.tokenAccount, outputAta.toBase58());
+});
+
+test("rejects underfilled, misreported, or unfinalized Solana reward purchases", () => {
+  const input = buyback();
+  const reward = { ...input, ...input.swap, minimumOutputAtomic: "990000" };
+  assert.throws(() => verifySolanaRewardPurchaseReceipt({ ...reward, minimumOutputAtomic: "995001" }), /reward_output_below_minimum/);
+  assert.throws(() => verifySolanaRewardPurchaseReceipt({ ...reward, purchasedAmountAtomic: "995001" }), /swap_output_delta_mismatch/);
+  assert.throws(() => verifySolanaRewardPurchaseReceipt({ ...reward,
+    status: { ...input.swap.status!, confirmationStatus: "confirmed" },
+  }), /not_finalized/);
+  assert.throws(() => verifySolanaRewardPurchaseReceipt({ ...reward, treasury: recipient.toBase58() }), /unexpected_signer/);
 });
 
 test("rejects an extra system transfer from the buyback treasury", () => {

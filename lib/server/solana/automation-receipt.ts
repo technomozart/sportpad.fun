@@ -267,6 +267,41 @@ function verifySwap(input: ReceiptEvidence & ExpectedToken & {
   return { slot: receipt.slot, purchased, debit, outputAta, mint, tokenProgram, treasury };
 }
 
+/** A reward purchase is credited only from the exact finalized SOL debit and
+ * Fan Token increase in the dedicated treasury ATA. A quote or worker report
+ * alone never establishes inventory for a holder epoch. */
+export function observedSolanaRewardPurchaseOutput(input: ReceiptEvidence & ExpectedToken & {
+  treasury: string;
+}) {
+  const receipt = finalized(input);
+  const { mint, tokenProgram } = tokenContext(input);
+  const treasury = key(input.treasury, "treasury_invalid");
+  const outputAta = getAssociatedTokenAddressSync(mint, treasury, false, tokenProgram);
+  const index = indexOf(accountKeys(receipt), outputAta);
+  const before = balanceAt(receipt, "pre", index, mint, treasury, tokenProgram, input.decimals);
+  const after = balanceAt(receipt, "post", index, mint, treasury, tokenProgram, input.decimals);
+  if (after <= before) reject("reward_output_missing");
+  return (after - before).toString();
+}
+
+export function verifySolanaRewardPurchaseReceipt(input: ReceiptEvidence & ExpectedToken & {
+  treasury: string;
+  inputAmountLamports: string;
+  purchasedAmountAtomic: string;
+  minimumOutputAtomic: string;
+}) {
+  const swap = verifySwap(input);
+  const minimum = positiveAtomic(input.minimumOutputAtomic, "minimum_output_invalid");
+  if (swap.purchased < minimum) reject("reward_output_below_minimum");
+  return {
+    swapSignature: input.signature,
+    swapSlot: swap.slot,
+    inputDebitLamports: swap.debit.toString(),
+    purchasedAmountAtomic: swap.purchased.toString(),
+    tokenAccount: swap.outputAta.toBase58(),
+  };
+}
+
 function verifyBurn(input: ReceiptEvidence & ExpectedToken & {
   treasury: string;
   amountAtomic: string;

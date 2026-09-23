@@ -17,6 +17,9 @@ const EXECUTE_URL = "https://api.jup.ag/swap/v2/execute";
 // The quote and transaction are now inspected before signing, but the buyback
 // lane remains closed until swap and burn have a durable replay-safe ledger.
 const BUYBACK_EXECUTION_SAFE = false;
+// Keep the new purchase lane dark until a funded end-to-end canary has
+// exercised the persisted order, finalized receipt, ledger, and claim path.
+const REWARD_PURCHASE_EXECUTION_SAFE = false;
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -40,7 +43,8 @@ const rewards = process.env.SOLANA_REWARD_VAULT_PRIVATE_KEY?.trim() ? keypairFro
 if (!buyback && !rewards) throw new Error("Configure at least one Solana automation key.");
 if (!rewards && !BUYBACK_EXECUTION_SAFE) throw new Error("Buyback execution is disabled pending durable swap/burn recovery.");
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}`, "confirmed");
-const workerId = `solana:${(buyback ?? rewards).publicKey.toBase58()}`;
+const buybackWorkerId = buyback ? `solana:${buyback.publicKey.toBase58()}` : null;
+const rewardWorkerId = rewards ? `solana:${rewards.publicKey.toBase58()}` : null;
 
 async function assertPublishedTreasuries() {
   const response = await fetch(`${baseUrl}/api/protocol/status`, {
@@ -77,7 +81,7 @@ async function api(body) {
   return payload;
 }
 
-async function buyAndBurn(payload, arm, jobId) {
+async function buyAndBurn(payload, arm, jobId, workerId) {
   if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_durable_recovery");
   if (!buyback) throw new Error("buyback_signer_not_configured");
   const mint = new PublicKey(payload.sportpadMint);
@@ -154,6 +158,69 @@ async function buyAndBurn(payload, arm, jobId) {
   return { txHash: burnSignature, sourceTxHash: executed.signature, outputAmountAtomic: purchased.toString() };
 }
 
+async function buyRewards(payload, arm, jobId, workerId) {
+  if (!REWARD_PURCHASE_EXECUTION_SAFE) throw new Error("reward_purchase_execution_disabled_pending_funded_canary");
+  if (!rewards) throw new Error("reward_signer_not_configured");
+  const mint = new PublicKey(payload.rewardMint);
+  const tokenProgram = await tokenProgramForMint(mint);
+  await arm();
+  // A separate confirmed ATA creation is required so the swap receipt has a
+  // pre-balance. It must never be mistaken for the swap's reward inventory.
+  const tokenAccount = await getOrCreateAssociatedTokenAccount(
+    connection, rewards, mint, rewards.publicKey, false, "confirmed", undefined, tokenProgram,
+  );
+  const order = new URL(ORDER_URL);
+  order.searchParams.set("inputMint", SOL);
+  order.searchParams.set("outputMint", mint.toBase58());
+  order.searchParams.set("amount", payload.rewardAmountLamports);
+  order.searchParams.set("taker", rewards.publicKey.toBase58());
+  order.searchParams.set("slippageBps", "100");
+  order.searchParams.set("excludeRouters", "jupiterz,dflow,okx");
+  const orderResponse = await fetch(order, {
+    headers: { Accept: "application/json", "x-api-key": jupiterKey },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const quote = await orderResponse.json().catch(() => ({}));
+  if (!orderResponse.ok || !quote.transaction) throw new Error("reward_jupiter_route_unavailable");
+  const inspection = await inspectBuybackOrder({
+    connection, quote, signer: rewards.publicKey, mint, tokenProgram,
+    amountLamports: payload.rewardAmountLamports,
+  });
+  if (!inspection.outputAta.equals(tokenAccount.address)) throw new Error("reward_output_ata_mismatch");
+  const transaction = inspection.transaction;
+  transaction.sign([rewards]);
+  const expectedSignature = bs58.encode(transaction.signatures[0]);
+  const signedTransactionBase64 = Buffer.from(transaction.serialize()).toString("base64");
+  const prepared = await api({
+    action: "prepare_reward_swap", jobId, workerId,
+    providerRequestId: quote.requestId,
+    unsignedTransactionBase64: quote.transaction,
+    signedTransactionBase64,
+    inputAmountLamports: payload.rewardAmountLamports,
+    outputMint: mint.toBase58(),
+    minimumOutputAtomic: inspection.minOutput.toString(),
+    lastValidBlockHeight: quote.lastValidBlockHeight,
+  });
+  if (!prepared.prepared || prepared.txSignature !== expectedSignature) {
+    throw new Error("reward_order_intent_not_persisted");
+  }
+  const executeResponse = await fetch(EXECUTE_URL, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": jupiterKey },
+    body: JSON.stringify({ signedTransaction: signedTransactionBase64,
+      requestId: quote.requestId, lastValidBlockHeight: quote.lastValidBlockHeight }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const executed = await executeResponse.json().catch(() => ({}));
+  if (!executeResponse.ok || executed.status !== "Success" ||
+    executed.signature !== expectedSignature) throw new Error("reward_swap_broadcast_unknown_or_failed");
+  const receipt = await connection.getTransaction(executed.signature, {
+    commitment: "confirmed", maxSupportedTransactionVersion: 0,
+  });
+  const { purchased } = inspectBuybackSettlement(receipt, inspection);
+  return { txHash: executed.signature, outputAmountAtomic: purchased.toString() };
+}
+
 async function paySolanaClaim(payload, arm) {
   if (!rewards) throw new Error("reward_signer_not_configured");
   const mint = new PublicKey(payload.tokenAddress);
@@ -185,20 +252,32 @@ function retryable(error) {
 }
 
 async function runOnce() {
-  const jobTypes = [];
-  if (buyback && BUYBACK_EXECUTION_SAFE) jobTypes.push("sportpad_buyback_burn");
-  if (rewards) jobTypes.push("solana_claim_payout");
-  const { job } = await api({ action: "lease", workerId, jobTypes });
-  if (!job) return false;
-  try {
-    await assertPublishedTreasuries();
-    const arm = async () => { await api({ action: "arm", jobId: job.id, workerId }); };
-    const result = job.type === "sportpad_buyback_burn" ? await buyAndBurn(job.payload, arm, job.id) : await paySolanaClaim(job.payload, arm);
-    await api({ action: "complete", jobId: job.id, workerId, ...result });
-  } catch (error) {
-    await api({ action: "fail", jobId: job.id, workerId, errorCode: errorCode(error), retryable: retryable(error) });
+  const lanes = [];
+  if (rewardWorkerId) lanes.push({ workerId: rewardWorkerId,
+    jobTypes: REWARD_PURCHASE_EXECUTION_SAFE
+      ? ["solana_reward_purchase", "solana_claim_payout"] : ["solana_claim_payout"] });
+  if (buybackWorkerId && BUYBACK_EXECUTION_SAFE) lanes.push({ workerId: buybackWorkerId,
+    jobTypes: ["sportpad_buyback_burn"] });
+  for (const lane of lanes) {
+    const { workerId, jobTypes } = lane;
+    const { job } = await api({ action: "lease", workerId, jobTypes });
+    if (!job) continue;
+    try {
+      await assertPublishedTreasuries();
+      const arm = async () => { await api({ action: "arm", jobId: job.id, workerId }); };
+      const result = job.type === "sportpad_buyback_burn"
+        ? await buyAndBurn(job.payload, arm, job.id, workerId)
+        : job.type === "solana_reward_purchase"
+          ? await buyRewards(job.payload, arm, job.id, workerId)
+          : await paySolanaClaim(job.payload, arm);
+      await api({ action: "complete", jobId: job.id, workerId, ...result });
+    } catch (error) {
+      await api({ action: "fail", jobId: job.id, workerId,
+        errorCode: errorCode(error), retryable: retryable(error) });
+    }
+    return true;
   }
-  return true;
+  return false;
 }
 
 await assertPublishedTreasuries();

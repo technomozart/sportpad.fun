@@ -247,6 +247,12 @@ async function startEpoch(launchId: string, actor: string) {
 }
 
 async function closeEpoch(epochId: string) {
+  const automatic = await database.prepare(`
+    SELECT 1 AS owned FROM protocol_events
+    WHERE entity_type = 'epoch' AND entity_id = ?1
+      AND event_type = 'automatic_reward_epoch_opened' LIMIT 1
+  `).bind(epochId).first<{ owned: number }>();
+  if (automatic) throw new Error("This reward epoch is managed by the automatic worker.");
   const epoch = await database.prepare(`
     SELECT e.id, e.launch_id, e.state, e.funded_amount_atomic,
       e.allocated_amount_atomic, e.dust_amount_atomic, e.reward_decimals,

@@ -17,6 +17,7 @@ import bs58 from "bs58";
 import {
   inspectPreparedAutomaticBuybackOrder,
   verifyPersistedAutomaticBuybackIntent,
+  verifyPersistedAutomaticRewardIntent,
   type PersistedAutomaticBuybackIntent,
 } from "./buyback-intent-proof.ts";
 import type { SolanaAutomationReceipt } from "./automation-receipt.ts";
@@ -86,6 +87,27 @@ test("binds a finalized swap to one persisted signed Jupiter message", async () 
   const proof = await verifyPersistedAutomaticBuybackIntent(input);
   assert.equal(proof.txSignature, input.expected.swapSignature);
   assert.equal(proof.providerRequestId, "jupiter-order-123");
+});
+
+test("binds a Solana reward purchase to its own persisted signer and mint", async () => {
+  const input = await fixture();
+  const reward = {
+    ...input,
+    expected: { settlementId: input.expected.settlementId, treasury: input.expected.treasury,
+      rewardMint: input.expected.sportpadMint, inputAmountLamports: input.expected.inputAmountLamports,
+      purchasedAmountAtomic: input.expected.purchasedAmountAtomic, swapSignature: input.expected.swapSignature },
+    intent: { ...input.intent,
+      idempotency_key: `automation:reward:swap:${input.expected.settlementId}`,
+      signer_role: "reward_treasury", action: "solana_reward_purchase_automation" },
+  };
+  const proof = await verifyPersistedAutomaticRewardIntent(reward);
+  assert.equal(proof.txSignature, reward.expected.swapSignature);
+  await assert.rejects(verifyPersistedAutomaticRewardIntent({ ...reward,
+    intent: { ...reward.intent, signer_role: "buyback_treasury" },
+  }), /job_identity_mismatch/);
+  await assert.rejects(verifyPersistedAutomaticRewardIntent({ ...reward,
+    expected: { ...reward.expected, rewardMint: Keypair.generate().publicKey.toBase58() },
+  }), /swap_terms_mismatch/);
 });
 
 test("rejects a missing pre-broadcast intent", async () => {

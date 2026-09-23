@@ -152,7 +152,7 @@ async function activeEpochs(database: D1Database, epochId?: string) {
     FROM reward_epochs e
     JOIN launch_drafts l ON l.id = e.launch_id
     WHERE e.state = 'accruing'
-      AND l.status = 'mainnet_published'
+      AND l.status IN ('mainnet_published', 'mainnet_suspended')
       AND l.mainnet_mint IS NOT NULL
       AND l.mainnet_reward_treasury IS NOT NULL
       AND l.mainnet_buyback_treasury IS NOT NULL

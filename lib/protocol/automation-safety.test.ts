@@ -4,10 +4,13 @@ import test from "node:test";
 
 import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBACK_SETTLEMENT_SQL, COMPLETE_CLAIM_SQL,
   COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
+  COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL, COMPLETE_SOLANA_PURCHASE_VAULT_SQL,
+  COMPLETE_RECONCILED_JOB_SQL,
   DEFER_CHILIZ_EPOCH_SQL, ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL,
   failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
   FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL,
   laneAllowsJob, ownsActiveLease, ownsBroadcast, pauseConditionSql,
+  REQUEUE_UNPREPARED_REWARD_JOB_SQL,
   QUEUE_CLAIM_JOB_SQL, QUEUE_CLAIM_TRANSITION_SQL } from "./automation-safety.ts";
 
 function atomic(db: DatabaseSync, writes: (() => void)[]) {
@@ -45,9 +48,15 @@ test("mature epoch fencing is exclusive and an empty epoch can be reopened", () 
       id TEXT PRIMARY KEY, state TEXT, funded_amount_atomic TEXT,
       ends_at TEXT, updated_at TEXT
     );
+    CREATE TABLE holder_snapshot_checkpoints (
+      epoch_id TEXT PRIMARY KEY, last_observed_at INTEGER NOT NULL
+    );
     INSERT INTO reward_epochs VALUES ('epoch', 'accruing', '1000000000000000000',
-      datetime(CURRENT_TIMESTAMP, '-1 hour'), NULL);
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour'), NULL);
   `);
+  assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
+  db.exec(`INSERT INTO holder_snapshot_checkpoints VALUES
+    ('epoch', CAST(strftime('%s', 'now') AS INTEGER))`);
   assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 1);
   assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
   assert.equal(db.prepare("SELECT state FROM reward_epochs").get()?.state, "allocating");
@@ -130,6 +139,108 @@ test("two purchase completions cannot lose a vault increment or partially commit
   assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "20000000000000000000");
   assert.throws(() => complete("job-a", "settlement-a", "0xtx-a", "20000000000000000000", "24000000000000000000"), /malformed JSON/);
   assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "20000000000000000000");
+  db.close();
+});
+
+test("a Solana reward purchase credits only its community launch and rolls back a stale vault write", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, state TEXT, tx_hash TEXT,
+      error_code TEXT, leased_until INTEGER, updated_at TEXT);
+    CREATE TABLE protocol_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT, reward_mint TEXT,
+      mainnet_mint TEXT, mainnet_reward_treasury TEXT, status TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT, reward_amount_atomic TEXT,
+      reward_swap_signature TEXT, buyback_swap_signature TEXT, burn_signature TEXT,
+      state TEXT, updated_at TEXT);
+    CREATE TABLE reward_vaults (id TEXT PRIMARY KEY, launch_id TEXT, reward_mint TEXT,
+      chain TEXT, owner_address TEXT, token_account TEXT, state TEXT,
+      inventory_atomic TEXT, last_observed_slot INTEGER, updated_at TEXT,
+      UNIQUE(launch_id, reward_mint));
+    INSERT INTO protocol_settings VALUES ('sportpad_mint', 'SPORTPAD');
+    INSERT INTO launch_drafts VALUES ('community', 'solana', 'FAN', 'COMMUNITY', 'reward-treasury', 'mainnet_published'),
+      ('platform', 'solana', 'FAN', 'SPORTPAD', 'reward-treasury', 'mainnet_published');
+    INSERT INTO fee_events VALUES ('fee-a', 'community'), ('fee-b', 'community'),
+      ('fee-platform', 'platform');
+    INSERT INTO settlements VALUES
+      ('settlement-a', 'fee-a', '50000000', NULL, NULL, NULL, 'reconciled', NULL),
+      ('settlement-b', 'fee-b', '50000000', NULL, NULL, NULL, 'reconciled', NULL),
+      ('platform', 'fee-platform', '50000000', NULL, NULL, NULL, 'reconciled', NULL);
+    INSERT INTO automation_jobs VALUES ('job-a', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL),
+      ('job-b', 'broadcasting', NULL, 'broadcasting:worker', NULL, NULL);
+    INSERT INTO reward_vaults VALUES ('vault', 'community', 'FAN', 'solana',
+      'reward-treasury', 'fan-ata', 'funded', '100', NULL, NULL);
+  `);
+  const complete = (jobId: string, settlementId: string, tx: string, oldValue: string, newValue: string) => atomic(db, [
+    () => { db.prepare(COMPLETE_BROADCAST_JOB_SQL).run(jobId, tx, "broadcasting:worker"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL).run(settlementId, tx,
+      "community", "FAN", "reward-treasury", "50000000"); },
+    () => assertOne(db),
+    () => { db.prepare(COMPLETE_SOLANA_PURCHASE_VAULT_SQL).run("unused", "community",
+      "FAN", "reward-treasury", "fan-ata", newValue, 100, oldValue); },
+    () => assertOne(db),
+  ]);
+  assert.equal(db.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL).run("platform", "platform-swap",
+    "platform", "FAN", "reward-treasury", "50000000").changes, 0);
+  db.exec("UPDATE launch_drafts SET status = 'mainnet_suspended' WHERE id = 'community'");
+  assert.equal(db.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL).run("settlement-a", "suspended-swap",
+    "community", "FAN", "reward-treasury", "50000000").changes, 0);
+  db.exec("UPDATE launch_drafts SET status = 'mainnet_published' WHERE id = 'community'");
+  complete("job-a", "settlement-a", "swap-a", "100", "140");
+  assert.throws(() => complete("job-b", "settlement-b", "swap-b", "100", "160"), /malformed JSON/);
+  assert.equal(db.prepare("SELECT reward_swap_signature FROM settlements WHERE id = 'settlement-b'").get()?.reward_swap_signature, null);
+  assert.equal(db.prepare("SELECT state FROM automation_jobs WHERE id = 'job-b'").get()?.state, "broadcasting");
+  complete("job-b", "settlement-b", "swap-b", "140", "200");
+  assert.equal(db.prepare("SELECT inventory_atomic FROM reward_vaults").get()?.inventory_atomic, "200");
+  assert.equal(db.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL).run("settlement-a", "swap-a",
+    "community", "FAN", "reward-treasury", "50000000").changes, 0);
+  db.close();
+});
+
+test("only the same signed Solana reward swap can complete a held job", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, state TEXT,
+      tx_hash TEXT, error_code TEXT, leased_until INTEGER, updated_at TEXT);
+    INSERT INTO automation_jobs VALUES
+      ('held', 'solana_reward_purchase', 'reconciliation_required',
+        'signed-swap', 'swap_timeout', NULL, NULL),
+      ('other', 'sportpad_buyback_burn', 'reconciliation_required',
+        'burn', 'swap_timeout', NULL, NULL);
+  `);
+  assert.equal(db.prepare(COMPLETE_RECONCILED_JOB_SQL).run("held", "another-swap").changes, 0);
+  assert.equal(db.prepare(COMPLETE_RECONCILED_JOB_SQL).run("other", "burn").changes, 0);
+  assert.equal(db.prepare(COMPLETE_RECONCILED_JOB_SQL).run("held", "signed-swap").changes, 1);
+  assert.equal(db.prepare(COMPLETE_RECONCILED_JOB_SQL).run("held", "signed-swap").changes, 0);
+  db.close();
+});
+
+test("only an old unprepared reward job can be automatically requeued", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, entity_id TEXT,
+      state TEXT, tx_hash TEXT, error_code TEXT, leased_until INTEGER,
+      available_at INTEGER, updated_at TEXT);
+    CREATE TABLE transaction_intents (settlement_id TEXT, action TEXT);
+    INSERT INTO automation_jobs VALUES
+      ('unprepared', 'solana_reward_purchase', 'a', 'reconciliation_required', NULL,
+        'quote_failed', NULL, 0, datetime('now', '-10 minutes')),
+      ('prepared', 'solana_reward_purchase', 'b', 'reconciliation_required', NULL,
+        'swap_timeout', NULL, 0, datetime('now', '-10 minutes')),
+      ('reported', 'solana_reward_purchase', 'c', 'reconciliation_required', 'tx-c',
+        'swap_timeout', NULL, 0, datetime('now', '-10 minutes')),
+      ('fresh', 'solana_reward_purchase', 'd', 'broadcasting', NULL,
+        'broadcasting:solana:treasury', NULL, 0, CURRENT_TIMESTAMP);
+    INSERT INTO transaction_intents VALUES ('b', 'solana_reward_purchase_automation');
+  `);
+  assert.equal(db.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
+    .run(100, "broadcasting:solana:treasury").changes, 1);
+  assert.equal(db.prepare("SELECT state FROM automation_jobs WHERE id = 'unprepared'").get()?.state, "queued");
+  for (const id of ["prepared", "reported", "fresh"]) {
+    assert.notEqual(db.prepare("SELECT state FROM automation_jobs WHERE id = ?1").get(id)?.state, "queued");
+  }
   db.close();
 });
 
@@ -244,15 +355,18 @@ test("financial execution remains statically held pending ledger verification", 
 test("financial lanes respect their flags and independent pause controls", () => {
   assert.equal(laneAllowsJob("chiliz_reward_purchase", openLanes), true);
   assert.equal(laneAllowsJob("chiliz_claim_unwrap", openLanes), true);
+  assert.equal(laneAllowsJob("solana_reward_purchase", openLanes), true);
   assert.equal(laneAllowsJob("solana_claim_payout", openLanes), true);
   assert.equal(laneAllowsJob("sportpad_buyback_burn", openLanes), true);
-  for (const type of ["chiliz_reward_purchase", "chiliz_claim_unwrap", "solana_claim_payout", "sportpad_buyback_burn"] as const) {
+  for (const type of ["chiliz_reward_purchase", "chiliz_claim_unwrap", "solana_reward_purchase", "solana_claim_payout", "sportpad_buyback_burn"] as const) {
     assert.equal(laneAllowsJob(type, { ...openLanes, mainnetEnabled: false }), false);
   }
   assert.equal(laneAllowsJob("chiliz_reward_purchase", { ...openLanes, settlementPaused: true }), false);
+  assert.equal(laneAllowsJob("solana_reward_purchase", { ...openLanes, settlementPaused: true }), false);
   assert.equal(laneAllowsJob("sportpad_buyback_burn", { ...openLanes, settlementPaused: true }), false);
   assert.equal(laneAllowsJob("chiliz_claim_unwrap", { ...openLanes, settlementPaused: true }), true);
   assert.equal(laneAllowsJob("chiliz_reward_purchase", { ...openLanes, rewardsPaused: true }), false);
+  assert.equal(laneAllowsJob("solana_reward_purchase", { ...openLanes, rewardsPaused: true }), false);
   assert.equal(laneAllowsJob("chiliz_claim_unwrap", { ...openLanes, rewardsPaused: true }), false);
   assert.equal(laneAllowsJob("solana_claim_payout", { ...openLanes, claimsEnabled: false }), false);
   assert.equal(laneAllowsJob("sportpad_buyback_burn", { ...openLanes, buybackPaused: true }), false);
@@ -261,6 +375,7 @@ test("financial lanes respect their flags and independent pause controls", () =>
 
 test("arming checks the matching database pause columns atomically", () => {
   assert.equal(pauseConditionSql("chiliz_reward_purchase"), "settlement_paused = 0 AND rewards_paused = 0");
+  assert.equal(pauseConditionSql("solana_reward_purchase"), "settlement_paused = 0 AND rewards_paused = 0");
   assert.equal(pauseConditionSql("chiliz_claim_unwrap"), "rewards_paused = 0");
   assert.equal(pauseConditionSql("solana_claim_payout"), "rewards_paused = 0");
   assert.equal(pauseConditionSql("sportpad_buyback_burn"), "settlement_paused = 0 AND buyback_paused = 0");

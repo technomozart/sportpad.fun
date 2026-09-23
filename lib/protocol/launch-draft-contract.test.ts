@@ -137,7 +137,7 @@ test("mainnet launch fails closed, freezes treasuries, and verifies exact onchai
   assert.match(configSource, /SOLANA_BUYBACK_TREASURY_ADDRESS/);
   assert.match(walletSessionSource, /sportpad_mainnet_wallet_session_v1/);
   assert.match(routeSource, /checkRewardRoute/);
-  assert.match(routeSource, /readLaunchAutomationReadiness\(env\.DB, rewardChain, config\.buybackTreasury\)/);
+  assert.match(routeSource, /readLaunchAutomationReadiness\(env\.DB, rewardChain, config\.buybackTreasury, config\.rewardTreasury\)/);
   assert.ok(
     routeSource.indexOf('if (input.action === "prepare")') < routeSource.indexOf("readLaunchAutomationReadiness(env.DB, rewardChain"),
     "the automation gate must run inside prepare, before a new mainnet coin can be signed",

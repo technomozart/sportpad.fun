@@ -46,6 +46,7 @@ export function evaluateLaunchAutomationReadiness(
   maintenanceRuns: MaintenanceRun[],
   rewardChain: RewardChain,
   buybackTreasury: string | null,
+  rewardTreasury: string | null,
   nowMs: number = Date.now(),
 ): LaunchAutomationReadiness {
   const missing: string[] = [];
@@ -66,9 +67,9 @@ export function evaluateLaunchAutomationReadiness(
       missing.push(requirement.label);
     }
   }
-  const solana = rows.find((row) => row.key === `automation:solana:${buybackTreasury}`);
-  const solanaJobs = solana ? activeJobTypes(solana, nowMs) : new Set<string>();
-  if (!buybackTreasury || !solanaJobs.has("sportpad_buyback_burn")) {
+  const buybackHeartbeat = rows.find((row) => row.key === `automation:solana:${buybackTreasury}`);
+  const buybackJobs = buybackHeartbeat ? activeJobTypes(buybackHeartbeat, nowMs) : new Set<string>();
+  if (!buybackTreasury || !buybackJobs.has("sportpad_buyback_burn")) {
     missing.push("active Solana buyback worker");
   }
 
@@ -79,7 +80,10 @@ export function evaluateLaunchAutomationReadiness(
     );
     if (!chilizReady) missing.push("active Chiliz reward and claim worker");
   } else {
-    if (!solanaJobs.has("solana_claim_payout")) missing.push("active Solana reward payout worker");
+    const rewardHeartbeat = rows.find((row) => row.key === `automation:solana:${rewardTreasury}`);
+    const rewardJobs = rewardHeartbeat ? activeJobTypes(rewardHeartbeat, nowMs) : new Set<string>();
+    if (!rewardTreasury || !rewardJobs.has("solana_reward_purchase")) missing.push("active Solana reward purchase worker");
+    if (!rewardTreasury || !rewardJobs.has("solana_claim_payout")) missing.push("active Solana reward payout worker");
   }
 
   return { ready: missing.length === 0, missing };

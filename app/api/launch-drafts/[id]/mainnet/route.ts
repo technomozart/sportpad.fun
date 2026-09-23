@@ -109,7 +109,7 @@ export async function GET(request: Request, context: MainnetRouteContext) {
     const config = readMainnetConfig();
     const automation = draft.status === "mainnet_published"
       ? { ready: false, missing: [] }
-      : await readLaunchAutomationReadiness(env.DB, draft.rewardChain as RewardChain, config.buybackTreasury);
+      : await readLaunchAutomationReadiness(env.DB, draft.rewardChain as RewardChain, config.buybackTreasury, config.rewardTreasury);
     return privateJson({ mainnet: serializeMainnetState(draft, automation) });
   } catch (error) {
     logFailure("mainnet_state_get_failed", error);
@@ -160,7 +160,7 @@ export async function POST(request: Request, context: MainnetRouteContext) {
       if (session.walletAddress === config.rewardTreasury || session.walletAddress === config.buybackTreasury) {
         return privateJson({ error: "The creator wallet must be different from both protocol treasury addresses." }, 409);
       }
-      const automation = await readLaunchAutomationReadiness(env.DB, rewardChain, config.buybackTreasury);
+      const automation = await readLaunchAutomationReadiness(env.DB, rewardChain, config.buybackTreasury, config.rewardTreasury);
       if (!automation.ready) {
         return privateJson({ error: `Mainnet launches are paused until reward and buyback automation are verified. Waiting for: ${automation.missing.join(", ")}.` }, 409);
       }
