@@ -4,7 +4,8 @@ import test from "node:test";
 
 import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBACK_SETTLEMENT_SQL, COMPLETE_CLAIM_SQL,
   COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
-  DEFER_CHILIZ_EPOCH_SQL, failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
+  DEFER_CHILIZ_EPOCH_SQL, ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL,
+  failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
   FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL,
   laneAllowsJob, ownsActiveLease, ownsBroadcast, pauseConditionSql,
   QUEUE_CLAIM_JOB_SQL, QUEUE_CLAIM_TRANSITION_SQL } from "./automation-safety.ts";
@@ -138,8 +139,11 @@ test("a settlement is complete only after both reward and buyback receipts, in e
     CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT, reward_swap_signature TEXT,
       buyback_swap_signature TEXT, burn_signature TEXT, state TEXT, updated_at TEXT);
     CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
-    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT, reward_mint TEXT, reward_wrapped_contract TEXT);
-    INSERT INTO launch_drafts VALUES ('launch', 'chiliz', 'v2-token', NULL);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT, reward_mint TEXT, reward_wrapped_contract TEXT,
+      mainnet_mint TEXT, status TEXT);
+    CREATE TABLE protocol_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO protocol_settings VALUES ('sportpad_mint', 'sportpad-mint');
+    INSERT INTO launch_drafts VALUES ('launch', 'chiliz', 'v2-token', NULL, 'community-mint', 'mainnet_published');
     INSERT INTO fee_events VALUES ('fee-a', 'launch'), ('fee-b', 'launch');
     INSERT INTO settlements VALUES ('settlement-a', 'fee-a', NULL, NULL, NULL, 'reconciled', NULL),
       ('settlement-b', 'fee-b', NULL, NULL, NULL, 'reconciled', NULL);
@@ -157,6 +161,34 @@ test("a settlement is complete only after both reward and buyback receipts, in e
   db.prepare(COMPLETE_BUYBACK_SETTLEMENT_SQL).run("settlement-b", "swap-b", "burn-b");
   assertOne(db);
   assert.equal(db.prepare("SELECT state FROM settlements WHERE id = 'settlement-b'").get()?.state, "complete");
+  db.close();
+});
+
+test("SPORTPAD's own fees cannot seed community buyback jobs or complete a burn settlement", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, mainnet_mint TEXT, status TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT, buyback_amount_atomic TEXT,
+      buyback_swap_signature TEXT, burn_signature TEXT, reward_swap_signature TEXT, state TEXT,
+      created_at TEXT, updated_at TEXT);
+    CREATE TABLE protocol_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO protocol_settings VALUES ('sportpad_mint', 'sportpad-mint');
+    INSERT INTO launch_drafts VALUES ('platform', 'sportpad-mint', 'mainnet_published'),
+      ('community', 'community-mint', 'mainnet_published'),
+      ('unverified', NULL, 'draft');
+    INSERT INTO fee_events VALUES ('fee-platform', 'platform'), ('fee-community', 'community'),
+      ('fee-dust', 'community'), ('fee-unverified', 'unverified');
+    INSERT INTO settlements VALUES
+      ('platform', 'fee-platform', '20', NULL, NULL, NULL, 'reconciled', '2026-01-01', NULL),
+      ('community', 'fee-community', '20', NULL, NULL, NULL, 'reconciled', '2026-01-02', NULL),
+      ('dust', 'fee-dust', '0', NULL, NULL, NULL, 'reconciled', '2026-01-03', NULL),
+      ('unverified', 'fee-unverified', '20', NULL, NULL, NULL, 'reconciled', '2026-01-04', NULL);
+  `);
+  const eligible = db.prepare(ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL).all("sportpad-mint");
+  assert.deepEqual(eligible.map((row) => row.settlement_id), ["community"]);
+  assert.equal(db.prepare(COMPLETE_BUYBACK_SETTLEMENT_SQL).run("platform", "swap-platform", "burn-platform").changes, 0);
+  assert.equal(db.prepare(COMPLETE_BUYBACK_SETTLEMENT_SQL).run("community", "swap-community", "burn-community").changes, 1);
   db.close();
 });
 

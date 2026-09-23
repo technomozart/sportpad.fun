@@ -24,5 +24,17 @@ export const INSERT_AUTOMATIC_BUYBACK_INTENT_SQL = `
   ) AND EXISTS (
     SELECT 1 FROM protocol_controls c WHERE c.key = 'global'
       AND c.settlement_paused = 0 AND c.buyback_paused = 0
+  ) AND EXISTS (
+    SELECT 1 FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+    JOIN launch_drafts l ON l.id = f.launch_id
+    JOIN protocol_settings p ON p.key = 'sportpad_mint'
+    WHERE s.id = ?3 AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
+      AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
+      AND s.buyback_amount_atomic = ?14
+      AND s.buyback_amount_atomic GLOB '[1-9]*'
+      AND s.buyback_amount_atomic NOT GLOB '*[^0-9]*'
+      AND l.status IN ('mainnet_published', 'mainnet_suspended')
+      AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+      AND l.mainnet_buyback_treasury = ?4 AND p.value = ?13
   )
 `;

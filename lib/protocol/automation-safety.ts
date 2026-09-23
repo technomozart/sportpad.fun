@@ -57,10 +57,31 @@ export const COMPLETE_BUYBACK_SETTLEMENT_SQL = `
     updated_at = CURRENT_TIMESTAMP
   WHERE id = ?1 AND buyback_swap_signature IS NULL AND burn_signature IS NULL
     AND state IN ('reconciled', 'distributed', 'reward_acquired')
+    AND EXISTS (
+      SELECT 1 FROM fee_events f JOIN launch_drafts l ON l.id = f.launch_id
+      JOIN protocol_settings p ON p.key = 'sportpad_mint'
+      WHERE f.id = settlements.fee_event_id AND l.mainnet_mint IS NOT NULL
+        AND l.mainnet_mint <> p.value
+    )
     AND NOT EXISTS (
       SELECT 1 FROM settlements other
       WHERE other.id <> ?1 AND other.buyback_swap_signature = ?2
     )
+`;
+
+// SPORTPAD's own creator fees belong to project development. Exclude its mint
+// again at job creation even though the fee indexer normally skips it.
+export const ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL = `
+  SELECT s.id AS settlement_id, s.buyback_amount_atomic, f.launch_id
+  FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+  JOIN launch_drafts l ON l.id = f.launch_id
+  WHERE l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> ?1
+    AND l.status IN ('mainnet_published', 'mainnet_suspended')
+    AND s.buyback_amount_atomic GLOB '[1-9]*'
+    AND s.buyback_amount_atomic NOT GLOB '*[^0-9]*'
+    AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
+    AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
+  ORDER BY s.created_at ASC LIMIT 25
 `;
 
 export const COMPLETE_PURCHASE_VAULT_SQL = `

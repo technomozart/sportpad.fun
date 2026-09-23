@@ -10,7 +10,8 @@ import { CHILIZ_ASSET_MIGRATION_VERIFIED, verifyChilizPurchaseReceipt,
   verifyChilizTransferReceipt } from "@/lib/protocol/chiliz-receipts";
 import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBACK_SETTLEMENT_SQL, COMPLETE_CLAIM_SQL,
   COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
-  DEFER_CHILIZ_EPOCH_SQL, failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
+  DEFER_CHILIZ_EPOCH_SQL, ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL,
+  failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
   FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL, laneAllowsJob,
   ownsActiveLease, ownsBroadcast, pauseConditionSql,
   type AutomationLaneControls } from "@/lib/protocol/automation-safety";
@@ -141,13 +142,8 @@ async function seedBuybackJobs(database: D1Database) {
   const setting = await database.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
     .first<{ value: string }>();
   if (!setting?.value) return;
-  const rows = await database.prepare(`
-    SELECT s.id AS settlement_id, s.buyback_amount_atomic, f.launch_id
-    FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
-    WHERE s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
-      AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
-    ORDER BY s.created_at ASC LIMIT 25
-  `).all<{ settlement_id: string; buyback_amount_atomic: string; launch_id: string }>();
+  const rows = await database.prepare(ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL)
+    .bind(setting.value).all<{ settlement_id: string; buyback_amount_atomic: string; launch_id: string }>();
   if (!rows.results.length) return;
   const now = Date.now();
   await database.batch(rows.results.map((row) => database.prepare(`
@@ -515,18 +511,25 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
   } else if (job.job_type === "sportpad_buyback_burn") {
     const [row, setting] = await Promise.all([
       database.prepare(`
-        SELECT s.buyback_amount_atomic, s.buyback_swap_signature, s.burn_signature, f.launch_id
+        SELECT s.buyback_amount_atomic, s.buyback_swap_signature, s.burn_signature, f.launch_id,
+          l.mainnet_mint, l.mainnet_buyback_treasury, l.status AS launch_status
         FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+        JOIN launch_drafts l ON l.id = f.launch_id
         WHERE s.id = ?1 AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
           AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
       `).bind(job.entity_id).first<{
         buyback_amount_atomic: string; buyback_swap_signature: string | null;
-        burn_signature: string | null; launch_id: string;
+        burn_signature: string | null; launch_id: string; mainnet_mint: string | null;
+        mainnet_buyback_treasury: string | null; launch_status: string;
       }>(),
       database.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
         .first<{ value: string }>(),
     ]);
     if (!row || !setting?.value || !sourceTxHash || !reportedOutput ||
+      !row.mainnet_mint || row.mainnet_mint === setting.value ||
+      row.mainnet_buyback_treasury !== config.buybackTreasury ||
+      !["mainnet_published", "mainnet_suspended"].includes(row.launch_status) ||
+      !/^[1-9][0-9]*$/.test(row.buyback_amount_atomic) ||
       payload.settlementId !== job.entity_id || payload.launchId !== row.launch_id ||
       payload.amountLamports !== row.buyback_amount_atomic ||
       payload.sportpadMint !== setting.value ||
@@ -600,13 +603,14 @@ async function persistPreparedBuybackSwap(database: D1Database, job: AutomationR
   const [settlement, setting] = await Promise.all([
     database.prepare(`
       SELECT s.buyback_amount_atomic, s.state, f.launch_id, l.mainnet_mint,
-        l.mainnet_buyback_treasury
+        l.mainnet_buyback_treasury, l.status AS launch_status
       FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
       JOIN launch_drafts l ON l.id = f.launch_id
       WHERE s.id = ?1 AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
     `).bind(job.entity_id).first<{
       buyback_amount_atomic: string; state: string; launch_id: string;
       mainnet_mint: string | null; mainnet_buyback_treasury: string | null;
+      launch_status: string;
     }>(),
     database.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
       .first<{ value: string }>(),
@@ -615,6 +619,8 @@ async function persistPreparedBuybackSwap(database: D1Database, job: AutomationR
   if (!settlement || !setting?.value || !settlement.mainnet_mint ||
     settlement.mainnet_mint === setting.value ||
     settlement.mainnet_buyback_treasury !== config.buybackTreasury ||
+    !["mainnet_published", "mainnet_suspended"].includes(settlement.launch_status) ||
+    !/^[1-9][0-9]*$/.test(settlement.buyback_amount_atomic) ||
     !["reconciled", "distributed", "reward_acquired"].includes(settlement.state) ||
     payload.settlementId !== job.entity_id || payload.launchId !== settlement.launch_id ||
     payload.sportpadMint !== setting.value || payload.amountLamports !== settlement.buyback_amount_atomic ||
@@ -710,6 +716,18 @@ export async function POST(request: Request) {
         error_code = ?3, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?1 AND state = 'leased' AND error_code = ?2 AND leased_until >= ?4
         AND EXISTS (SELECT 1 FROM protocol_controls WHERE key = 'global' AND ${pauseSql})
+        AND (job_type <> 'sportpad_buyback_burn' OR EXISTS (
+          SELECT 1 FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+          JOIN launch_drafts l ON l.id = f.launch_id
+          JOIN protocol_settings p ON p.key = 'sportpad_mint'
+          WHERE s.id = automation_jobs.entity_id
+            AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
+            AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
+            AND l.status IN ('mainnet_published', 'mainnet_suspended')
+            AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+            AND s.buyback_amount_atomic GLOB '[1-9]*'
+            AND s.buyback_amount_atomic NOT GLOB '*[^0-9]*'
+        ))
     `).bind(job.id, `leased:${input.workerId}`, `broadcasting:${input.workerId}`, Date.now()).run();
     if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
     return Response.json({ armed: true });

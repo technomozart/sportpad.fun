@@ -17,6 +17,9 @@ import { readMainnetConfig } from "@/lib/server/mainnet-config";
 // Keep public launches locked until the buyback transaction and recovery path
 // have passed a funded end-to-end canary. A heartbeat is not proof of safety.
 const BUYBACK_EXECUTION_VERIFIED = false;
+// A live Solana claim signer is not a reward-acquisition system. Fee SOL must
+// first become verified AFC/ARG inventory and fund an epoch automatically.
+const SOLANA_REWARD_AUTOMATION_VERIFIED = false;
 
 type ControlsRow = {
   settlement_paused: number;
@@ -67,6 +70,9 @@ export async function readLaunchAutomationReadiness(
   if (!FINANCIAL_LEDGER_VERIFIED) missing.push("financial ledger and receipt verification");
   if (rewardChain === "chiliz" && !CHILIZ_ASSET_MIGRATION_VERIFIED) {
     missing.push("Chiliz V2 acquisition and payout execution not verified");
+  }
+  if (rewardChain === "solana" && !SOLANA_REWARD_AUTOMATION_VERIFIED) {
+    missing.push("Solana Fan Token acquisition and epoch automation not verified");
   }
   if (!BUYBACK_EXECUTION_VERIFIED) missing.push("buyback safety verification");
   return { ready: missing.length === 0, missing };

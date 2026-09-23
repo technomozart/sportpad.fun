@@ -236,7 +236,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
     <section className="devnet-launch-panel" aria-labelledby="mainnet-launch-title">
       <div className="devnet-launch-head">
         <span><Rocket /></span>
-        <div><p className="section-eyebrow">Solana mainnet community launch</p><h3 id="mainnet-launch-title">Launch the real Pump coin and lock its reward route.</h3><p>This community coin trades against SOL. Its creator fees are locked 80% to official Fan Token rewards and 20% to buying and burning SPORTPAD. SPORTPAD&apos;s own creator fees remain with the project for development.</p></div>
+        <div><p className="section-eyebrow">Solana mainnet community launch</p><h3 id="mainnet-launch-title">Review the Pump launch and fee recipients.</h3><p>This community coin would trade against SOL. Its creator fees would route 80% to a Fan Token reward treasury and 20% to a SPORTPAD buyback treasury. Those transfers do not themselves buy rewards or burn SPORTPAD. SPORTPAD&apos;s own creator fees remain with the project for development.</p></div>
         <strong className="devnet-badge">REAL SOL</strong>
       </div>
 
@@ -249,8 +249,8 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
       </div>
 
       <div className="devnet-recipient-grid">
-        <label>80% reward treasury<code>{mainnet.rewardTreasury || "Not configured"}</code><small>Creator fees allocated for official Fan Token acquisition and holder epochs.</small></label>
-        <label>20% community-funded SPORTPAD burn<code>{mainnet.buybackTreasury || "Not configured"}</code><small>Uses this launch&apos;s fees to buy SPORTPAD, then burns the purchased tokens.</small></label>
+        <label>80% reward treasury<code>{mainnet.rewardTreasury || "Not configured"}</code><small>Proposed creator-fee recipient. Fan Token purchases and holder epochs are separate, currently paused steps.</small></label>
+        <label>20% SPORTPAD buyback treasury<code>{mainnet.buybackTreasury || "Not configured"}</code><small>Proposed recipient for this community launch. SPORTPAD purchases and burns are separate, currently paused steps.</small></label>
       </div>
 
       {!mainnet.metadataUri ? <label className="devnet-consent"><input type="checkbox" checked={publicationAccepted} onChange={(event) => setPublicationAccepted(event.target.checked)} /><span><strong>Publish the approved image and metadata to IPFS</strong><small>This content becomes public and may be permanent.</small></span></label> : null}

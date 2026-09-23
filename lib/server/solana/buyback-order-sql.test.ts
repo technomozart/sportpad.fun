@@ -14,6 +14,13 @@ function database() {
     CREATE TABLE protocol_controls (
       key TEXT PRIMARY KEY, settlement_paused INTEGER NOT NULL, buyback_paused INTEGER NOT NULL
     );
+    CREATE TABLE protocol_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, mainnet_mint TEXT,
+      mainnet_buyback_treasury TEXT, status TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT NOT NULL);
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT NOT NULL,
+      buyback_amount_atomic TEXT NOT NULL, buyback_swap_signature TEXT,
+      burn_signature TEXT, state TEXT NOT NULL);
     CREATE TABLE transaction_intents (
       id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
       settlement_id TEXT NOT NULL, signer_role TEXT NOT NULL,
@@ -28,6 +35,12 @@ function database() {
     INSERT INTO automation_jobs VALUES
       ('job-1', 'sportpad_buyback_burn', 'settlement-1', 'broadcasting', 'broadcasting:solana:treasury');
     INSERT INTO protocol_controls VALUES ('global', 0, 0);
+    INSERT INTO protocol_settings VALUES ('sportpad_mint', 'SPORTPAD');
+    INSERT INTO launch_drafts VALUES ('community', 'COMMUNITY', 'treasury', 'mainnet_published');
+    INSERT INTO fee_events VALUES ('fee-1', 'community'), ('fee-2', 'community');
+    INSERT INTO settlements VALUES
+      ('settlement-1', 'fee-1', '50000000', NULL, NULL, 'reconciled'),
+      ('settlement-2', 'fee-2', '50000000', NULL, NULL, 'reconciled');
   `);
   return db;
 }
@@ -74,6 +87,25 @@ test("does not persist when settlement or buyback has been paused", () => {
     assert.equal(db.prepare(INSERT_AUTOMATIC_BUYBACK_INTENT_SQL).run(...fields()).changes, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM transaction_intents").get()?.count, 0);
   } finally { db.close(); }
+});
+
+test("does not persist a stale or ineligible community buyback order", () => {
+  const changes = [
+    "UPDATE launch_drafts SET status = 'draft' WHERE id = 'community'",
+    "UPDATE launch_drafts SET mainnet_mint = 'SPORTPAD' WHERE id = 'community'",
+    "UPDATE launch_drafts SET mainnet_buyback_treasury = 'other' WHERE id = 'community'",
+    "UPDATE settlements SET buyback_amount_atomic = '0' WHERE id = 'settlement-1'",
+    "UPDATE settlements SET buyback_amount_atomic = '60000000' WHERE id = 'settlement-1'",
+    "UPDATE settlements SET state = 'failed' WHERE id = 'settlement-1'",
+    "UPDATE settlements SET buyback_swap_signature = 'old-swap' WHERE id = 'settlement-1'",
+  ];
+  for (const change of changes) {
+    const db = database();
+    try {
+      db.exec(change);
+      assert.equal(db.prepare(INSERT_AUTOMATIC_BUYBACK_INTENT_SQL).run(...fields()).changes, 0, change);
+    } finally { db.close(); }
+  }
 });
 
 test("a duplicate idempotency key cannot replace the original signed order", () => {
