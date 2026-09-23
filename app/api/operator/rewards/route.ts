@@ -411,12 +411,17 @@ export async function GET(request: Request) {
   return privateJson(await getConsoleData());
 }
 
+// The legacy operator actions do not share automatic epoch ownership and
+// mint-wide vault fencing. Keep every mutating path closed independently of
+// the automatic ledger gate until they are redesigned and funded-canary tested.
+const LEGACY_OPERATOR_REWARD_EXECUTION_SAFE = false;
+
 export async function POST(request: Request) {
   if (!isOperatorRequest(request)) return privateJson({ error: "Operator access is required." }, 403);
   if (!isSameOrigin(request)) return privateJson({ error: "Same-origin request required." }, 403);
   if (!database) return privateJson({ error: "Reward database is unavailable." }, 503);
-  if (!FINANCIAL_LEDGER_VERIFIED) {
-    return privateJson({ error: "Legacy reward execution is paused pending atomic accounting and receipt verification." }, 503);
+  if (!LEGACY_OPERATOR_REWARD_EXECUTION_SAFE || !FINANCIAL_LEDGER_VERIFIED) {
+    return privateJson({ error: "Legacy operator reward actions are disabled while automatic rewards are being verified." }, 503);
   }
   const actor = getLaunchDraftOwner(request);
   if (!actor) return privateJson({ error: "Operator access is required." }, 403);

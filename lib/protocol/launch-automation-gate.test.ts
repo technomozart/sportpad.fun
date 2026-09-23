@@ -31,6 +31,18 @@ test("a launch requires fresh chain-specific reward capabilities and the configu
   assert.equal(evaluateLaunchAutomationReadiness(fullWorkers.slice(0, 2), successfulMaintenance, "chiliz", buybackTreasury, rewardTreasury, now).ready, false);
 });
 
+test("pre-mint Solana launches can accrue the 20% share without a buyback worker", () => {
+  const withoutBuyback = fullWorkers.slice(1);
+  assert.deepEqual(evaluateLaunchAutomationReadiness(
+    withoutBuyback, successfulMaintenance, "solana", buybackTreasury,
+    rewardTreasury, now, false,
+  ), { ready: true, missing: [] });
+  assert.equal(evaluateLaunchAutomationReadiness(
+    withoutBuyback, successfulMaintenance, "solana", buybackTreasury,
+    rewardTreasury, now, true,
+  ).ready, false);
+});
+
 test("stale, malformed, and capability-incomplete worker heartbeats fail closed", () => {
   const stale = heartbeat(`automation:solana:${buybackTreasury}`, ["sportpad_buyback_burn", "solana_claim_payout"], "2026-09-23 11:58:00");
   assert.equal(evaluateLaunchAutomationReadiness([stale], successfulMaintenance, "solana", buybackTreasury, rewardTreasury, now).ready, false);

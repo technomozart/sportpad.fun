@@ -7,7 +7,8 @@ export const STAGE_HOLDER_POSITION_SQL = `
     ending_balance_atomic, observed_slot, observed_at
   )
   SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
-  FROM reward_epochs e WHERE e.id = ?2 AND e.state = 'accruing'
+  FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
+  WHERE e.id = ?2 AND e.state = 'accruing' AND l.status = 'mainnet_published'
 `;
 
 export const ASSERT_STAGED_SNAPSHOT_SQL = `
@@ -23,11 +24,12 @@ export const ASSERT_STAGED_SNAPSHOT_SQL = `
 // following changes() assertion fails.
 export const COMMIT_HOLDER_CHECKPOINT_SQL = `
   INSERT INTO holder_snapshot_checkpoints (
-    epoch_id, generation_id, last_observed_slot, last_observed_at,
+    epoch_id, generation_id, first_finalized_at, last_observed_slot, last_observed_at,
     position_count, evidence_hash, updated_at
   )
-  SELECT ?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP
-  FROM reward_epochs e WHERE e.id = ?1 AND e.state = 'accruing'
+  SELECT ?1, ?2, ?4, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP
+  FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
+  WHERE e.id = ?1 AND e.state = 'accruing' AND l.status = 'mainnet_published'
   ON CONFLICT(epoch_id) DO UPDATE SET
     generation_id = excluded.generation_id,
     last_observed_slot = excluded.last_observed_slot,
@@ -40,8 +42,9 @@ export const COMMIT_HOLDER_CHECKPOINT_SQL = `
     AND ?7 IS NOT NULL
     AND holder_snapshot_checkpoints.generation_id = ?7
     AND EXISTS (
-      SELECT 1 FROM reward_epochs e
+      SELECT 1 FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
       WHERE e.id = excluded.epoch_id AND e.state = 'accruing'
+        AND l.status = 'mainnet_published'
     )
 `;
 
@@ -63,6 +66,7 @@ export const COMMIT_STAGED_HOLDER_POSITIONS_SQL = `
   JOIN holder_snapshot_checkpoints c
     ON c.epoch_id = s.epoch_id AND c.generation_id = s.generation_id
   JOIN reward_epochs e ON e.id = s.epoch_id AND e.state = 'accruing'
+  JOIN launch_drafts l ON l.id = e.launch_id AND l.status = 'mainnet_published'
   WHERE s.generation_id = ?1 AND s.epoch_id = ?2
   ON CONFLICT(epoch_id, wallet) DO UPDATE SET
     token_seconds_atomic = excluded.token_seconds_atomic,
@@ -84,5 +88,29 @@ export const RECORD_HOLDER_SNAPSHOT_SQL = `
   SELECT ?1, 'rewards', 'epoch', ?2, 'holder_snapshot_indexed', ?1, 'verified', ?3, ?4, ?5, ?6
   FROM holder_snapshot_checkpoints c
   JOIN reward_epochs e ON e.id = c.epoch_id AND e.state = 'accruing'
+  JOIN launch_drafts l ON l.id = e.launch_id AND l.status = 'mainnet_published'
   WHERE c.epoch_id = ?2 AND c.generation_id = ?7
+`;
+
+// A checkpoint from the old wall-clock indexer has no first_finalized_at and
+// cannot authorize allocation. Every canonical position must belong to the
+// same finalized closing snapshot, with accrual reaching the epoch end.
+export const COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL = `
+  EXISTS (
+    SELECT 1 FROM holder_snapshot_checkpoints c
+    WHERE c.epoch_id = e.id
+      AND c.first_finalized_at IS NOT NULL
+      AND c.first_finalized_at <= CAST(strftime('%s', e.starts_at) AS INTEGER)
+      AND c.last_observed_at >= CAST(strftime('%s', e.ends_at) AS INTEGER)
+      AND c.last_observed_slot > 0
+      AND c.position_count = (
+        SELECT COUNT(*) FROM holder_epoch_positions p WHERE p.epoch_id = e.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM holder_epoch_positions p WHERE p.epoch_id = e.id
+          AND (p.last_observed_slot IS NULL OR p.last_observed_slot <> c.last_observed_slot
+            OR p.last_observed_at IS NULL
+            OR p.last_observed_at < CAST(strftime('%s', e.ends_at) AS INTEGER))
+      )
+  )
 `;

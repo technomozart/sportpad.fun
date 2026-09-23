@@ -45,7 +45,7 @@ function fields() {
     '["jupiter_v2_metis_pinned"]', '["SOL","FAN"]',
     "50000000", "request-1", "unsigned-base64", "a".repeat(64),
     200, "SOL", "FAN", "50000000", "990000", "swap-signature",
-    "2026-09-23T12:00:00.000Z", "job-1", "broadcasting:solana:treasury",
+    "2026-09-23T12:00:00.000Z", "job-1", "broadcasting:solana:treasury", null,
   ];
 }
 
@@ -84,4 +84,25 @@ test("rejects a stale, paused, misdirected, or platform-owned reward order", () 
       assert.equal(db.prepare(INSERT_AUTOMATIC_REWARD_INTENT_SQL).run(...fields()).changes, 0, mutation);
     } finally { db.close(); }
   }
+});
+
+test("accepts a community reward before the platform mint exists", () => {
+  const db = database();
+  try {
+    db.exec("DELETE FROM protocol_settings WHERE key = 'sportpad_mint'");
+    assert.equal(db.prepare(INSERT_AUTOMATIC_REWARD_INTENT_SQL).run(...fields()).changes, 1);
+  } finally { db.close(); }
+});
+
+test("configured platform mint excludes itself and conflicts with a different DB mint", () => {
+  const db = database();
+  try {
+    const configured = fields();
+    configured[19] = "OTHER_PLATFORM";
+    assert.equal(db.prepare(INSERT_AUTOMATIC_REWARD_INTENT_SQL).run(...configured).changes, 0);
+    db.exec("DELETE FROM protocol_settings WHERE key = 'sportpad_mint'");
+    db.exec("UPDATE launch_drafts SET mainnet_mint = 'SPORTPAD' WHERE id = 'community'");
+    configured[19] = "SPORTPAD";
+    assert.equal(db.prepare(INSERT_AUTOMATIC_REWARD_INTENT_SQL).run(...configured).changes, 0);
+  } finally { db.close(); }
 });

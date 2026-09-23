@@ -97,7 +97,7 @@ export default async function TransparencyPage() {
 
         <div className="incident-note">
           <AlertTriangle />
-          <div><strong>{launch.ready ? "Mainnet launcher is enabled." : "New mainnet launches are paused until reward and buyback automation are verified."}</strong><p>The 80/20 route applies to community launches only. SPORTPAD&apos;s own creator fees stay with the project for development. {launch.ready ? "Reward and buyback workers are ready for a live preflight." : `Waiting for: ${launch.missing.join(", ")}.`}</p></div>
+          <div><strong>{launch.ready ? "Mainnet launcher is enabled." : "New mainnet launches are paused until required financial automation is verified."}</strong><p>The 80/20 route applies to community launches only. SPORTPAD&apos;s own creator fees stay with the project for development. {launch.ready ? sportpadMint ? "Reward and buyback workers passed the launch gate." : "Reward execution passed the launch gate. The 20% share accumulates in its dedicated treasury until the SPORTPAD mint and buyback execution are ready." : `Waiting for: ${launch.missing.join(", ")}.`}</p></div>
         </div>
       </main>
     </SiteChrome>

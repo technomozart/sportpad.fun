@@ -6,6 +6,7 @@ import {
   ASSERT_ONE_CHECKPOINT_SQL,
   ASSERT_POSITION_COUNT_SQL,
   ASSERT_STAGED_SNAPSHOT_SQL,
+  COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL,
   COMMIT_HOLDER_CHECKPOINT_SQL,
   COMMIT_STAGED_HOLDER_POSITIONS_SQL,
   RECORD_HOLDER_SNAPSHOT_SQL,
@@ -15,7 +16,9 @@ import {
 function fixture() {
   const db = new DatabaseSync(":memory:");
   db.exec(`
-    CREATE TABLE reward_epochs (id TEXT PRIMARY KEY, state TEXT NOT NULL);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, status TEXT NOT NULL);
+    CREATE TABLE reward_epochs (id TEXT PRIMARY KEY, launch_id TEXT NOT NULL,
+      starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, state TEXT NOT NULL);
     CREATE TABLE holder_epoch_positions (
       id TEXT PRIMARY KEY, epoch_id TEXT NOT NULL, launch_id TEXT NOT NULL,
       wallet TEXT NOT NULL, token_seconds_atomic TEXT NOT NULL,
@@ -31,6 +34,7 @@ function fixture() {
     );
     CREATE TABLE holder_snapshot_checkpoints (
       epoch_id TEXT PRIMARY KEY, generation_id TEXT NOT NULL,
+      first_finalized_at INTEGER,
       last_observed_slot INTEGER NOT NULL, last_observed_at INTEGER NOT NULL,
       position_count INTEGER NOT NULL, evidence_hash TEXT NOT NULL, updated_at TEXT
     );
@@ -39,7 +43,9 @@ function fixture() {
       event_type TEXT, idempotency_key TEXT UNIQUE, state TEXT, slot INTEGER,
       amount_atomic TEXT, mint TEXT, evidence_hash TEXT
     );
-    INSERT INTO reward_epochs (id, state) VALUES ('epoch', 'accruing');
+    INSERT INTO launch_drafts (id, status) VALUES ('launch', 'mainnet_published');
+    INSERT INTO reward_epochs (id, launch_id, starts_at, ends_at, state)
+      VALUES ('epoch', 'launch', '1970-01-01T00:01:40.000Z', '1970-01-01T00:03:20.000Z', 'accruing');
   `);
   return db;
 }
@@ -47,6 +53,13 @@ function fixture() {
 function stage(db: DatabaseSync, generation: string, wallet: string, weight: string, slot: number, time: number) {
   return db.prepare(STAGE_HOLDER_POSITION_SQL)
     .run(generation, "epoch", "launch", wallet, weight, "10", slot, time);
+}
+
+function hasCompleteCoverage(db: DatabaseSync) {
+  return Boolean(db.prepare(`SELECT e.id FROM reward_epochs e
+    JOIN launch_drafts l ON l.id = e.launch_id
+    WHERE l.status = 'mainnet_published' AND ${COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL}`)
+    .get());
 }
 
 // This models one D1.batch: every statement succeeds together or an error
@@ -154,4 +167,40 @@ test("stale base generation cannot overwrite newer accrued token-seconds even wi
   assert.equal(db.prepare("SELECT token_seconds_atomic FROM holder_epoch_positions WHERE wallet = 'a'").get()?.token_seconds_atomic, "200");
   assert.equal(db.prepare("SELECT generation_id FROM holder_snapshot_checkpoints WHERE epoch_id = 'epoch'").get()?.generation_id, "first");
   db.close();
+});
+
+test("allocation requires a finalized snapshot before start and after end", () => {
+  const db = fixture();
+  try {
+    stage(db, "opening", "holder", "0", 10, 95);
+    commit(db, "opening", 1, 10, 95);
+    assert.equal(hasCompleteCoverage(db), false);
+    stage(db, "near-end", "holder", "100", 11, 199);
+    commit(db, "near-end", 1, 11, 199, "opening");
+    assert.equal(hasCompleteCoverage(db), false);
+    stage(db, "closing", "holder", "200", 12, 205);
+    commit(db, "closing", 1, 12, 205, "near-end");
+    assert.equal(hasCompleteCoverage(db), true);
+    db.exec("UPDATE launch_drafts SET status = 'mainnet_suspended' WHERE id = 'launch'");
+    assert.equal(hasCompleteCoverage(db), false);
+    assert.equal(stage(db, "suspended", "holder", "300", 13, 210).changes, 0);
+  } finally { db.close(); }
+});
+
+test("late opening, legacy, and incomplete canonical checkpoints fail closed", () => {
+  const db = fixture();
+  try {
+    stage(db, "late-opening", "holder", "0", 10, 101);
+    commit(db, "late-opening", 1, 10, 101);
+    stage(db, "closing", "holder", "200", 11, 205);
+    commit(db, "closing", 1, 11, 205, "late-opening");
+    assert.equal(hasCompleteCoverage(db), false);
+    db.exec("UPDATE holder_snapshot_checkpoints SET first_finalized_at = 95");
+    assert.equal(hasCompleteCoverage(db), true);
+    db.exec("UPDATE holder_epoch_positions SET last_observed_slot = 10");
+    assert.equal(hasCompleteCoverage(db), false);
+    db.exec("UPDATE holder_epoch_positions SET last_observed_slot = 11");
+    db.exec("UPDATE holder_snapshot_checkpoints SET first_finalized_at = NULL");
+    assert.equal(hasCompleteCoverage(db), false);
+  } finally { db.close(); }
 });

@@ -240,7 +240,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
         <strong className="devnet-badge">REAL SOL</strong>
       </div>
 
-      {!mainnet.ready ? <div className="devnet-lock-notice"><LockKeyhole /><p><strong>New mainnet launches are paused until reward and buyback automation are verified.</strong> Waiting for: {mainnet.missing.join(", ")}. {resumingSignedLaunch ? "You can still verify the mint and fee-lock transactions you already signed." : null}</p></div> : null}
+      {!mainnet.ready ? <div className="devnet-lock-notice"><LockKeyhole /><p><strong>New mainnet launches are paused until the required financial automation is verified.</strong> Waiting for: {mainnet.missing.join(", ")}. {resumingSignedLaunch ? "You can still verify the mint and fee-lock transactions you already signed." : null}</p></div> : null}
 
       <div className="devnet-wallet-state">
         <Wallet />
@@ -250,7 +250,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
 
       <div className="devnet-recipient-grid">
         <label>80% reward treasury<code>{mainnet.rewardTreasury || "Not configured"}</code><small>Proposed creator-fee recipient. Fan Token purchases and holder epochs are separate, currently paused steps.</small></label>
-        <label>20% SPORTPAD buyback treasury<code>{mainnet.buybackTreasury || "Not configured"}</code><small>Proposed recipient for this community launch. SPORTPAD purchases and burns are separate, currently paused steps.</small></label>
+        <label>20% SPORTPAD buyback treasury<code>{mainnet.buybackTreasury || "Not configured"}</code><small>The 20% share accumulates here before the SPORTPAD mint exists. Purchases and burns begin only after the mint and buyback execution are verified.</small></label>
       </div>
 
       {!mainnet.metadataUri ? <label className="devnet-consent"><input type="checkbox" checked={publicationAccepted} onChange={(event) => setPublicationAccepted(event.target.checked)} /><span><strong>Publish the approved image and metadata to IPFS</strong><small>This content becomes public and may be permanent.</small></span></label> : null}

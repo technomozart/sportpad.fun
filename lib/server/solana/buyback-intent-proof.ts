@@ -202,3 +202,20 @@ export function verifyPersistedAutomaticRewardIntent(input: {
     idempotencyKey: `automation:reward:swap:${input.expected.settlementId}`,
   });
 }
+
+/** Chunked rewards share the parent settlement FK but require a unique
+ * signed order per step. The exact step ID is part of the proof namespace. */
+export function verifyPersistedAutomaticRewardChunkIntent(input: {
+  intent: PersistedAutomaticRewardIntent | null;
+  expected: Omit<ExpectedAutomaticSwap, "outputMint"> & { rewardMint: string; stepId: string };
+  swapReceipt: SolanaAutomationReceipt | null;
+  swapStatus: SignatureStatus | null;
+}) {
+  return verifyPersistedAutomaticSwapIntent({
+    ...input,
+    expected: { ...input.expected, outputMint: input.expected.rewardMint },
+    action: "solana_reward_purchase_automation",
+    signerRole: "reward_treasury",
+    idempotencyKey: `automation:reward:swap:${input.expected.stepId}`,
+  });
+}

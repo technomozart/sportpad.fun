@@ -83,10 +83,11 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
   `).bind(epoch.epoch_id).all<PositionRow>();
   const existing = new Map(existingResult.results.map((row) => [row.wallet, row]));
   const wallets = new Set([...existing.keys(), ...snapshot.balances.keys()]);
-  const observedAt = Math.floor(Date.now() / 1000);
+  // The snapshot's finalized slot, not the worker's wall clock, determines
+  // whether the epoch's start and end were actually covered.
+  const observedAt = snapshot.finalizedAt;
   const startsAt = unixSeconds(epoch.starts_at);
   const endsAt = unixSeconds(epoch.ends_at);
-  const checkpointAt = Math.min(Math.max(observedAt, startsAt), endsAt);
   const generationId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [];
 
@@ -117,13 +118,13 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
   try {
     const staged = await writeBatches(database, statements);
     if (staged !== wallets.size) throw new Error("holder_snapshot_stage_incomplete");
-    const eventId = `holder-snapshot:${epoch.epoch_id}:${snapshot.slot}:${checkpointAt}`;
+    const eventId = `holder-snapshot:${epoch.epoch_id}:${snapshot.slot}:${observedAt}`;
     // D1.batch is a transaction. A failed count, stale checkpoint, or failed
     // canonical copy rolls back the entire generation, including its event.
     const results = await database.batch([
       database.prepare(ASSERT_STAGED_SNAPSHOT_SQL).bind(generationId, epoch.epoch_id, wallets.size),
       database.prepare(COMMIT_HOLDER_CHECKPOINT_SQL).bind(
-        epoch.epoch_id, generationId, snapshot.slot, checkpointAt, wallets.size, snapshot.evidenceHash,
+        epoch.epoch_id, generationId, snapshot.slot, observedAt, wallets.size, snapshot.evidenceHash,
         baseCheckpoint?.generation_id ?? null,
       ),
       database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
@@ -152,7 +153,7 @@ async function activeEpochs(database: D1Database, epochId?: string) {
     FROM reward_epochs e
     JOIN launch_drafts l ON l.id = e.launch_id
     WHERE e.state = 'accruing'
-      AND l.status IN ('mainnet_published', 'mainnet_suspended')
+      AND l.status = 'mainnet_published'
       AND l.mainnet_mint IS NOT NULL
       AND l.mainnet_reward_treasury IS NOT NULL
       AND l.mainnet_buyback_treasury IS NOT NULL

@@ -121,6 +121,17 @@ function validIntentId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f-]{36}$/.test(value);
 }
 
+async function automaticRewardChunkExists(settlementId: string) {
+  const row = await env.DB!.prepare(`
+    SELECT 1 AS active FROM settlements s WHERE s.id = ?1
+      AND (s.reward_spent_atomic <> '0' OR EXISTS (
+        SELECT 1 FROM settlement_steps step WHERE step.settlement_id = s.id
+          AND step.stage = 'automatic_reward_chunk'))
+    LIMIT 1
+  `).bind(settlementId).first<{ active: number }>();
+  return Boolean(row);
+}
+
 export async function GET(request: Request) {
   if (!isOperatorRequest(request)) return privateJson({ error: "Operator access is required." }, 403);
   if (!env.DB) return privateJson({ error: "Settlement database is unavailable." }, 503);
@@ -158,10 +169,18 @@ export async function GET(request: Request) {
   });
 }
 
+// This legacy route does not share the automatic job/receipt ledger or
+// mint-wide vault fence. Keep every mutating action closed independently of
+// the automatic worker's execution flags until it is redesigned.
+const LEGACY_OPERATOR_SWAP_EXECUTION_SAFE = false;
+
 export async function POST(request: Request) {
   if (!isOperatorRequest(request)) return privateJson({ error: "Operator access is required." }, 403);
   if (!isSameOrigin(request)) return privateJson({ error: "Same-origin request required." }, 403);
   if (!env.DB) return privateJson({ error: "Settlement database is unavailable." }, 503);
+  if (!LEGACY_OPERATOR_SWAP_EXECUTION_SAFE) {
+    return privateJson({ error: "Legacy operator swaps are disabled while automatic settlement is being verified." }, 503);
+  }
   const walletSession = await getVerifiedWalletSession(request);
   if (!walletSession) return privateJson({ error: "Verify the required Solana treasury wallet first." }, 401);
   const rateLimit = await consumeFixedWindow({
@@ -187,6 +206,9 @@ export async function POST(request: Request) {
       if (!settlement) return privateJson({ error: "Settlement not found." }, 404);
       requireCommunityLaunchSettlement(settlement);
       requireManualLane(control, leg);
+      if (leg === "reward" && await automaticRewardChunkExists(settlement.settlement_id)) {
+        return privateJson({ error: "Automatic reward chunks already own this settlement. A manual full-size swap would double-spend it." }, 409);
+      }
       if ((leg === "reward" && settlement.reward_swap_signature) || (leg === "buyback" && settlement.buyback_swap_signature)) {
         return privateJson({ error: "That settlement leg already has a transaction receipt." }, 409);
       }
@@ -264,6 +286,9 @@ export async function POST(request: Request) {
       const intentSettlement = await settlementById(intent.settlement_id);
       if (!intentSettlement) return privateJson({ error: "Settlement not found." }, 404);
       requireCommunityLaunchSettlement(intentSettlement);
+      if (intent.action === "reward_swap" && await automaticRewardChunkExists(intent.settlement_id)) {
+        return privateJson({ error: "Automatic reward chunks already own this settlement. This manual swap cannot be submitted." }, 409);
+      }
       if (Date.parse(intent.expires_at) <= Date.now()) return privateJson({ error: "That Jupiter order expired. Prepare a new order." }, 409);
       if (walletSession.walletAddress !== intent.signer_address) return privateJson({ error: "The signed wallet does not match this treasury intent." }, 403);
       let signed: VersionedTransaction;

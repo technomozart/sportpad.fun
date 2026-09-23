@@ -165,8 +165,10 @@ export async function getExecutionStatus() {
     buyback: withStaticHolds(configuredReadiness.buyback),
   };
   const launchReadiness = await readGlobalLaunchReadiness();
-  const managedExecutionReady = FINANCIAL_LEDGER_VERIFIED && launchReadiness.ready
-    && Object.values(readiness).every((lane) => lane.ready);
+  // Launch readiness evaluates the selected reward chains and the pre-mint
+  // 20% accrual phase. The summary mode must not require both reward chains
+  // and an unavailable SPORTPAD mint when one eligible lane is ready.
+  const managedExecutionReady = FINANCIAL_LEDGER_VERIFIED && launchReadiness.ready;
 
   return {
     version: 1,

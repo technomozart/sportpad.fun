@@ -48,6 +48,7 @@ export function evaluateLaunchAutomationReadiness(
   buybackTreasury: string | null,
   rewardTreasury: string | null,
   nowMs: number = Date.now(),
+  requireBuybackExecution = true,
 ): LaunchAutomationReadiness {
   const missing: string[] = [];
   const chilizHeartbeat = rows.some((row) =>
@@ -69,7 +70,7 @@ export function evaluateLaunchAutomationReadiness(
   }
   const buybackHeartbeat = rows.find((row) => row.key === `automation:solana:${buybackTreasury}`);
   const buybackJobs = buybackHeartbeat ? activeJobTypes(buybackHeartbeat, nowMs) : new Set<string>();
-  if (!buybackTreasury || !buybackJobs.has("sportpad_buyback_burn")) {
+  if (requireBuybackExecution && (!buybackTreasury || !buybackJobs.has("sportpad_buyback_burn"))) {
     missing.push("active Solana buyback worker");
   }
 

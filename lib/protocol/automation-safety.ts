@@ -1,3 +1,5 @@
+import { COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL } from "./holder-indexer-sql.ts";
+
 export type AutomationOwnership = {
   state: string;
   leased_until: number | null;
@@ -27,7 +29,7 @@ export const COMPLETE_RECONCILED_JOB_SQL = `
     leased_until = NULL, updated_at = CURRENT_TIMESTAMP
   WHERE id = ?1 AND state = 'reconciliation_required'
     AND (tx_hash IS NULL OR tx_hash = ?2)
-    AND job_type = 'solana_reward_purchase'
+    AND job_type = 'solana_reward_purchase' AND entity_type = 'settlement_step'
 `;
 
 // Arming may precede ATA creation and quote acquisition. If no order was ever
@@ -37,12 +39,13 @@ export const REQUEUE_UNPREPARED_REWARD_JOB_SQL = `
   UPDATE automation_jobs SET state = 'queued', error_code = NULL,
     leased_until = NULL, available_at = ?1, updated_at = CURRENT_TIMESTAMP
   WHERE job_type = 'solana_reward_purchase'
+    AND entity_type = 'settlement_step'
     AND state IN ('broadcasting', 'reconciliation_required')
     AND (state = 'reconciliation_required' OR error_code = ?2)
     AND tx_hash IS NULL
     AND updated_at < datetime('now', '-5 minutes')
     AND NOT EXISTS (SELECT 1 FROM transaction_intents i
-      WHERE i.settlement_id = automation_jobs.entity_id
+      WHERE i.idempotency_key = 'automation:reward:swap:' || automation_jobs.entity_id
         AND i.action = 'solana_reward_purchase_automation')
 `;
 
@@ -84,11 +87,12 @@ export const COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL = `
     AND reward_amount_atomic = ?6
     AND EXISTS (
       SELECT 1 FROM fee_events f JOIN launch_drafts l ON l.id = f.launch_id
-      JOIN protocol_settings p ON p.key = 'sportpad_mint'
+      LEFT JOIN protocol_settings p ON p.key = 'sportpad_mint'
       WHERE f.id = settlements.fee_event_id AND f.launch_id = ?3
         AND l.reward_chain = 'solana' AND l.reward_mint = ?4
         AND l.status = 'mainnet_published'
-        AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+        AND l.mainnet_mint IS NOT NULL
+        AND (p.value IS NULL OR l.mainnet_mint <> p.value)
         AND l.mainnet_reward_treasury = ?5
     )
     AND NOT EXISTS (
@@ -162,9 +166,10 @@ export const FENCE_CHILIZ_EPOCH_SQL = `
   UPDATE reward_epochs SET state = 'allocating', updated_at = CURRENT_TIMESTAMP
   WHERE id = ?1 AND state = 'accruing' AND funded_amount_atomic = ?2
     AND datetime(ends_at) <= CURRENT_TIMESTAMP
-    AND EXISTS (SELECT 1 FROM holder_snapshot_checkpoints c
-      WHERE c.epoch_id = reward_epochs.id
-        AND c.last_observed_at >= CAST(strftime('%s', reward_epochs.ends_at) AS INTEGER))
+    AND EXISTS (SELECT 1 FROM launch_drafts l
+      WHERE l.id = reward_epochs.launch_id AND l.status = 'mainnet_published')
+    AND EXISTS (SELECT 1 FROM reward_epochs e WHERE e.id = reward_epochs.id
+      AND ${COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL})
 `;
 
 export const DEFER_CHILIZ_EPOCH_SQL = `

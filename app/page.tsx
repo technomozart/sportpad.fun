@@ -42,7 +42,7 @@ export default async function Home() {
           <div className="home-hero-copy">
             <div className="hero-kicker"><span className="live-pulse" /> Solana sports launch drafts · planned Fan Token rewards</div>
             <h1>Launch the culture.<br /><span>Route the rewards.</span></h1>
-            <p>Draft a Solana community coin and select an official Fan Token reward. The planned mainnet launch locks its creator fees 80% to a reward treasury and 20% to a SPORTPAD buyback treasury. Purchases and burns require separate verified execution; new mainnet launches are currently paused. SPORTPAD&apos;s own creator fees are reserved for development.</p>
+            <p>Draft a Solana community coin and select an official Fan Token reward. A mainnet launch locks its creator fees 80% to a reward treasury and 20% to a SPORTPAD buyback treasury. Reward purchases require verified execution. The 20% share accumulates until a SPORTPAD mint and buyback route are ready. {launch.ready ? "Eligible mainnet launches are enabled." : "New mainnet launches are currently paused."} SPORTPAD&apos;s own creator fees are reserved for development.</p>
             <div className="hero-actions">
               <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 font-semibold text-[#071008] hover:bg-[#adff7d]">
                 <Link href="/launch"><Sparkles className="size-4" /> Start a launch draft</Link>

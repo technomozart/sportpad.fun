@@ -1,0 +1,1 @@
+ALTER TABLE `holder_snapshot_checkpoints` ADD `first_finalized_at` integer;

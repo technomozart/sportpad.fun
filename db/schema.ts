@@ -191,7 +191,11 @@ export const settlements = sqliteTable(
     id: text("id").primaryKey(),
     feeEventId: text("fee_event_id").notNull().references(() => feeEvents.id),
     rewardAmountAtomic: text("reward_amount_atomic").notNull(),
+    // Progress of verified automatic Solana reward chunks only. The reward
+    // leg is complete once this equals rewardAmountAtomic.
+    rewardSpentAtomic: text("reward_spent_atomic").notNull().default("0"),
     buybackAmountAtomic: text("buyback_amount_atomic").notNull(),
+    buybackSpentAtomic: text("buyback_spent_atomic").notNull().default("0"),
     rewardSwapSignature: text("reward_swap_signature"),
     buybackSwapSignature: text("buyback_swap_signature"),
     burnSignature: text("burn_signature"),
@@ -323,6 +327,7 @@ export const settlementSteps = sqliteTable(
     minimumOutputAtomic: text("minimum_output_atomic"),
     providerRequestId: text("provider_request_id"),
     txSignature: text("tx_signature"),
+    burnSignature: text("burn_signature"),
     verifiedSlot: integer("verified_slot"),
     attempt: integer("attempt").notNull().default(0),
     errorCode: text("error_code"),
@@ -332,8 +337,14 @@ export const settlementSteps = sqliteTable(
   (table) => [
     uniqueIndex("idx_settlement_steps_idempotency").on(table.idempotencyKey),
     uniqueIndex("idx_settlement_steps_signature").on(table.txSignature),
+    uniqueIndex("idx_settlement_steps_burn_signature").on(table.burnSignature)
+      .where(sql`${table.burnSignature} IS NOT NULL`),
     index("idx_settlement_steps_settlement_stage").on(table.settlementId, table.stage),
     index("idx_settlement_steps_state").on(table.state),
+    uniqueIndex("idx_settlement_steps_one_active_reward_chunk").on(table.settlementId)
+      .where(sql`${table.stage} = 'automatic_reward_chunk' AND ${table.state} <> 'verified'`),
+    uniqueIndex("idx_settlement_steps_one_active_buyback_chunk").on(table.settlementId)
+      .where(sql`${table.stage} = 'automatic_buyback_chunk' AND ${table.state} <> 'verified'`),
   ],
 );
 
@@ -438,6 +449,8 @@ export const holderSnapshotStaging = sqliteTable(
 export const holderSnapshotCheckpoints = sqliteTable("holder_snapshot_checkpoints", {
   epochId: text("epoch_id").primaryKey().references(() => rewardEpochs.id),
   generationId: text("generation_id").notNull(),
+  // Null on legacy checkpoints: they cannot prove coverage from epoch start.
+  firstFinalizedAt: integer("first_finalized_at"),
   lastObservedSlot: integer("last_observed_slot").notNull(),
   lastObservedAt: integer("last_observed_at").notNull(),
   positionCount: integer("position_count").notNull(),

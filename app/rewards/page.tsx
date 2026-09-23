@@ -14,9 +14,9 @@ export default function RewardsPage() {
         <SafetyNotice>No balances are simulated. Every displayed position comes from finalized holder indexing, every allocation is limited by acquired inventory, and every payout links to its onchain receipt.</SafetyNotice>
         <section className="content-section"><RewardDashboard /></section>
         <section className="page-section">
-          <SectionHeading eyebrow="Methodology" title="Time in the stands matters." copy="The target model uses time-weighted balances instead of one convenient end-of-epoch snapshot." />
+          <SectionHeading eyebrow="Methodology" title="Time in the stands matters." copy="The target model approximates time-weighted balances from periodic finalized holder snapshots, rather than using only an end-of-epoch balance." />
           <div className="method-grid">
-            <article><Layers3 /><h3>Balance over time</h3><p>Every finalized balance interval contributes token-seconds. Holding more for longer generally produces more eligible points.</p></article>
+            <article><Layers3 /><h3>Balance over time</h3><p>Each finalized snapshot updates token-seconds using the last observed balance. Transfers between snapshots take effect at the next observation, so allocations are an approximation.</p></article>
             <article><ShieldCheck /><h3>Controlled accounts excluded</h3><p>The launch creator, bonding curve, fee configuration, protocol treasuries, off-curve program owners, and burn addresses do not share user rewards.</p></article>
             <article><Calculator /><h3>Integer-safe allocation</h3><p>Each epoch rounds down in atomic token units. Remainder dust is recorded and carried forward rather than disappearing.</p></article>
             <article><CircleHelp /><h3>Final only when funded</h3><p>An estimate becomes claimable only after the epoch closes, current-token inventory is reserved, and the allocation commitment is recorded.</p></article>

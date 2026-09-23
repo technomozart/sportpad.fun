@@ -66,11 +66,17 @@ export async function fetchFinalizedTokenHolders({
   });
   if (!response.ok) throw new Error(`Helius holder indexing failed with HTTP ${response.status}.`);
   const body = await response.json() as ProgramAccountResponse;
-  if (body.error || !Array.isArray(body.result?.value) || !Number.isSafeInteger(body.result.context?.slot)) {
+  const snapshotSlot = body.result?.context?.slot;
+  if (body.error || !Array.isArray(body.result?.value) || typeof snapshotSlot !== "number" ||
+    !Number.isSafeInteger(snapshotSlot) || snapshotSlot < minimumSlot) {
     throw new Error("Helius holder indexing returned an invalid finalized response.");
   }
   if (body.result.value.length > maximumAccounts) {
     throw new Error(`Holder indexing exceeded the ${maximumAccounts} account safety cap.`);
+  }
+  const finalizedAt = await rpc.getBlockTime(snapshotSlot);
+  if (!Number.isSafeInteger(finalizedAt) || finalizedAt! <= 0 || finalizedAt! > Math.floor(Date.now() / 1000) + 10) {
+    throw new Error("The finalized holder snapshot has no trustworthy block time.");
   }
 
   const balances = new Map<string, bigint>();
@@ -90,7 +96,8 @@ export async function fetchFinalizedTokenHolders({
   const canonical = canonicalHolderSnapshot([...balances].map(([wallet, amountAtomic]) => ({ wallet, amountAtomic })));
   return {
     balances,
-    slot: body.result.context!.slot!,
+    slot: snapshotSlot,
+    finalizedAt: finalizedAt!,
     accountsSeen: body.result.value.length,
     evidenceHash: await sha256Hex(canonical),
   };

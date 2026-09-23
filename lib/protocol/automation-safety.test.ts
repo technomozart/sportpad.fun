@@ -45,18 +45,34 @@ test("mature epoch fencing is exclusive and an empty epoch can be reopened", () 
   const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE reward_epochs (
-      id TEXT PRIMARY KEY, state TEXT, funded_amount_atomic TEXT,
-      ends_at TEXT, updated_at TEXT
+      id TEXT PRIMARY KEY, launch_id TEXT, state TEXT, funded_amount_atomic TEXT,
+      starts_at TEXT, ends_at TEXT, updated_at TEXT
     );
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, status TEXT);
     CREATE TABLE holder_snapshot_checkpoints (
-      epoch_id TEXT PRIMARY KEY, last_observed_at INTEGER NOT NULL
+      epoch_id TEXT PRIMARY KEY, first_finalized_at INTEGER,
+      last_observed_slot INTEGER NOT NULL, last_observed_at INTEGER NOT NULL,
+      position_count INTEGER NOT NULL
     );
-    INSERT INTO reward_epochs VALUES ('epoch', 'accruing', '1000000000000000000',
+    CREATE TABLE holder_epoch_positions (
+      epoch_id TEXT, last_observed_slot INTEGER, last_observed_at INTEGER
+    );
+    INSERT INTO launch_drafts VALUES ('launch', 'mainnet_published');
+    INSERT INTO reward_epochs VALUES ('epoch', 'launch', 'accruing', '1000000000000000000',
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 hour'),
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour'), NULL);
   `);
   assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
-  db.exec(`INSERT INTO holder_snapshot_checkpoints VALUES
-    ('epoch', CAST(strftime('%s', 'now') AS INTEGER))`);
+  db.exec(`
+    INSERT INTO holder_snapshot_checkpoints VALUES
+      ('epoch', CAST(strftime('%s', 'now', '-3 hour') AS INTEGER),
+        10, CAST(strftime('%s', 'now') AS INTEGER), 1);
+    INSERT INTO holder_epoch_positions VALUES
+      ('epoch', 10, CAST(strftime('%s', 'now', '-1 hour') AS INTEGER));
+  `);
+  db.exec("UPDATE launch_drafts SET status = 'mainnet_suspended' WHERE id = 'launch'");
+  assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
+  db.exec("UPDATE launch_drafts SET status = 'mainnet_published' WHERE id = 'launch'");
   assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 1);
   assert.equal(db.prepare(FENCE_CHILIZ_EPOCH_SQL).run("epoch", "1000000000000000000").changes, 0);
   assert.equal(db.prepare("SELECT state FROM reward_epochs").get()?.state, "allocating");
@@ -199,15 +215,44 @@ test("a Solana reward purchase credits only its community launch and rolls back 
   db.close();
 });
 
+test("a community Solana reward can settle before the SPORTPAD mint is registered", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE protocol_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, reward_chain TEXT,
+      reward_mint TEXT, mainnet_mint TEXT, mainnet_reward_treasury TEXT,
+      status TEXT);
+    CREATE TABLE fee_events (id TEXT PRIMARY KEY, launch_id TEXT);
+    CREATE TABLE settlements (id TEXT PRIMARY KEY, fee_event_id TEXT,
+      reward_swap_signature TEXT, buyback_swap_signature TEXT,
+      burn_signature TEXT, reward_amount_atomic TEXT, state TEXT,
+      updated_at TEXT);
+    INSERT INTO launch_drafts VALUES ('community', 'solana', 'FAN',
+      'COMMUNITY', 'reward-treasury', 'mainnet_published');
+    INSERT INTO fee_events VALUES ('fee', 'community');
+    INSERT INTO settlements VALUES ('settlement', 'fee', NULL, NULL,
+      NULL, '50000000', 'reconciled', NULL);
+  `);
+  const settle = () => db.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL)
+    .run('settlement', 'swap', 'community', 'FAN', 'reward-treasury', '50000000').changes;
+  assert.equal(settle(), 1);
+  db.exec(`
+    UPDATE settlements SET reward_swap_signature = NULL, state = 'reconciled';
+    INSERT INTO protocol_settings VALUES ('sportpad_mint', 'COMMUNITY');
+  `);
+  assert.equal(settle(), 0);
+  db.close();
+});
+
 test("only the same signed Solana reward swap can complete a held job", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
-    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, state TEXT,
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, entity_type TEXT, state TEXT,
       tx_hash TEXT, error_code TEXT, leased_until INTEGER, updated_at TEXT);
     INSERT INTO automation_jobs VALUES
-      ('held', 'solana_reward_purchase', 'reconciliation_required',
+      ('held', 'solana_reward_purchase', 'settlement_step', 'reconciliation_required',
         'signed-swap', 'swap_timeout', NULL, NULL),
-      ('other', 'sportpad_buyback_burn', 'reconciliation_required',
+      ('other', 'sportpad_buyback_burn', 'settlement', 'reconciliation_required',
         'burn', 'swap_timeout', NULL, NULL);
   `);
   assert.equal(db.prepare(COMPLETE_RECONCILED_JOB_SQL).run("held", "another-swap").changes, 0);
@@ -220,20 +265,20 @@ test("only the same signed Solana reward swap can complete a held job", () => {
 test("only an old unprepared reward job can be automatically requeued", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
-    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, entity_id TEXT,
+    CREATE TABLE automation_jobs (id TEXT PRIMARY KEY, job_type TEXT, entity_type TEXT, entity_id TEXT,
       state TEXT, tx_hash TEXT, error_code TEXT, leased_until INTEGER,
       available_at INTEGER, updated_at TEXT);
-    CREATE TABLE transaction_intents (settlement_id TEXT, action TEXT);
+    CREATE TABLE transaction_intents (idempotency_key TEXT, action TEXT);
     INSERT INTO automation_jobs VALUES
-      ('unprepared', 'solana_reward_purchase', 'a', 'reconciliation_required', NULL,
+      ('unprepared', 'solana_reward_purchase', 'settlement_step', 'a', 'reconciliation_required', NULL,
         'quote_failed', NULL, 0, datetime('now', '-10 minutes')),
-      ('prepared', 'solana_reward_purchase', 'b', 'reconciliation_required', NULL,
+      ('prepared', 'solana_reward_purchase', 'settlement_step', 'b', 'reconciliation_required', NULL,
         'swap_timeout', NULL, 0, datetime('now', '-10 minutes')),
-      ('reported', 'solana_reward_purchase', 'c', 'reconciliation_required', 'tx-c',
+      ('reported', 'solana_reward_purchase', 'settlement_step', 'c', 'reconciliation_required', 'tx-c',
         'swap_timeout', NULL, 0, datetime('now', '-10 minutes')),
-      ('fresh', 'solana_reward_purchase', 'd', 'broadcasting', NULL,
+      ('fresh', 'solana_reward_purchase', 'settlement_step', 'd', 'broadcasting', NULL,
         'broadcasting:solana:treasury', NULL, 0, CURRENT_TIMESTAMP);
-    INSERT INTO transaction_intents VALUES ('b', 'solana_reward_purchase_automation');
+    INSERT INTO transaction_intents VALUES ('automation:reward:swap:b', 'solana_reward_purchase_automation');
   `);
   assert.equal(db.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
     .run(100, "broadcasting:solana:treasury").changes, 1);

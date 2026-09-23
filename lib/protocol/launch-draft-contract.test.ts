@@ -146,7 +146,7 @@ test("mainnet launch fails closed, freezes treasuries, and verifies exact onchai
     routeSource.indexOf("readLaunchAutomationReadiness(env.DB, rewardChain") < routeSource.indexOf("// Verification must never be blocked"),
     "previously signed mainnet evidence must be verifiable after the preflight gate closes",
   );
-  assert.match(panelSource, /New mainnet launches are paused until reward and buyback automation are verified/);
+  assert.match(panelSource, /New mainnet launches are paused until the required financial automation is verified/);
   assert.match(panelSource, /Boolean\(pending\.create && pending\.fee\)/);
   assert.ok(
     panelSource.indexOf('await post({ action: "prepare", publicationAccepted: true });', panelSource.indexOf("if (!work.fee)"))

@@ -17,6 +17,7 @@ import bs58 from "bs58";
 import {
   inspectPreparedAutomaticBuybackOrder,
   verifyPersistedAutomaticBuybackIntent,
+  verifyPersistedAutomaticRewardChunkIntent,
   verifyPersistedAutomaticRewardIntent,
   type PersistedAutomaticBuybackIntent,
 } from "./buyback-intent-proof.ts";
@@ -108,6 +109,25 @@ test("binds a Solana reward purchase to its own persisted signer and mint", asyn
   await assert.rejects(verifyPersistedAutomaticRewardIntent({ ...reward,
     expected: { ...reward.expected, rewardMint: Keypair.generate().publicKey.toBase58() },
   }), /swap_terms_mismatch/);
+});
+
+test("a reward chunk proof binds the step ID as well as its parent settlement", async () => {
+  const input = await fixture();
+  const chunk = {
+    ...input,
+    expected: { settlementId: input.expected.settlementId, stepId: "step-1",
+      treasury: input.expected.treasury, rewardMint: input.expected.sportpadMint,
+      inputAmountLamports: input.expected.inputAmountLamports,
+      purchasedAmountAtomic: input.expected.purchasedAmountAtomic,
+      swapSignature: input.expected.swapSignature },
+    intent: { ...input.intent, idempotency_key: "automation:reward:swap:step-1",
+      signer_role: "reward_treasury", action: "solana_reward_purchase_automation" },
+  };
+  assert.equal((await verifyPersistedAutomaticRewardChunkIntent(chunk)).txSignature,
+    input.expected.swapSignature);
+  await assert.rejects(verifyPersistedAutomaticRewardChunkIntent({ ...chunk,
+    expected: { ...chunk.expected, stepId: "step-2" },
+  }), /job_identity_mismatch/);
 });
 
 test("rejects a missing pre-broadcast intent", async () => {

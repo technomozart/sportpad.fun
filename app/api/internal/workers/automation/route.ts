@@ -10,7 +10,7 @@ import { CHILIZ_ASSET_MIGRATION_VERIFIED, verifyChilizPurchaseReceipt,
   verifyChilizTransferReceipt } from "@/lib/protocol/chiliz-receipts";
 import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBACK_SETTLEMENT_SQL, COMPLETE_CLAIM_SQL,
   COMPLETE_CLAIM_VAULT_SQL, COMPLETE_PURCHASE_SETTLEMENT_SQL, COMPLETE_PURCHASE_VAULT_SQL,
-  COMPLETE_RECONCILED_JOB_SQL, COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL,
+  COMPLETE_RECONCILED_JOB_SQL,
   COMPLETE_SOLANA_PURCHASE_VAULT_SQL,
   DEFER_CHILIZ_EPOCH_SQL, ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL,
   failureDisposition, FENCE_CHILIZ_EPOCH_SQL,
@@ -19,6 +19,7 @@ import { ASSERT_ONE_ROW_CHANGED_SQL, COMPLETE_BROADCAST_JOB_SQL, COMPLETE_BUYBAC
   REQUEUE_UNPREPARED_REWARD_JOB_SQL,
   type AutomationLaneControls } from "@/lib/protocol/automation-safety";
 import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
+import { COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL } from "@/lib/protocol/holder-indexer-sql";
 import { getRewardOption } from "@/lib/protocol/reward-options";
 import { quoteChilizPurchaseSpendCeiling } from "@/lib/server/chiliz-spend-bound";
 import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig, readWorkerToken } from "@/lib/server/execution-config";
@@ -27,9 +28,18 @@ import { observedSolanaRewardPurchaseOutput, verifySolanaClaimPayoutReceipt,
   verifySolanaRewardPurchaseReceipt,
   verifySportpadBuybackReceipts } from "@/lib/server/solana/automation-receipt";
 import { inspectPreparedAutomaticBuybackOrder, verifyPersistedAutomaticBuybackIntent,
-  verifyPersistedAutomaticRewardIntent, type PersistedAutomaticBuybackIntent } from "@/lib/server/solana/buyback-intent-proof";
+  verifyPersistedAutomaticRewardChunkIntent, type PersistedAutomaticBuybackIntent } from "@/lib/server/solana/buyback-intent-proof";
+import { inspectPreparedAutomaticClaimPayout, verifyPersistedAutomaticClaimIntent,
+  type PersistedAutomaticClaimIntent } from "@/lib/server/solana/claim-intent-proof";
+import { COMPLETE_AUTOMATIC_CLAIM_INTENT_SQL, INSERT_AUTOMATIC_CLAIM_INTENT_SQL,
+  REQUEUE_UNPREPARED_CLAIM_JOB_SQL } from "@/lib/server/solana/claim-intent-sql";
 import { INSERT_AUTOMATIC_BUYBACK_INTENT_SQL } from "@/lib/server/solana/buyback-order-sql";
-import { INSERT_AUTOMATIC_REWARD_INTENT_SQL } from "@/lib/server/solana/reward-order-sql";
+import { readSolanaRewardVaultSolvency } from "@/lib/server/solana/vault-solvency";
+import { readSolanaVaultFence, UPDATE_SOLANA_VAULT_FENCE_SQL } from "@/lib/server/solana/vault-fence";
+import { ADVANCE_AUTOMATIC_REWARD_SETTLEMENT_SQL, automaticRewardChunkKey,
+  COMPLETE_AUTOMATIC_REWARD_CHUNK_SQL, INSERT_AUTOMATIC_REWARD_CHUNK_INTENT_SQL,
+  INSERT_AUTOMATIC_REWARD_CHUNK_JOB_SQL, INSERT_AUTOMATIC_REWARD_CHUNK_SQL,
+  planAutomaticRewardChunk } from "@/lib/server/solana/reward-chunk-sql";
 import { getMainnetConnection } from "@/lib/server/solana/devnet";
 import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth";
 
@@ -38,6 +48,14 @@ const requestSchema = z.discriminatedUnion("action", [
     action: z.literal("lease"),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
     jobTypes: z.array(z.enum(["chiliz_reward_purchase", "chiliz_claim_unwrap", "solana_reward_purchase", "solana_claim_payout", "sportpad_buyback_burn"])).min(1).max(5),
+  }).strict(),
+  z.object({
+    action: z.literal("reconcile"),
+    workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  }).strict(),
+  z.object({
+    action: z.literal("reconcile_claim"),
+    workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   }).strict(),
   z.object({
     action: z.literal("arm"),
@@ -69,6 +87,16 @@ const requestSchema = z.discriminatedUnion("action", [
     lastValidBlockHeight: z.number().int().positive().safe(),
   }).strict(),
   z.object({
+    action: z.literal("prepare_solana_claim_payout"),
+    jobId: z.string().uuid(),
+    workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+    signedTransactionBase64: z.string().min(1).max(20_000),
+    tokenAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+    destinationAddress: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+    amountAtomic: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    lastValidBlockHeight: z.number().int().positive().safe(),
+  }).strict(),
+  z.object({
     action: z.literal("complete"),
     jobId: z.string().uuid(),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
@@ -84,6 +112,9 @@ const requestSchema = z.discriminatedUnion("action", [
     retryable: z.boolean(),
   }).strict(),
 ]);
+
+// Each unattended payout needs a funded end-to-end canary before activation.
+const CLAIM_PAYOUT_EXECUTION_SAFE = false;
 
 type AutomationRow = {
   id: string; job_type: string; entity_type: string; entity_id: string; chain: string;
@@ -160,47 +191,69 @@ async function seedSolanaPurchaseJobs(database: D1Database) {
   const config = readMainnetConfig();
   const setting = await database.prepare("SELECT value FROM protocol_settings WHERE key = 'sportpad_mint'")
     .first<{ value: string }>();
-  if (!config.rewardTreasury || !setting?.value ||
-    (config.sportpadMint && config.sportpadMint !== setting.value)) return;
+  if (!config.rewardTreasury ||
+    (config.sportpadMint && setting?.value && config.sportpadMint !== setting.value)) return;
+  const platformMint = setting?.value ?? config.sportpadMint ?? null;
   const rows = await database.prepare(`
-    SELECT s.id AS settlement_id, s.reward_amount_atomic, f.launch_id,
+    SELECT s.id AS settlement_id, s.reward_amount_atomic, s.reward_spent_atomic, f.launch_id,
       l.reward_symbol, l.reward_mint
     FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
     JOIN launch_drafts l ON l.id = f.launch_id
     WHERE l.reward_chain = 'solana' AND l.reward_mint IS NOT NULL
-      AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> ?1
+      AND l.mainnet_mint IS NOT NULL AND (?1 IS NULL OR l.mainnet_mint <> ?1)
       AND l.mainnet_reward_treasury = ?2
       AND l.status = 'mainnet_published'
-      AND s.reward_amount_atomic GLOB '[1-9]*'
-      AND s.reward_amount_atomic NOT GLOB '*[^0-9]*'
-      AND CAST(s.reward_amount_atomic AS INTEGER) <= 100000000
       AND s.reward_swap_signature IS NULL
+      AND s.reward_spent_atomic <> s.reward_amount_atomic
       AND s.state IN ('reconciled', 'distributed', 'buyback_burned')
-      AND NOT EXISTS (SELECT 1 FROM automation_jobs j
-        WHERE j.entity_id = s.id AND j.job_type = 'solana_reward_purchase')
+      AND NOT EXISTS (SELECT 1 FROM settlement_steps step
+        WHERE step.settlement_id = s.id AND step.stage = 'automatic_reward_chunk'
+          AND step.state <> 'verified')
+      AND NOT EXISTS (SELECT 1 FROM automation_jobs old_job
+        WHERE old_job.entity_id = s.id AND old_job.entity_type = 'settlement'
+          AND old_job.job_type = 'solana_reward_purchase')
     ORDER BY s.created_at ASC LIMIT 25
-  `).bind(setting.value, config.rewardTreasury).all<{
-    settlement_id: string; reward_amount_atomic: string; launch_id: string;
+  `).bind(platformMint, config.rewardTreasury).all<{
+    settlement_id: string; reward_amount_atomic: string; reward_spent_atomic: string; launch_id: string;
     reward_symbol: string; reward_mint: string;
   }>();
-  const eligible = rows.results.filter((row) => {
+  const eligible = rows.results.flatMap((row) => {
     const asset = getRewardOption("solana", row.reward_symbol);
-    return asset?.tokenAddress === row.reward_mint &&
-      BigInt(row.reward_amount_atomic) <= 100_000_000n;
+    if (asset?.tokenAddress !== row.reward_mint) return [];
+    try {
+      const chunk = planAutomaticRewardChunk(row.reward_amount_atomic, row.reward_spent_atomic);
+      return chunk ? [{ row, chunk }] : [];
+    } catch { return []; }
   });
   if (!eligible.length) return;
   const now = Date.now();
-  await database.batch(eligible.map((row) => database.prepare(`
-    INSERT OR IGNORE INTO automation_jobs
-      (id, job_type, entity_type, entity_id, chain, payload_json, state, available_at)
-    VALUES (?1, 'solana_reward_purchase', 'settlement', ?2, 'solana', ?3, 'queued', ?4)
-  `).bind(crypto.randomUUID(), row.settlement_id, JSON.stringify({
-    settlementId: row.settlement_id,
-    launchId: row.launch_id,
-    rewardAmountLamports: row.reward_amount_atomic,
-    rewardSymbol: row.reward_symbol,
-    rewardMint: row.reward_mint,
-  }), now)));
+  for (const { row, chunk } of eligible) {
+    const stepId = crypto.randomUUID();
+    const jobId = crypto.randomUUID();
+    const payload = JSON.stringify({
+      settlementId: row.settlement_id, stepId, launchId: row.launch_id,
+      rewardAmountLamports: chunk.inputAmountLamports,
+      rewardTotalLamports: row.reward_amount_atomic,
+      chunkOffsetAtomic: chunk.offsetAtomic,
+      rewardSymbol: row.reward_symbol, rewardMint: row.reward_mint,
+    });
+    try {
+      await database.batch([
+        database.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_SQL).bind(
+          stepId, automaticRewardChunkKey(row.settlement_id, chunk.offsetAtomic),
+          chunk.inputAmountLamports, row.settlement_id, chunk.offsetAtomic,
+          row.reward_amount_atomic, config.rewardTreasury, config.sportpadMint ?? null),
+        database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+        database.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_JOB_SQL).bind(jobId, stepId, payload, now),
+        database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      ]);
+    } catch (error) {
+      // A concurrent seeder can win the single-active-step CAS. Any other
+      // failure must surface rather than silently strand a settlement.
+      const message = error instanceof Error ? error.message : "unknown";
+      if (!message.includes("sportpad_cas_conflict") && !message.includes("UNIQUE constraint failed")) throw error;
+    }
+  }
 }
 
 async function seedBuybackJobs(database: D1Database) {
@@ -235,10 +288,10 @@ async function closeMatureRewardEpoch(database: D1Database, chain: "chiliz" | "s
       e.state, l.reward_mint
     FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
     WHERE e.state IN ('accruing', 'allocating') AND datetime(e.ends_at) <= CURRENT_TIMESTAMP
+      AND l.status = 'mainnet_published'
       AND l.reward_chain = ?1 AND (?1 <> 'chiliz' OR l.reward_wrapped_contract IS NULL)
       AND (?2 IS NULL OR e.launch_id = ?2)
-      AND EXISTS (SELECT 1 FROM holder_snapshot_checkpoints c WHERE c.epoch_id = e.id
-        AND c.last_observed_at >= CAST(strftime('%s', e.ends_at) AS INTEGER))
+      AND ${COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL}
       AND (?1 <> 'solana' OR EXISTS (SELECT 1 FROM protocol_events p
         WHERE p.entity_type = 'epoch' AND p.entity_id = e.id
           AND p.event_type = 'automatic_reward_epoch_opened'))
@@ -302,6 +355,12 @@ async function closeMatureRewardEpoch(database: D1Database, chain: "chiliz" | "s
         reward_decimals = ?7, cutoff_slot = ?4, allocation_hash = ?5, closed_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND state = 'allocating'
           AND funded_amount_atomic = ?6 AND datetime(ends_at) <= CURRENT_TIMESTAMP
+          AND EXISTS (SELECT 1 FROM launch_drafts l WHERE l.id = reward_epochs.launch_id
+            AND l.status = 'mainnet_published')
+          AND EXISTS (SELECT 1 FROM holder_snapshot_checkpoints c WHERE c.epoch_id = reward_epochs.id
+            AND c.first_finalized_at IS NOT NULL
+            AND c.first_finalized_at <= CAST(strftime('%s', reward_epochs.starts_at) AS INTEGER)
+            AND c.last_observed_at >= CAST(strftime('%s', reward_epochs.ends_at) AS INTEGER))
     `).bind(epoch.id, allocatedAtomic.toString(), dustAtomic.toString(), cutoffSlot,
       allocationHash, epoch.funded_amount_atomic, epoch.reward_decimals),
     database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
@@ -347,6 +406,7 @@ async function leaseJob(database: D1Database, workerId: string, jobTypes: string
       SELECT id, job_type, entity_type, entity_id, chain, payload_json, state, attempt, leased_until, error_code, tx_hash
       FROM automation_jobs
       WHERE job_type IN (${placeholders}) AND available_at <= ?1
+        AND (job_type <> 'solana_reward_purchase' OR entity_type = 'settlement_step')
         AND (state = 'queued' OR (state = 'leased' AND leased_until < ?1))
       ORDER BY available_at ASC, created_at ASC LIMIT 1
     `).bind(now, ...jobTypes).first<AutomationRow>();
@@ -364,13 +424,22 @@ async function leaseJob(database: D1Database, workerId: string, jobTypes: string
   return null;
 }
 
-async function completeJob(database: D1Database, job: AutomationRow, workerId: string, txHash: string, outputAmountAtomic?: string, sourceTxHash?: string) {
+async function completeJob(database: D1Database, job: AutomationRow, workerId: string, txHash: string,
+  outputAmountAtomic?: string, sourceTxHash?: string, verifiedSlot?: number) {
   // Claim the completion first, then apply every ledger effect in the same D1
   // transaction. Each zero-row compare-and-swap must throw so D1 rolls back.
   const statements: D1PreparedStatement[] = [
     job.state === "reconciliation_required" && job.job_type === "solana_reward_purchase"
       ? database.prepare(COMPLETE_RECONCILED_JOB_SQL).bind(job.id, txHash)
-      : database.prepare(COMPLETE_BROADCAST_JOB_SQL).bind(job.id, txHash, `broadcasting:${workerId}`),
+      : job.state === "reconciliation_required" && job.job_type === "solana_claim_payout"
+        ? database.prepare(`
+          UPDATE automation_jobs SET state = 'complete', tx_hash = ?2, error_code = NULL,
+            leased_until = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?1 AND state = 'reconciliation_required'
+            AND job_type = 'solana_claim_payout'
+            AND (tx_hash IS NULL OR tx_hash = ?2)
+        `).bind(job.id, txHash)
+        : database.prepare(COMPLETE_BROADCAST_JOB_SQL).bind(job.id, txHash, `broadcasting:${workerId}`),
     database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
   ];
   if (job.job_type === "chiliz_claim_unwrap" || job.job_type === "solana_claim_payout") {
@@ -390,6 +459,13 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
     }
     const vaultMint = claim.reward_mint;
     if (!vaultMint) throw new Error("claim_vault_mint_missing");
+    let vaultFence: Awaited<ReturnType<typeof readSolanaVaultFence>> | null = null;
+    if (job.job_type === "solana_claim_payout") {
+      const rewardTreasury = readMainnetConfig().rewardTreasury;
+      if (!rewardTreasury || workerId !== `solana:${rewardTreasury}` ||
+        claim.reward_chain !== "solana") throw new Error("claim_vault_treasury_mismatch");
+      vaultFence = await readSolanaVaultFence(database, rewardTreasury, vaultMint);
+    }
     const vault = await database.prepare(`
       SELECT inventory_atomic, reserved_atomic, claimed_atomic FROM reward_vaults
       WHERE launch_id = ?1 AND reward_mint = ?2
@@ -402,6 +478,11 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
     const inventory = BigInt(vault.inventory_atomic);
     const reserved = BigInt(vault.reserved_atomic);
     if (inventory < claimAmount || reserved < claimAmount) throw new Error("claim_vault_accounting_underflow");
+    if (vaultFence) {
+      statements.push(database.prepare(UPDATE_SOLANA_VAULT_FENCE_SQL).bind(
+        vaultFence.key, vaultFence.priorValue, vaultFence.nextValue));
+      statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
+    }
     statements.push(database.prepare(COMPLETE_CLAIM_VAULT_SQL).bind(
       claim.launch_id,
       vaultMint,
@@ -416,6 +497,11 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
     statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
     statements.push(database.prepare(COMPLETE_CLAIM_SQL).bind(job.entity_id, txHash));
     statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
+    if (job.job_type === "solana_claim_payout") {
+      statements.push(database.prepare(COMPLETE_AUTOMATIC_CLAIM_INTENT_SQL).bind(
+        `automation:claim:payout:${job.id}:${job.attempt}`, job.entity_id, txHash));
+      statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
+    }
   } else if (job.job_type === "chiliz_reward_purchase") {
     if (!outputAmountAtomic) throw new Error("purchase_output_missing");
     const payload = JSON.parse(job.payload_json) as { launchId: string; fanTokenContract: string };
@@ -443,7 +529,9 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
       `).bind(epoch.id, nextFunding, epoch.funded_amount_atomic));
       statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
     } else if (!epoch) {
-      const startsAt = new Date();
+      // Give the finalized holder indexer time to establish a pre-start
+      // checkpoint. A missed warm-up makes this epoch fail closed.
+      const startsAt = new Date(Date.now() + 5 * 60 * 1_000);
       const endsAt = new Date(startsAt.getTime() + 24 * 60 * 60 * 1_000);
       statements.push(database.prepare(`
         INSERT INTO reward_epochs
@@ -453,12 +541,44 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
       statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
     }
   } else if (job.job_type === "solana_reward_purchase") {
-    if (!outputAmountAtomic || sourceTxHash) throw new Error("solana_reward_receipt_missing");
+    if (!outputAmountAtomic || sourceTxHash || !Number.isSafeInteger(verifiedSlot) ||
+      !verifiedSlot || verifiedSlot <= 0) throw new Error("solana_reward_receipt_missing");
     const payload = JSON.parse(job.payload_json) as {
-      launchId: string; rewardMint: string; rewardAmountLamports: string;
+      settlementId: string; stepId: string; launchId: string; rewardMint: string;
+      rewardAmountLamports: string; rewardTotalLamports: string; chunkOffsetAtomic: string;
     };
     const owner = readMainnetConfig().rewardTreasury;
     if (!owner || workerId !== `solana:${owner}`) throw new Error("solana_reward_owner_mismatch");
+    const step = await database.prepare(`
+      SELECT step.settlement_id, step.state, step.input_amount_atomic, step.output_mint,
+        step.idempotency_key, s.reward_amount_atomic, s.reward_spent_atomic,
+        s.reward_swap_signature, s.state AS settlement_state,
+        f.launch_id, l.status AS launch_status, l.reward_chain, l.reward_mint,
+        l.mainnet_reward_treasury
+      FROM settlement_steps step JOIN settlements s ON s.id = step.settlement_id
+      JOIN fee_events f ON f.id = s.fee_event_id
+      JOIN launch_drafts l ON l.id = f.launch_id
+      WHERE step.id = ?1 AND step.stage = 'automatic_reward_chunk'
+    `).bind(job.entity_id).first<{
+      settlement_id: string; state: string; input_amount_atomic: string; output_mint: string;
+      idempotency_key: string; reward_amount_atomic: string; reward_spent_atomic: string;
+      reward_swap_signature: string | null; settlement_state: string; launch_id: string;
+      launch_status: string; reward_chain: string; reward_mint: string;
+      mainnet_reward_treasury: string | null;
+    }>();
+    const chunk = step && planAutomaticRewardChunk(step.reward_amount_atomic, step.reward_spent_atomic);
+    if (!step || !chunk || job.entity_type !== "settlement_step" ||
+      step.state !== "planned" || step.reward_swap_signature !== null ||
+      !["reconciled", "distributed", "buyback_burned"].includes(step.settlement_state) ||
+      step.launch_status !== "mainnet_published" || step.reward_chain !== "solana" ||
+      step.mainnet_reward_treasury !== owner || step.reward_mint !== payload.rewardMint ||
+      step.output_mint !== payload.rewardMint || step.launch_id !== payload.launchId ||
+      step.settlement_id !== payload.settlementId || payload.stepId !== job.entity_id ||
+      step.input_amount_atomic !== chunk.inputAmountLamports ||
+      step.idempotency_key !== automaticRewardChunkKey(step.settlement_id, chunk.offsetAtomic) ||
+      payload.rewardAmountLamports !== chunk.inputAmountLamports ||
+      payload.rewardTotalLamports !== step.reward_amount_atomic ||
+      payload.chunkOffsetAtomic !== chunk.offsetAtomic) throw new Error("solana_reward_chunk_snapshot_mismatch");
     await closeMatureRewardEpoch(database, "solana", payload.launchId);
     const mint = new PublicKey(payload.rewardMint);
     const mintAccount = await getMainnetConnection().getAccountInfo(mint, "finalized");
@@ -488,13 +608,27 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
     if (epoch && Date.parse(epoch.ends_at) <= Date.now()) {
       throw new Error("solana_epoch_final_snapshot_pending");
     }
+    const fence = await readSolanaVaultFence(database, owner, payload.rewardMint);
+    await readSolanaRewardVaultSolvency(database, getMainnetConnection(), {
+      mint: payload.rewardMint, treasury: owner,
+      change: { type: "purchase_completed", amountAtomic: outputAmountAtomic },
+    });
     const nextInventory = (BigInt(vault?.inventory_atomic ?? "0") + BigInt(outputAmountAtomic)).toString();
     statements.push(
-      database.prepare(COMPLETE_SOLANA_PURCHASE_SETTLEMENT_SQL).bind(job.entity_id, txHash,
-        payload.launchId, payload.rewardMint, owner, payload.rewardAmountLamports),
+      database.prepare(UPDATE_SOLANA_VAULT_FENCE_SQL).bind(fence.key, fence.priorValue, fence.nextValue),
+      database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      database.prepare(COMPLETE_AUTOMATIC_REWARD_CHUNK_SQL).bind(
+        job.entity_id, txHash, outputAmountAtomic, verifiedSlot,
+        chunk.inputAmountLamports, payload.rewardMint, job.id,
+        `automation:reward:swap:${job.entity_id}`),
+      database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
+      database.prepare(ADVANCE_AUTOMATIC_REWARD_SETTLEMENT_SQL).bind(
+        step.settlement_id, chunk.offsetAtomic, step.reward_amount_atomic,
+        chunk.nextSpentAtomic, txHash, job.entity_id, chunk.inputAmountLamports,
+        readMainnetConfig().sportpadMint ?? null, owner),
       database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
       database.prepare(COMPLETE_SOLANA_PURCHASE_VAULT_SQL).bind(crypto.randomUUID(),
-        payload.launchId, payload.rewardMint, owner, tokenAccount, nextInventory, null,
+        payload.launchId, payload.rewardMint, owner, tokenAccount, nextInventory, verifiedSlot,
         vault?.inventory_atomic ?? "0"),
       database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
     );
@@ -507,7 +641,8 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
         mintState.decimals, epoch.funded_amount_atomic));
       statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
     } else {
-      const startsAt = new Date();
+      // Require a finalized holder snapshot before the first eligible second.
+      const startsAt = new Date(Date.now() + 15 * 60 * 1_000);
       const epochId = crypto.randomUUID();
       statements.push(database.prepare(`
         INSERT INTO reward_epochs
@@ -668,15 +803,21 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
   } else if (job.job_type === "solana_reward_purchase") {
     const [row, setting] = await Promise.all([
       database.prepare(`
-        SELECT s.reward_amount_atomic, f.launch_id, l.mainnet_mint,
+        SELECT step.settlement_id, step.state AS step_state, step.idempotency_key,
+          step.input_amount_atomic, s.reward_amount_atomic, s.reward_spent_atomic,
+          f.launch_id, l.mainnet_mint,
           l.mainnet_reward_treasury, l.reward_chain, l.reward_symbol, l.reward_mint,
           l.status AS launch_status
-        FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+        FROM settlement_steps step JOIN settlements s ON s.id = step.settlement_id
+        JOIN fee_events f ON f.id = s.fee_event_id
         JOIN launch_drafts l ON l.id = f.launch_id
-        WHERE s.id = ?1 AND s.reward_swap_signature IS NULL
+        WHERE step.id = ?1 AND step.stage = 'automatic_reward_chunk'
+          AND s.reward_swap_signature IS NULL
           AND s.state IN ('reconciled', 'distributed', 'buyback_burned')
       `).bind(job.entity_id).first<{
-        reward_amount_atomic: string; launch_id: string; mainnet_mint: string | null;
+        settlement_id: string; step_state: string; idempotency_key: string;
+        input_amount_atomic: string; reward_amount_atomic: string; reward_spent_atomic: string;
+        launch_id: string; mainnet_mint: string | null;
         mainnet_reward_treasury: string | null; reward_chain: string;
         reward_symbol: string; reward_mint: string | null; launch_status: string;
       }>(),
@@ -684,21 +825,28 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
         .first<{ value: string }>(),
     ]);
     const asset = row && getRewardOption("solana", row.reward_symbol);
-    if (!row || !asset || !setting?.value || job.entity_type !== "settlement" ||
+    const platformMint = setting?.value ?? config.sportpadMint ?? null;
+    const chunk = row && planAutomaticRewardChunk(row.reward_amount_atomic, row.reward_spent_atomic);
+    if (!row || !asset || !chunk || job.entity_type !== "settlement_step" ||
+      row.step_state !== "planned" || row.idempotency_key !==
+        automaticRewardChunkKey(row.settlement_id, chunk.offsetAtomic) ||
+      row.input_amount_atomic !== chunk.inputAmountLamports ||
       row.reward_chain !== "solana" || asset.tokenAddress !== row.reward_mint ||
-      !row.mainnet_mint || row.mainnet_mint === setting.value ||
+      !row.mainnet_mint || (platformMint && row.mainnet_mint === platformMint) ||
       row.mainnet_reward_treasury !== config.rewardTreasury ||
       row.launch_status !== "mainnet_published" ||
-      !/^[1-9][0-9]*$/.test(row.reward_amount_atomic) ||
-      payload.settlementId !== job.entity_id || payload.launchId !== row.launch_id ||
-      payload.rewardAmountLamports !== row.reward_amount_atomic ||
+      payload.settlementId !== row.settlement_id || payload.stepId !== job.entity_id ||
+      payload.launchId !== row.launch_id ||
+      payload.rewardAmountLamports !== chunk.inputAmountLamports ||
+      payload.rewardTotalLamports !== row.reward_amount_atomic ||
+      payload.chunkOffsetAtomic !== chunk.offsetAtomic ||
       payload.rewardSymbol !== row.reward_symbol || payload.rewardMint !== row.reward_mint ||
       !reportedOutput || sourceTxHash ||
-      (config.sportpadMint && config.sportpadMint !== setting.value)) {
+      (config.sportpadMint && setting?.value && config.sportpadMint !== setting.value)) {
       throw new Error("solana_reward_job_snapshot_mismatch");
     }
     expected = { mint: row.reward_mint, treasury: expectedWorkerTreasury,
-      inputAmountLamports: row.reward_amount_atomic, purchasedAmountAtomic: reportedOutput };
+      inputAmountLamports: chunk.inputAmountLamports, purchasedAmountAtomic: reportedOutput };
   } else if (job.job_type === "sportpad_buyback_burn") {
     const [row, setting] = await Promise.all([
       database.prepare(`
@@ -748,11 +896,26 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
     return { signature, receipt, status: statuses.value[0] ?? null };
   };
   if (job.job_type === "solana_claim_payout") {
+    const payout = await loadEvidence(txHash);
     verifySolanaClaimPayoutReceipt({
-      ...(await loadEvidence(txHash)),
+      ...payout,
       mint: expected.mint, tokenProgram: mintAccount.owner.toBase58(), decimals: mintState.decimals,
       treasury: expected.treasury, recipient: expected.recipient!, amountAtomic: expected.amountAtomic!,
     });
+    const intent = await database.prepare(`
+      SELECT idempotency_key, claim_id, signer_role, signer_address, action, state,
+        expected_programs_json, expected_mints_json, maximum_spend_lamports,
+        provider_request_id, unsigned_transaction_base64, transaction_message_hash,
+        last_valid_block_height, input_mint, input_amount_atomic, tx_signature
+      FROM transaction_intents WHERE idempotency_key = ?1 LIMIT 1
+    `).bind(`automation:claim:payout:${job.id}:${job.attempt}`)
+      .first<PersistedAutomaticClaimIntent>();
+    await verifyPersistedAutomaticClaimIntent({ intent, expected: {
+      claimId: job.entity_id, jobId: job.id, attempt: job.attempt,
+      signature: txHash, treasury: expected.treasury, mint: expected.mint,
+      recipient: expected.recipient!, amountAtomic: expected.amountAtomic!,
+      decimals: mintState.decimals, tokenProgram: mintAccount.owner.toBase58(),
+    }, receipt: payout.receipt, status: payout.status });
     return undefined;
   }
   if (job.job_type === "solana_reward_purchase") {
@@ -773,15 +936,17 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
       purchasedAmountAtomic: expected.purchasedAmountAtomic!,
       minimumOutputAtomic: intent.minimum_output_atomic,
     });
-    await verifyPersistedAutomaticRewardIntent({
+    const purchasePayload = payload as { settlementId: string };
+    await verifyPersistedAutomaticRewardChunkIntent({
       intent,
-      expected: { settlementId: job.entity_id, treasury: expected.treasury,
+      expected: { settlementId: purchasePayload.settlementId, stepId: job.entity_id,
+        treasury: expected.treasury,
         rewardMint: expected.mint, inputAmountLamports: expected.inputAmountLamports!,
         purchasedAmountAtomic: verified.purchasedAmountAtomic, swapSignature: txHash },
       swapReceipt: swap.receipt,
       swapStatus: swap.status,
     });
-    return verified.purchasedAmountAtomic;
+    return { outputAmountAtomic: verified.purchasedAmountAtomic, verifiedSlot: verified.swapSlot };
   }
   const [swap, burn] = await Promise.all([loadEvidence(sourceTxHash!), loadEvidence(txHash)]);
   const verified = verifySportpadBuybackReceipts({
@@ -811,7 +976,9 @@ async function verifiedSolanaOutput(database: D1Database, job: AutomationRow,
 
 async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: string) {
   const config = readMainnetConfig();
-  if (!config.rewardTreasury || workerId !== `solana:${config.rewardTreasury}`) return;
+  if (!config.rewardTreasury || workerId !== `solana:${config.rewardTreasury}`) {
+    throw new Error("reward_reconciliation_worker_mismatch");
+  }
   const row = await database.prepare(`
     SELECT j.id, j.job_type, j.entity_type, j.entity_id, j.chain,
       j.payload_json, j.state, j.attempt, j.leased_until, j.error_code,
@@ -819,6 +986,7 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
     FROM automation_jobs j JOIN transaction_intents i
       ON i.idempotency_key = 'automation:reward:swap:' || j.entity_id
     WHERE j.job_type = 'solana_reward_purchase'
+      AND j.entity_type = 'settlement_step'
       AND j.state IN ('broadcasting', 'reconciliation_required')
       AND i.tx_signature IS NOT NULL
       AND (j.state = 'reconciliation_required' OR j.error_code = ?1)
@@ -827,7 +995,7 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
     ORDER BY j.updated_at ASC LIMIT 1
   `).bind(`broadcasting:${workerId}`, Date.now())
     .first<AutomationRow & { prepared_signature: string }>();
-  if (!row) return;
+  if (!row) return false;
   const defer = async () => database.prepare(`
     UPDATE automation_jobs SET available_at = ?2
     WHERE id = ?1 AND state IN ('broadcasting', 'reconciliation_required')
@@ -842,12 +1010,12 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
     ]);
     const status = statuses.value[0] ?? null;
     if (!receipt || !status || status.confirmationStatus !== "finalized" ||
-      status.err !== null) { await defer(); return; }
+      status.err !== null) { await defer(); return false; }
     const payload = JSON.parse(row.payload_json) as { rewardMint: string };
     const mint = new PublicKey(payload.rewardMint);
     const mintAccount = await rpc.getAccountInfo(mint, "finalized");
     if (!mintAccount || (!mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
-      !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID))) { await defer(); return; }
+      !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID))) { await defer(); return false; }
     const mintState = await getMint(rpc, mint, "finalized", mintAccount.owner);
     const output = observedSolanaRewardPurchaseOutput({
       signature: row.prepared_signature, receipt, status,
@@ -856,14 +1024,17 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
     });
     const verified = await verifiedSolanaOutput(database, row, workerId,
       row.prepared_signature, undefined, output);
-    if (!verified) throw new Error("reward_reconciliation_output_missing");
-    await completeJob(database, row, workerId, row.prepared_signature, verified);
+    if (!verified || typeof verified !== "object") throw new Error("reward_reconciliation_output_missing");
+    await completeJob(database, row, workerId, row.prepared_signature,
+      verified.outputAmountAtomic, undefined, verified.verifiedSlot);
+    return true;
   } catch (error) {
     // Never form a second purchase while the persisted signature is ambiguous.
     // A later lease retries this same finalized signature without rebroadcast.
     console.error("reward_purchase_reconciliation_pending",
       error instanceof Error ? error.message : "unknown");
     await defer();
+    return false;
   }
 }
 
@@ -939,23 +1110,29 @@ type PrepareRewardRequest = Extract<z.infer<typeof requestSchema>, { action: "pr
 
 async function persistPreparedRewardSwap(database: D1Database, job: AutomationRow, input: PrepareRewardRequest) {
   if (!FINANCIAL_LEDGER_VERIFIED || job.job_type !== "solana_reward_purchase" ||
-    job.entity_type !== "settlement" || job.chain !== "solana") {
+    job.entity_type !== "settlement_step" || job.chain !== "solana") {
     throw new Error("reward_purchase_automation_lane_closed");
   }
   const config = readMainnetConfig();
   if (!config.rewardTreasury || input.workerId !== `solana:${config.rewardTreasury}`) {
     throw new Error("reward_purchase_worker_treasury_mismatch");
   }
-  const [settlement, setting] = await Promise.all([
+  const [step, setting] = await Promise.all([
     database.prepare(`
-      SELECT s.reward_amount_atomic, s.state, f.launch_id, l.mainnet_mint,
+      SELECT step.settlement_id, step.state AS step_state, step.idempotency_key,
+        step.input_amount_atomic, step.output_mint,
+        s.reward_amount_atomic, s.reward_spent_atomic, s.state, f.launch_id, l.mainnet_mint,
         l.mainnet_reward_treasury, l.reward_chain, l.reward_symbol, l.reward_mint,
         l.status AS launch_status
-      FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+      FROM settlement_steps step JOIN settlements s ON s.id = step.settlement_id
+      JOIN fee_events f ON f.id = s.fee_event_id
       JOIN launch_drafts l ON l.id = f.launch_id
-      WHERE s.id = ?1 AND s.reward_swap_signature IS NULL
+      WHERE step.id = ?1 AND step.stage = 'automatic_reward_chunk'
+        AND s.reward_swap_signature IS NULL
     `).bind(job.entity_id).first<{
-      reward_amount_atomic: string; state: string; launch_id: string;
+      settlement_id: string; step_state: string; idempotency_key: string;
+      input_amount_atomic: string; output_mint: string;
+      reward_amount_atomic: string; reward_spent_atomic: string; state: string; launch_id: string;
       mainnet_mint: string | null; mainnet_reward_treasury: string | null;
       reward_chain: string; reward_symbol: string; reward_mint: string | null;
       launch_status: string;
@@ -964,22 +1141,28 @@ async function persistPreparedRewardSwap(database: D1Database, job: AutomationRo
       .first<{ value: string }>(),
   ]);
   const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
-  const asset = settlement?.reward_chain === "solana"
-    ? getRewardOption("solana", settlement.reward_symbol) : null;
-  if (!settlement || !asset || !setting?.value || !settlement.mainnet_mint ||
-    settlement.mainnet_mint === setting.value ||
-    settlement.mainnet_reward_treasury !== config.rewardTreasury ||
-    settlement.launch_status !== "mainnet_published" ||
-    asset.tokenAddress !== settlement.reward_mint ||
-    !/^[1-9][0-9]*$/.test(settlement.reward_amount_atomic) ||
-    !["reconciled", "distributed", "buyback_burned"].includes(settlement.state) ||
-    payload.settlementId !== job.entity_id || payload.launchId !== settlement.launch_id ||
-    payload.rewardAmountLamports !== settlement.reward_amount_atomic ||
-    payload.rewardSymbol !== settlement.reward_symbol || payload.rewardMint !== settlement.reward_mint ||
-    input.outputMint !== settlement.reward_mint ||
-    input.inputAmountLamports !== settlement.reward_amount_atomic ||
-    (config.sportpadMint && config.sportpadMint !== setting.value) ||
-    BigInt(input.inputAmountLamports) > 100_000_000n ||
+  const asset = step?.reward_chain === "solana"
+    ? getRewardOption("solana", step.reward_symbol) : null;
+  const chunk = step && planAutomaticRewardChunk(step.reward_amount_atomic, step.reward_spent_atomic);
+  const platformMint = setting?.value ?? config.sportpadMint ?? null;
+  if (!step || !asset || !chunk || !step.mainnet_mint ||
+    (platformMint && step.mainnet_mint === platformMint) ||
+    step.mainnet_reward_treasury !== config.rewardTreasury ||
+    step.launch_status !== "mainnet_published" ||
+    asset.tokenAddress !== step.reward_mint || step.output_mint !== step.reward_mint ||
+    step.step_state !== "planned" ||
+    step.idempotency_key !== automaticRewardChunkKey(step.settlement_id, chunk.offsetAtomic) ||
+    step.input_amount_atomic !== chunk.inputAmountLamports ||
+    !["reconciled", "distributed", "buyback_burned"].includes(step.state) ||
+    payload.settlementId !== step.settlement_id || payload.stepId !== job.entity_id ||
+    payload.launchId !== step.launch_id ||
+    payload.rewardAmountLamports !== chunk.inputAmountLamports ||
+    payload.rewardTotalLamports !== step.reward_amount_atomic ||
+    payload.chunkOffsetAtomic !== chunk.offsetAtomic ||
+    payload.rewardSymbol !== step.reward_symbol || payload.rewardMint !== step.reward_mint ||
+    input.outputMint !== step.reward_mint ||
+    input.inputAmountLamports !== chunk.inputAmountLamports ||
+    (config.sportpadMint && setting?.value && config.sportpadMint !== setting.value) ||
     BigInt(input.minimumOutputAtomic) > 18_446_744_073_709_551_615n) {
     throw new Error("reward_purchase_order_job_snapshot_mismatch");
   }
@@ -995,19 +1178,221 @@ async function persistPreparedRewardSwap(database: D1Database, job: AutomationRo
     treasury: config.rewardTreasury,
   });
   const intentId = crypto.randomUUID();
-  const inserted = await database.prepare(INSERT_AUTOMATIC_REWARD_INTENT_SQL).bind(
-    intentId, `automation:reward:swap:${job.entity_id}`, job.entity_id, config.rewardTreasury,
+  const inserted = await database.prepare(INSERT_AUTOMATIC_REWARD_CHUNK_INTENT_SQL).bind(
+    intentId, `automation:reward:swap:${job.entity_id}`, step.settlement_id, config.rewardTreasury,
     JSON.stringify(["jupiter_v2_metis_pinned"]),
-    JSON.stringify([NATIVE_MINT.toBase58(), settlement.reward_mint]),
+    JSON.stringify([NATIVE_MINT.toBase58(), step.reward_mint]),
     input.inputAmountLamports, input.providerRequestId,
     input.unsignedTransactionBase64, prepared.transactionMessageHash,
-    input.lastValidBlockHeight, NATIVE_MINT.toBase58(), settlement.reward_mint,
+    input.lastValidBlockHeight, NATIVE_MINT.toBase58(), step.reward_mint,
     input.inputAmountLamports, input.minimumOutputAtomic,
     prepared.txSignature, new Date(Date.now() + 90_000).toISOString(),
-    job.id, `broadcasting:${input.workerId}`,
+    job.id, `broadcasting:${input.workerId}`, job.entity_id, config.sportpadMint ?? null,
   ).run();
   if (inserted.meta.changes !== 1) throw new Error("reward_purchase_order_intent_conflict_or_paused");
   return { intentId, txSignature: prepared.txSignature };
+}
+
+type PrepareClaimRequest = Extract<z.infer<typeof requestSchema>, { action: "prepare_solana_claim_payout" }>;
+
+async function persistPreparedSolanaClaim(database: D1Database, job: AutomationRow, input: PrepareClaimRequest) {
+  if (!FINANCIAL_LEDGER_VERIFIED || !CLAIM_PAYOUT_EXECUTION_SAFE ||
+    job.job_type !== "solana_claim_payout" || job.entity_type !== "reward_claim" ||
+    job.chain !== "solana") throw new Error("claim_payout_automation_lane_closed");
+  const config = readMainnetConfig();
+  if (!config.rewardTreasury || input.workerId !== `solana:${config.rewardTreasury}`) {
+    throw new Error("claim_payout_worker_treasury_mismatch");
+  }
+  const claim = await database.prepare(`
+    SELECT c.amount_atomic, c.destination_address, c.destination_chain, e.launch_id,
+      l.reward_chain, l.reward_mint, l.reward_symbol,
+      l.mainnet_reward_treasury, l.status AS launch_status
+    FROM reward_claims c JOIN reward_epochs e ON e.id = c.epoch_id
+    JOIN launch_drafts l ON l.id = e.launch_id
+    WHERE c.id = ?1 AND c.state = 'queued' AND c.claim_signature IS NULL
+  `).bind(job.entity_id).first<{
+    amount_atomic: string; destination_address: string; destination_chain: string; launch_id: string;
+    reward_chain: string; reward_mint: string; reward_symbol: string;
+    mainnet_reward_treasury: string | null; launch_status: string;
+  }>();
+  const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+  const asset = claim && getRewardOption("solana", claim.reward_symbol);
+  if (!claim || !asset || claim.reward_chain !== "solana" ||
+    claim.destination_chain !== "solana" || claim.launch_status !== "mainnet_published" ||
+    claim.mainnet_reward_treasury !== config.rewardTreasury ||
+    asset.tokenAddress !== claim.reward_mint ||
+    payload.claimId !== job.entity_id || payload.tokenAddress !== claim.reward_mint ||
+    payload.destinationAddress !== claim.destination_address ||
+    payload.amountAtomic !== claim.amount_atomic ||
+    input.tokenAddress !== claim.reward_mint ||
+    input.destinationAddress !== claim.destination_address ||
+    input.amountAtomic !== claim.amount_atomic ||
+    BigInt(input.amountAtomic) > 18_446_744_073_709_551_615n) {
+    throw new Error("claim_payout_job_snapshot_mismatch");
+  }
+  const controls = await readAutomationControls(database);
+  if (!laneAllowsJob(job.job_type, controls)) throw new Error("claim_payout_lane_paused");
+  const rpc = getMainnetConnection();
+  await readSolanaRewardVaultSolvency(database, rpc, {
+    mint: claim.reward_mint, treasury: config.rewardTreasury,
+    change: { type: "none" }, requiredLaunchId: claim.launch_id,
+  });
+  const currentHeight = await rpc.getBlockHeight("confirmed");
+  if (input.lastValidBlockHeight <= currentHeight || input.lastValidBlockHeight > currentHeight + 300) {
+    throw new Error("claim_payout_blockhash_window_invalid");
+  }
+  const mint = new PublicKey(claim.reward_mint);
+  const mintAccount = await rpc.getAccountInfo(mint, "finalized");
+  if (!mintAccount || (!mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
+    !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID))) throw new Error("claim_payout_mint_invalid");
+  const mintState = await getMint(rpc, mint, "finalized", mintAccount.owner);
+  const prepared = await inspectPreparedAutomaticClaimPayout(input.signedTransactionBase64, {
+    treasury: config.rewardTreasury, mint: claim.reward_mint,
+    recipient: claim.destination_address, amountAtomic: claim.amount_atomic,
+    decimals: mintState.decimals, tokenProgram: mintAccount.owner.toBase58(),
+  });
+  const intentId = crypto.randomUUID();
+  const inserted = await database.prepare(INSERT_AUTOMATIC_CLAIM_INTENT_SQL).bind(
+    intentId, `automation:claim:payout:${job.id}:${job.attempt}`, job.entity_id,
+    config.rewardTreasury, JSON.stringify([mintAccount.owner.toBase58()]),
+    JSON.stringify([claim.reward_mint]), prepared.blockhash,
+    input.signedTransactionBase64, prepared.transactionMessageHash,
+    input.lastValidBlockHeight, claim.reward_mint, claim.amount_atomic,
+    prepared.txSignature, new Date(Date.now() + 90_000).toISOString(),
+    job.id, `broadcasting:${input.workerId}`, claim.destination_address,
+  ).run();
+  if (inserted.meta.changes !== 1) throw new Error("claim_payout_intent_conflict_or_paused");
+  return { intentId, txSignature: prepared.txSignature };
+}
+
+async function reconcilePreparedSolanaClaim(database: D1Database, workerId: string,
+  allowReplay: boolean): Promise<{ reconciled: boolean; prepared?: {
+    jobId: string; payload: Record<string, unknown>; signature: string;
+    signedTransactionBase64: string; lastValidBlockHeight: number;
+  } }> {
+  const config = readMainnetConfig();
+  if (!config.rewardTreasury || workerId !== `solana:${config.rewardTreasury}`) {
+    throw new Error("claim_reconciliation_worker_mismatch");
+  }
+  const row = await database.prepare(`
+    SELECT j.id, j.job_type, j.entity_type, j.entity_id, j.chain,
+      j.payload_json, j.state, j.attempt, j.leased_until, j.error_code, j.tx_hash,
+      i.idempotency_key, i.claim_id, i.signer_role, i.signer_address, i.action,
+      i.state AS intent_state, i.expected_programs_json, i.expected_mints_json,
+      i.maximum_spend_lamports, i.provider_request_id,
+      i.unsigned_transaction_base64, i.transaction_message_hash,
+      i.last_valid_block_height, i.input_mint, i.input_amount_atomic,
+      i.tx_signature
+    FROM automation_jobs j JOIN transaction_intents i
+      ON i.idempotency_key = 'automation:claim:payout:' || j.id || ':' || j.attempt
+    WHERE j.job_type = 'solana_claim_payout' AND j.entity_type = 'reward_claim'
+      AND j.chain = 'solana' AND j.state IN ('broadcasting', 'reconciliation_required')
+      AND i.action = 'solana_claim_payout_automation' AND i.state = 'prepared'
+      AND i.claim_id = j.entity_id AND i.tx_signature IS NOT NULL
+      AND (j.state = 'reconciliation_required' OR j.error_code = ?1)
+      AND (j.tx_hash IS NULL OR j.tx_hash = i.tx_signature)
+      AND j.available_at <= ?2
+    ORDER BY j.updated_at ASC LIMIT 1
+  `).bind(`broadcasting:${workerId}`, Date.now())
+    .first<AutomationRow & PersistedAutomaticClaimIntent & { intent_state: string }>();
+  if (!row?.tx_signature) return { reconciled: false };
+  const defer = async () => database.prepare(`
+    UPDATE automation_jobs SET available_at = ?2
+    WHERE id = ?1 AND state IN ('broadcasting', 'reconciliation_required')
+      AND (tx_hash IS NULL OR tx_hash = ?3)
+  `).bind(row.id, Date.now() + 30_000, row.tx_signature).run();
+  try {
+    const rpc = getMainnetConnection();
+    const [receipt, statuses] = await Promise.all([
+      rpc.getTransaction(row.tx_signature,
+        { commitment: "finalized", maxSupportedTransactionVersion: 0 }),
+      rpc.getSignatureStatuses([row.tx_signature], { searchTransactionHistory: true }),
+    ]);
+    const status = statuses.value[0] ?? null;
+    if (receipt && status?.confirmationStatus === "finalized" && status.err === null) {
+      await verifiedSolanaOutput(database, row, workerId, row.tx_signature);
+      await completeJob(database, row, workerId, row.tx_signature);
+      return { reconciled: true };
+    }
+    // Finalized failures, missing archival evidence and expired blockhashes
+    // cannot be re-signed automatically. They remain reserved for audit.
+    if (!allowReplay || status?.err || status?.confirmationStatus === "finalized" || receipt?.meta?.err) {
+      await defer();
+      return { reconciled: false };
+    }
+    const currentHeight = await rpc.getBlockHeight("finalized");
+    if (!Number.isSafeInteger(row.last_valid_block_height) ||
+      !row.last_valid_block_height || currentHeight > row.last_valid_block_height) {
+      await defer();
+      return { reconciled: false };
+    }
+    const claim = await database.prepare(`
+      SELECT c.amount_atomic, c.destination_address, c.destination_chain,
+        l.reward_chain, l.reward_mint, l.reward_symbol,
+        l.mainnet_reward_treasury, l.status AS launch_status
+      FROM reward_claims c JOIN reward_epochs e ON e.id = c.epoch_id
+      JOIN launch_drafts l ON l.id = e.launch_id
+      WHERE c.id = ?1 AND c.state = 'queued' AND c.claim_signature IS NULL
+    `).bind(row.entity_id).first<{
+      amount_atomic: string; destination_address: string; destination_chain: string;
+      reward_chain: string; reward_mint: string; reward_symbol: string;
+      mainnet_reward_treasury: string | null; launch_status: string;
+    }>();
+    const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    const asset = claim && getRewardOption("solana", claim.reward_symbol);
+    if (!claim || !asset || claim.reward_chain !== "solana" ||
+      claim.destination_chain !== "solana" || claim.launch_status !== "mainnet_published" ||
+      claim.mainnet_reward_treasury !== config.rewardTreasury ||
+      asset.tokenAddress !== claim.reward_mint ||
+      payload.claimId !== row.entity_id || payload.tokenAddress !== claim.reward_mint ||
+      payload.destinationAddress !== claim.destination_address ||
+      payload.amountAtomic !== claim.amount_atomic ||
+      row.claim_id !== row.entity_id || row.signer_role !== "reward_treasury" ||
+      row.signer_address !== config.rewardTreasury ||
+      row.input_mint !== claim.reward_mint || row.input_amount_atomic !== claim.amount_atomic ||
+      row.maximum_spend_lamports !== "500000") {
+      throw new Error("claim_reconciliation_snapshot_mismatch");
+    }
+    const mint = new PublicKey(claim.reward_mint);
+    const mintAccount = await rpc.getAccountInfo(mint, "finalized");
+    if (!mintAccount || (!mintAccount.owner.equals(TOKEN_PROGRAM_ID) &&
+      !mintAccount.owner.equals(TOKEN_2022_PROGRAM_ID))) throw new Error("claim_reconciliation_mint_invalid");
+    const mintState = await getMint(rpc, mint, "finalized", mintAccount.owner);
+    if (row.expected_programs_json !== JSON.stringify([mintAccount.owner.toBase58()]) ||
+      row.expected_mints_json !== JSON.stringify([claim.reward_mint])) {
+      throw new Error("claim_reconciliation_program_mismatch");
+    }
+    const signedTransactionBase64 = row.unsigned_transaction_base64;
+    if (!signedTransactionBase64) throw new Error("claim_reconciliation_bytes_missing");
+    const prepared = await inspectPreparedAutomaticClaimPayout(signedTransactionBase64, {
+      treasury: config.rewardTreasury, mint: claim.reward_mint,
+      recipient: claim.destination_address, amountAtomic: claim.amount_atomic,
+      decimals: mintState.decimals, tokenProgram: mintAccount.owner.toBase58(),
+    });
+    if (prepared.txSignature !== row.tx_signature ||
+      prepared.transactionMessageHash !== row.transaction_message_hash ||
+      prepared.blockhash !== row.provider_request_id) {
+      throw new Error("claim_reconciliation_intent_mismatch");
+    }
+    if (row.state === "reconciliation_required") {
+      const restored = await database.prepare(`
+        UPDATE automation_jobs SET state = 'broadcasting', error_code = ?2,
+          available_at = ?3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?1 AND state = 'reconciliation_required'
+          AND (tx_hash IS NULL OR tx_hash = ?4)
+      `).bind(row.id, `broadcasting:${workerId}`, Date.now(), row.tx_signature).run();
+      if (restored.meta.changes !== 1) throw new Error("claim_reconciliation_job_changed");
+    }
+    return { reconciled: false, prepared: {
+      jobId: row.id, payload, signature: row.tx_signature,
+      signedTransactionBase64, lastValidBlockHeight: row.last_valid_block_height,
+    } };
+  } catch (error) {
+    console.error("claim_payout_reconciliation_pending",
+      error instanceof Error ? error.message : "unknown");
+    await defer();
+    return { reconciled: false };
+  }
 }
 
 export async function POST(request: Request) {
@@ -1016,11 +1401,54 @@ export async function POST(request: Request) {
   let input: z.infer<typeof requestSchema>;
   try { input = requestSchema.parse(await request.json()); }
   catch { return Response.json({ error: "Invalid worker request." }, { status: 400 }); }
+  if (input.action === "reconcile") {
+    const config = readMainnetConfig();
+    const controls = await readAutomationControls(env.DB);
+    if (!FINANCIAL_LEDGER_VERIFIED || !config.rewardTreasury ||
+      input.workerId !== `solana:${config.rewardTreasury}` ||
+      !laneAllowsJob("solana_reward_purchase", controls)) {
+      return Response.json({ error: "Reward reconciliation lane is paused or unavailable." }, { status: 409 });
+    }
+    const requeued = await env.DB.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
+      .bind(Date.now(), `broadcasting:${input.workerId}`).run();
+    const reconciled = await reconcilePreparedSolanaPurchase(env.DB, input.workerId);
+    const pending = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM automation_jobs
+      WHERE job_type = 'solana_reward_purchase'
+        AND entity_type = 'settlement_step'
+        AND state IN ('broadcasting', 'reconciliation_required')
+        AND (state = 'reconciliation_required' OR error_code = ?1)
+    `).bind(`broadcasting:${input.workerId}`).first<{ count: number }>();
+    return Response.json({ reconciled: reconciled || Number(requeued.meta.changes ?? 0) > 0,
+      pending: Number(pending?.count ?? 0) > 0 }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (input.action === "reconcile_claim") {
+    const config = readMainnetConfig();
+    if (!FINANCIAL_LEDGER_VERIFIED || !CLAIM_PAYOUT_EXECUTION_SAFE ||
+      !config.rewardTreasury || input.workerId !== `solana:${config.rewardTreasury}`) {
+      return Response.json({ error: "Claim reconciliation lane is unavailable." }, { status: 409 });
+    }
+    const controls = await readAutomationControls(env.DB);
+    const requeued = await env.DB.prepare(REQUEUE_UNPREPARED_CLAIM_JOB_SQL)
+      .bind(Date.now(), `broadcasting:${input.workerId}`).run();
+    const outcome = await reconcilePreparedSolanaClaim(env.DB, input.workerId,
+      laneAllowsJob("solana_claim_payout", controls));
+    const pending = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM automation_jobs
+      WHERE job_type = 'solana_claim_payout'
+        AND state IN ('broadcasting', 'reconciliation_required')
+        AND (state = 'reconciliation_required' OR error_code = ?1)
+    `).bind(`broadcasting:${input.workerId}`).first<{ count: number }>();
+    return Response.json({ reconciled: outcome.reconciled || Number(requeued.meta.changes ?? 0) > 0,
+      pending: Number(pending?.count ?? 0) > 0, ...(outcome.prepared ? { prepared: outcome.prepared } : {}) },
+    { headers: { "Cache-Control": "no-store" } });
+  }
   if (input.action === "lease") {
     const controls = await readAutomationControls(env.DB);
     const allowedJobTypes = FINANCIAL_LEDGER_VERIFIED
       ? input.jobTypes.filter((jobType) => laneAllowsJob(jobType, controls) &&
-        (CHILIZ_ASSET_MIGRATION_VERIFIED || !jobType.startsWith("chiliz_"))) : [];
+        (CHILIZ_ASSET_MIGRATION_VERIFIED || !jobType.startsWith("chiliz_")) &&
+        (CLAIM_PAYOUT_EXECUTION_SAFE || jobType !== "solana_claim_payout")) : [];
     await env.DB.prepare(`
       INSERT INTO service_cursors (key, value, updated_at)
       VALUES (?1, ?2, CURRENT_TIMESTAMP)
@@ -1028,14 +1456,6 @@ export async function POST(request: Request) {
     `).bind(`automation:${input.workerId}`, JSON.stringify({ jobTypes: allowedJobTypes, observedAt: Date.now() })).run();
     if (allowedJobTypes.includes("chiliz_reward_purchase")) await seedPurchaseJobs(env.DB);
     if (allowedJobTypes.includes("solana_reward_purchase")) await seedSolanaPurchaseJobs(env.DB);
-    if (allowedJobTypes.includes("solana_reward_purchase")) {
-      const rewardTreasury = readMainnetConfig().rewardTreasury;
-      if (rewardTreasury && input.workerId === `solana:${rewardTreasury}`) {
-        await env.DB.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
-          .bind(Date.now(), `broadcasting:${input.workerId}`).run();
-      }
-      await reconcilePreparedSolanaPurchase(env.DB, input.workerId);
-    }
     if (allowedJobTypes.includes("sportpad_buyback_burn")) await seedBuybackJobs(env.DB);
     if (allowedJobTypes.includes("chiliz_claim_unwrap") || allowedJobTypes.includes("chiliz_reward_purchase")) {
       await closeMatureRewardEpoch(env.DB, "chiliz");
@@ -1062,7 +1482,8 @@ export async function POST(request: Request) {
   const ownedBroadcast = ownsBroadcast(job, input.workerId);
   if (!job || (input.action === "arm" ? !ownedLease :
     input.action === "complete" || input.action === "prepare_buyback_swap" ||
-      input.action === "prepare_reward_swap" ? !ownedBroadcast :
+      input.action === "prepare_reward_swap" || input.action === "prepare_solana_claim_payout"
+      ? !ownedBroadcast :
       !ownedLease && !ownedBroadcast)) {
     return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
   }
@@ -1070,6 +1491,7 @@ export async function POST(request: Request) {
     const controls = await readAutomationControls(env.DB);
     const pauseSql = pauseConditionSql(job.job_type);
     if (!FINANCIAL_LEDGER_VERIFIED ||
+      (!CLAIM_PAYOUT_EXECUTION_SAFE && job.job_type === "solana_claim_payout") ||
       (!CHILIZ_ASSET_MIGRATION_VERIFIED && job.job_type.startsWith("chiliz_")) ||
       !pauseSql || !laneAllowsJob(job.job_type, controls)) {
       return Response.json({ error: "Financial lane is paused or unavailable." }, { status: 409 });
@@ -1094,19 +1516,32 @@ export async function POST(request: Request) {
             AND s.buyback_amount_atomic NOT GLOB '*[^0-9]*'
         ))
         AND (job_type <> 'solana_reward_purchase' OR EXISTS (
-          SELECT 1 FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
+          SELECT 1 FROM settlement_steps step
+          JOIN settlements s ON s.id = step.settlement_id
+          JOIN fee_events f ON f.id = s.fee_event_id
           JOIN launch_drafts l ON l.id = f.launch_id
-          JOIN protocol_settings p ON p.key = 'sportpad_mint'
-          WHERE s.id = automation_jobs.entity_id
+          LEFT JOIN protocol_settings p ON p.key = 'sportpad_mint'
+          WHERE step.id = automation_jobs.entity_id
+            AND automation_jobs.entity_type = 'settlement_step'
+            AND step.stage = 'automatic_reward_chunk' AND step.state = 'planned'
             AND s.reward_swap_signature IS NULL
             AND s.state IN ('reconciled', 'distributed', 'buyback_burned')
+            AND step.idempotency_key = 'automation:reward:chunk:' || s.id || ':' || s.reward_spent_atomic
             AND l.status = 'mainnet_published'
-            AND l.reward_chain = 'solana' AND l.reward_mint IS NOT NULL
-            AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+            AND l.reward_chain = 'solana' AND l.reward_mint = step.output_mint
+            AND l.mainnet_mint IS NOT NULL
+            AND (p.value IS NULL OR l.mainnet_mint <> p.value)
+            AND (?5 IS NULL OR l.mainnet_mint <> ?5)
             AND s.reward_amount_atomic GLOB '[1-9]*'
             AND s.reward_amount_atomic NOT GLOB '*[^0-9]*'
+            AND s.reward_spent_atomic GLOB '[0-9]*'
+            AND s.reward_spent_atomic NOT GLOB '*[^0-9]*'
+            AND CAST(s.reward_spent_atomic AS INTEGER) < CAST(s.reward_amount_atomic AS INTEGER)
+            AND CAST(step.input_amount_atomic AS INTEGER) = MIN(100000000,
+              CAST(s.reward_amount_atomic AS INTEGER) - CAST(s.reward_spent_atomic AS INTEGER))
         ))
-    `).bind(job.id, `leased:${input.workerId}`, `broadcasting:${input.workerId}`, Date.now()).run();
+    `).bind(job.id, `leased:${input.workerId}`, `broadcasting:${input.workerId}`,
+      Date.now(), readMainnetConfig().sportpadMint).run();
     if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
     return Response.json({ armed: true });
   }
@@ -1130,6 +1565,15 @@ export async function POST(request: Request) {
       return Response.json({ error: "Reward purchase order could not be durably prepared." }, { status: 409 });
     }
   }
+  if (input.action === "prepare_solana_claim_payout") {
+    try {
+      const prepared = await persistPreparedSolanaClaim(env.DB, job, input);
+      return Response.json({ prepared: true, ...prepared });
+    } catch (error) {
+      console.error("claim_payout_prepare_failed", error instanceof Error ? error.message : "unknown");
+      return Response.json({ error: "Claim payout could not be durably prepared." }, { status: 409 });
+    }
+  }
   if (input.action === "complete") {
     if (!FINANCIAL_LEDGER_VERIFIED ||
       (!CHILIZ_ASSET_MIGRATION_VERIFIED && job.job_type.startsWith("chiliz_"))) {
@@ -1146,6 +1590,7 @@ export async function POST(request: Request) {
       return Response.json({ completed: false, reconciliationRequired: true }, { status: 202 });
     }
     let verifiedOutput = input.outputAmountAtomic;
+    let verifiedSlot: number | undefined;
     if (job.job_type === "chiliz_reward_purchase" || job.job_type === "chiliz_claim_unwrap") {
       try {
         verifiedOutput = await verifiedChilizOutput(env.DB, job, input.workerId, input.txHash, input.outputAmountAtomic);
@@ -1164,8 +1609,14 @@ export async function POST(request: Request) {
     } else if (job.job_type === "solana_claim_payout" || job.job_type === "solana_reward_purchase" ||
       job.job_type === "sportpad_buyback_burn") {
       try {
-        verifiedOutput = await verifiedSolanaOutput(env.DB, job, input.workerId, input.txHash,
+        const verified = await verifiedSolanaOutput(env.DB, job, input.workerId, input.txHash,
           input.sourceTxHash, input.outputAmountAtomic);
+        if (verified && typeof verified === "object") {
+          verifiedOutput = verified.outputAmountAtomic;
+          verifiedSlot = verified.verifiedSlot;
+        } else {
+          verifiedOutput = verified;
+        }
       } catch (error) {
         // Keep an ambiguous or invalid broadcast out of the lease pool. Its
         // claimed hash is evidence for reconciliation, never proof of payment.
@@ -1182,7 +1633,8 @@ export async function POST(request: Request) {
     let completionError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await completeJob(env.DB, job, input.workerId, input.txHash, verifiedOutput, input.sourceTxHash);
+        await completeJob(env.DB, job, input.workerId, input.txHash,
+          verifiedOutput, input.sourceTxHash, verifiedSlot);
         return Response.json({ completed: true });
       } catch (error) {
         // A concurrent purchase or claim may have changed a vault snapshot.

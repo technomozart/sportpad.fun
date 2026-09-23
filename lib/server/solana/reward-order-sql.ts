@@ -1,6 +1,7 @@
 /** Persist the exact signed Jupiter reward order before any broadcast.
- * Parameters 1-17 are immutable order fields; 18 is the armed job ID and 19
- * its worker-specific broadcast fence. A stale or changed settlement cannot
+ * Parameters 1-17 are immutable order fields; 18 is the armed job ID, 19 is
+ * its worker-specific broadcast fence, and 20 is the optional configured
+ * SPORTPAD mint. A stale or changed settlement cannot
  * authorize a purchase, even when the job was queued earlier. */
 export const INSERT_AUTOMATIC_REWARD_INTENT_SQL = `
   INSERT INTO transaction_intents (
@@ -27,7 +28,7 @@ export const INSERT_AUTOMATIC_REWARD_INTENT_SQL = `
   ) AND EXISTS (
     SELECT 1 FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
     JOIN launch_drafts l ON l.id = f.launch_id
-    JOIN protocol_settings p ON p.key = 'sportpad_mint'
+    LEFT JOIN protocol_settings p ON p.key = 'sportpad_mint'
     WHERE s.id = ?3 AND s.reward_swap_signature IS NULL
       AND s.state IN ('reconciled', 'distributed', 'buyback_burned')
       AND s.reward_amount_atomic = ?14
@@ -36,6 +37,9 @@ export const INSERT_AUTOMATIC_REWARD_INTENT_SQL = `
       AND l.status = 'mainnet_published'
       AND l.reward_chain = 'solana' AND l.reward_mint = ?13
       AND l.mainnet_reward_treasury = ?4
-      AND l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> p.value
+      AND l.mainnet_mint IS NOT NULL
+      AND (p.value IS NULL OR l.mainnet_mint <> p.value)
+      AND (?20 IS NULL OR l.mainnet_mint <> ?20)
+      AND (?20 IS NULL OR p.value IS NULL OR p.value = ?20)
   )
 `;
