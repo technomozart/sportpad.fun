@@ -550,6 +550,90 @@ export const chilizSignedIntents = sqliteTable(
   ],
 );
 
+/** One explicitly armed bridge canary. No row is seeded by migration. Once a
+ * transaction is reserved the policy cannot be reset or used a second time. */
+export const chilizBridgePolicy = sqliteTable(
+  "chiliz_bridge_policy",
+  {
+    key: text("key").primaryKey(),
+    sourceWallet: text("source_wallet").notNull(),
+    destinationTreasury: text("destination_treasury").notNull(),
+    maxSourceAmountAtomic: text("max_source_amount_atomic").notNull(),
+    reservedBridgeId: text("reserved_bridge_id"),
+    state: text("state").notNull().default("paused"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_bridge_policy_reservation").on(table.reservedBridgeId)
+      .where(sql`${table.reservedBridgeId} IS NOT NULL`),
+    check("chk_chiliz_bridge_policy_key", sql`${table.key} = 'initial'`),
+    check("chk_chiliz_bridge_policy_state", sql`${table.state} IN ('paused', 'armed', 'reserved')`),
+    check("chk_chiliz_bridge_policy_reservation", sql`${table.state} <> 'reserved' OR ${table.reservedBridgeId} IS NOT NULL`),
+    check("chk_chiliz_bridge_policy_unreserved", sql`${table.state} <> 'armed' OR ${table.reservedBridgeId} IS NULL`),
+    check("chk_chiliz_bridge_policy_source", sql`length(${table.sourceWallet}) BETWEEN 32 AND 44`),
+    check("chk_chiliz_bridge_policy_destination", sql`length(${table.destinationTreasury}) = 42 AND substr(${table.destinationTreasury},1,2) = '0x' AND substr(${table.destinationTreasury},3) NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_bridge_policy_cap", sql`${table.maxSourceAmountAtomic} GLOB '[1-9]*' AND ${table.maxSourceAmountAtomic} NOT GLOB '*[^0-9]*' AND (length(${table.maxSourceAmountAtomic}) < 10 OR (length(${table.maxSourceAmountAtomic}) = 10 AND ${table.maxSourceAmountAtomic} <= '1000000000'))`),
+  ],
+);
+
+/** A single immutable signed Solana CHZ bridge transaction and its eventual
+ * Chiliz delivery evidence. Broadcast ambiguity is permanently held: there
+ * is no schema transition back to prepared and no replacement signature. */
+export const chilizBridgeJournal = sqliteTable(
+  "chiliz_bridge_journal",
+  {
+    id: text("id").primaryKey(),
+    policyKey: text("policy_key").notNull().references(() => chilizBridgePolicy.key),
+    sourceChain: text("source_chain").notNull(),
+    destinationChainId: integer("destination_chain_id").notNull(),
+    sourceMint: text("source_mint").notNull(),
+    destinationAsset: text("destination_asset").notNull(),
+    sourceWallet: text("source_wallet").notNull(),
+    destinationTreasury: text("destination_treasury").notNull(),
+    sourceAmountAtomic: text("source_amount_atomic").notNull(),
+    minimumDestinationWei: text("minimum_destination_wei").notNull(),
+    quoteId: text("quote_id").notNull(),
+    quoteExpiresAtMs: integer("quote_expires_at_ms").notNull(),
+    routeType: text("route_type").notNull(),
+    signedTransactionBase64: text("signed_transaction_base64").notNull(),
+    signedTransactionSha256: text("signed_transaction_sha256").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    sourceFinalizedSlot: integer("source_finalized_slot"),
+    sourceEvidenceJson: text("source_evidence_json"),
+    bridgeMessageId: text("bridge_message_id"),
+    destinationTxHash: text("destination_tx_hash"),
+    destinationFinalizedBlock: integer("destination_finalized_block"),
+    destinationReceivedWei: text("destination_received_wei"),
+    destinationEvidenceJson: text("destination_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_bridge_journal_policy").on(table.policyKey),
+    uniqueIndex("idx_chiliz_bridge_journal_quote").on(table.quoteId),
+    uniqueIndex("idx_chiliz_bridge_journal_signature").on(table.sourceSignature),
+    uniqueIndex("idx_chiliz_bridge_journal_signed_sha256").on(table.signedTransactionSha256),
+    uniqueIndex("idx_chiliz_bridge_journal_message").on(table.bridgeMessageId)
+      .where(sql`${table.bridgeMessageId} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_bridge_journal_destination_tx").on(table.destinationTxHash)
+      .where(sql`${table.destinationTxHash} IS NOT NULL`),
+    index("idx_chiliz_bridge_journal_state").on(table.state),
+    check("chk_chiliz_bridge_source_chain", sql`${table.sourceChain} = 'solana'`),
+    check("chk_chiliz_bridge_destination_chain", sql`${table.destinationChainId} = 88888`),
+    check("chk_chiliz_bridge_source_mint", sql`${table.sourceMint} = '6eftxVbSAunVEoxUWdGhPdxg5UdsJ8Wkwy5w5YFuxouw'`),
+    check("chk_chiliz_bridge_destination_asset", sql`${table.destinationAsset} = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'`),
+    check("chk_chiliz_bridge_route", sql`${table.routeType} IN ('OFT', 'OFT_V2')`),
+    check("chk_chiliz_bridge_state", sql`${table.state} IN ('prepared', 'broadcast_attempted', 'source_finalized', 'destination_finalized', 'held')`),
+    check("chk_chiliz_bridge_source_amount", sql`${table.sourceAmountAtomic} GLOB '[1-9]*' AND ${table.sourceAmountAtomic} NOT GLOB '*[^0-9]*'`),
+    check("chk_chiliz_bridge_min_destination", sql`${table.minimumDestinationWei} GLOB '[1-9]*' AND ${table.minimumDestinationWei} NOT GLOB '*[^0-9]*'`),
+    check("chk_chiliz_bridge_sha256", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_bridge_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+  ],
+);
+
 export const protocolSettings = sqliteTable("protocol_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

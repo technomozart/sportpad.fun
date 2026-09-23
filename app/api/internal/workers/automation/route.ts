@@ -26,6 +26,8 @@ import { COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL } from "@/lib/protocol/holder-in
 import { getRewardOption } from "@/lib/protocol/reward-options";
 import { quoteChilizPurchaseSpendCeiling } from "@/lib/server/chiliz-spend-bound";
 import { verifyChilizDualRpcFinality } from "@/lib/server/chiliz-finality";
+import { CHILIZ_FIRST_LEASE_ELIGIBLE_SQL,
+  REQUEUE_UNPREPARED_CHILIZ_FIRST_LEASE_SQL } from "@/lib/server/chiliz-first-lease-recovery";
 import { FINALIZE_CHILIZ_INTENT_SQL, FINALIZE_REVERTED_CHILIZ_JOB_SQL,
   INSERT_CHILIZ_SIGNED_INTENT_SQL,
   MARK_CHILIZ_INTENT_BROADCAST_SQL,
@@ -553,6 +555,11 @@ async function closeMatureRewardEpoch(database: D1Database, chain: "chiliz" | "s
 
 async function leaseJob(database: D1Database, workerId: string, jobTypes: string[]) {
   const now = Date.now();
+  if (jobTypes.includes("chiliz_reward_purchase") || jobTypes.includes("chiliz_claim_unwrap")) {
+    await database.prepare(REQUEUE_UNPREPARED_CHILIZ_FIRST_LEASE_SQL).bind(now, workerId,
+      Number(jobTypes.includes("chiliz_reward_purchase")),
+      Number(jobTypes.includes("chiliz_claim_unwrap"))).run();
+  }
   const placeholders = jobTypes.map((_, index) => `?${index + 2}`).join(", ");
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const row = await database.prepare(`
@@ -561,6 +568,7 @@ async function leaseJob(database: D1Database, workerId: string, jobTypes: string
       WHERE job_type IN (${placeholders}) AND available_at <= ?1
         AND (job_type <> 'solana_reward_purchase' OR entity_type IN ('settlement_step', 'reward_swap_batch'))
         AND (job_type <> 'sportpad_buyback_burn' OR entity_type = 'settlement_step')
+        AND ${CHILIZ_FIRST_LEASE_ELIGIBLE_SQL}
         AND (state = 'queued' OR (state = 'leased' AND leased_until < ?1))
       ORDER BY available_at ASC, created_at ASC LIMIT 1
     `).bind(now, ...jobTypes).first<AutomationRow>();
@@ -569,7 +577,8 @@ async function leaseJob(database: D1Database, workerId: string, jobTypes: string
     const result = await database.prepare(`
       UPDATE automation_jobs SET state = 'leased', leased_until = ?2, error_code = ?3,
         attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?1 AND (state = 'queued' OR (state = 'leased' AND leased_until < ?4))
+      WHERE id = ?1 AND ${CHILIZ_FIRST_LEASE_ELIGIBLE_SQL}
+        AND (state = 'queued' OR (state = 'leased' AND leased_until < ?4))
     `).bind(row.id, leasedUntil, `leased:${workerId}`, now).run();
     if (result.meta.changes === 1) {
       return { ...row, attempt: row.attempt + 1, leased_until: leasedUntil, error_code: `leased:${workerId}` };
@@ -3167,9 +3176,13 @@ export async function POST(request: Request) {
   }
   if (input.action === "lease") {
     const controls = await readAutomationControls(env.DB);
+    const treasury = env.CHILIZ_TREASURY_ADDRESS?.trim();
+    const chilizWorkerMatches = Boolean(treasury && /^0x[0-9a-fA-F]{40}$/.test(treasury) &&
+      input.workerId.toLowerCase() === `chiliz:${treasury.toLowerCase()}`);
     const allowedJobTypes = FINANCIAL_LEDGER_VERIFIED
       ? input.jobTypes.filter((jobType) => laneAllowsJob(jobType, controls) &&
         (CHILIZ_ASSET_MIGRATION_VERIFIED || !jobType.startsWith("chiliz_")) &&
+        (!jobType.startsWith("chiliz_") || chilizWorkerMatches) &&
         (CLAIM_PAYOUT_EXECUTION_SAFE || jobType !== "solana_claim_payout") &&
         (BUYBACK_BURN_EXECUTION_SAFE || jobType !== "sportpad_buyback_burn")) : [];
     await env.DB.prepare(`

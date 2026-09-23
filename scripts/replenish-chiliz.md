@@ -6,6 +6,11 @@ It does not convert the 80% Solana creator-fee stream into Chiliz liquidity.
 It does not load private keys, build bridge user steps, sign, broadcast, fund a
 wallet, or claim that a discovered path is liquid.
 
+The codebase also has an isolated LayerZero quote/build-step inspector and a
+default-paused, one-shot bridge journal capped at 10 CHZ. The inspector returns
+no transaction bytes to sign; the journal has no seeded authorization or
+worker. These components do not make the SOL-to-CHZ route executable.
+
 ## Verified public route and dry run
 
 On 2026-09-23, LayerZero's public `GET /chains` and `GET /tokens` directory
@@ -55,11 +60,12 @@ change, then a new bridge quote must be requested.
    LayerZero's unauthenticated directory merely lists a reachable route. The
    Chiliz Bridge UI documented by Chiliz only covers Ethereum and Chiliz, not
    a Solana-to-Chiliz automation route.
-2. Implement a durable, unique replenishment ledger keyed to reconciled 80%
-   fee events. Store source fee IDs, source wallet, source SOL amount, quote
-   hashes, route, expiry, maximum spend, Jupiter request ID, Solana swap
-   signature, pre/post finalized CHZ token-account balances, LayerZero quote
-   ID, bridge transaction signature, destination wallet and pre/post native
+2. Connect the default-paused bridge journal to a durable replenishment ledger
+   keyed to reconciled 80% fee events. Store source fee IDs, source wallet,
+   source SOL amount, quote hashes, route, expiry, maximum spend, Jupiter
+   request ID, Solana swap signature, pre/post finalized CHZ token-account
+   balances, LayerZero quote ID, bridge transaction signature, destination
+   wallet and pre/post native
    CHZ balances. Never aggregate money from unrelated batches without a
    verifiable allocation ledger.
 3. Before signing a Jupiter transaction, resolve all address lookup tables
