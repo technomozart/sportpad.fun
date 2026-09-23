@@ -24,6 +24,7 @@ SPORTPAD_HOLDER_INDEXER_ENABLED=true
 SPORTPAD_CLAIMS_ENABLED=true
 SPORTPAD_BUYBACK_ENABLED=false
 CHILIZ_RPC_URL=https://rpc.chiliz.com
+CHILIZ_TREASURY_ADDRESS=0x42c40359Da463b480C3Dc9e7A4D9c1ac2eF45C21
 ```
 
 `SPORTPAD_WORKER_TOKEN` must be a new high-entropy value shared only by Sites and the two workers.
@@ -86,11 +87,13 @@ These are dedicated hot wallets. Do not export a personal wallet holding unrelat
 1. In the Phantom browser extension, open the profile avatar, choose **Manage Accounts**, and select the account whose **Solana** public address is `yCBTQi7aUfQ7ytdmdMRC1BLjntduQYniZVELRc1mvF4`. Choose **Show Private Key**, then **Solana**. If **Show Private Key** is unavailable, stop; some Phantom account types cannot export the key. Do not substitute the recovery phrase.
 2. Open the [Solana worker Variables page](https://railway.com/project/bb01df2b-5c38-490e-acd1-7465654dd5d5/service/c9db38aa-c0df-4770-bb39-61dfb1cadab7/variables). Click **New Variable**, set the name `SOLANA_REWARD_VAULT_PRIVATE_KEY`, and paste only that account's private key into the value field. Save, review, and **Deploy** the staged change. Leave `SOLANA_BUYBACK_PRIVATE_KEY` unset until the burn lane is independently verified.
 3. Install MetaMask from [metamask.io](https://metamask.io/) in a separate browser profile and create a new, empty wallet dedicated to the Chiliz treasury. Store its recovery phrase offline. In the extension select the account, use the three-dot menu, **Account details**, **Private key**, and confirm with the MetaMask password. Copy only this new account's private key.
-4. Open the [Chiliz worker Variables page](https://railway.com/project/bb01df2b-5c38-490e-acd1-7465654dd5d5/service/3f594006-c1fd-4dfc-9c7a-33f314f2f778/variables). Add `CHILIZ_TREASURY_PRIVATE_KEY` with that private key, including a `0x` prefix, then review and **Deploy** the staged change. Share only its public `0x` address for verification. The account will eventually require native CHZ for gas and purchases, but do not fund it for production until the financial hold is lifted and a canary plan is agreed.
+4. Open the [Chiliz worker Variables page](https://railway.com/project/bb01df2b-5c38-490e-acd1-7465654dd5d5/service/3f594006-c1fd-4dfc-9c7a-33f314f2f778/variables). Add `CHILIZ_TREASURY_PRIVATE_KEY` with that account's private key (a `0x` prefix is optional) and `CHILIZ_TREASURY_ADDRESS` with its public address, then review and **Deploy** the staged change. The worker refuses to start if the key derives to a different address. Share only the public `0x` address for verification. The account will eventually require native CHZ for gas and purchases, but do not fund it for production until the financial hold is lifted and a canary plan is agreed.
 
 References: [Phantom private-key guide](https://help.phantom.com/articles/25334064171795), [MetaMask private-key guide](https://support.metamask.io/configure/accounts/how-to-export-an-accounts-private-key/), and [Railway variables guide](https://docs.railway.com/variables).
 
 ## 3b. SOL-to-Chiliz replenishment is still quote-only
+
+Run `npm run audit:chiliz` for a dated, read-only inspection of all catalogued current V2 contracts. It checks Chiliz Chain ID, contract code, 18-decimal precision, and direct Kayen quotes at 1 and 100 CHZ. The Fan Tokens page can check individual markets on demand. `quote_available` means only that a quote was returned at those sizes; `shallow_depth` means the 100 CHZ quote is more than 20% below a linear estimate from 1 CHZ. Neither result authorizes an automatic purchase or a public launch. A quote can disappear before a trade.
 
 The `scripts/replenish-chiliz.mjs` CLI checks the public route directory, attempts Jupiter's SOL-to-Solana-CHZ order, and, if a production API key is supplied, a LayerZero Solana-CHZ-to-native-Chiliz-CHZ quote. It **cannot sign, broadcast, bridge, or refill the treasury**. Its quote cannot be treated as acquired inventory or a guaranteed executable route. The current reward treasury has no SOL, and the latest Jupiter order reported insufficient funds; no executable SOL-to-CHZ transaction has been validated. The Chiliz worker still requires prefunded native CHZ and does not automatically replenish it.
 

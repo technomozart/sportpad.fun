@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PageIntro, SafetyNotice, SectionHeading, TokenMark } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { fanAssets } from "@/lib/site-data";
+import { RouteAuditCell } from "./route-audit-cell";
 import { TokenAddressCell } from "./token-address-cell";
 
 const chilizAssets = fanAssets.filter((asset) => asset.chain === "chiliz");
@@ -39,7 +40,7 @@ export default function FanTokensPage() {
           <div className="registry-stats"><div><strong>{chilizAssets.length}</strong><span>official Chiliz V2 addresses</span></div><div><strong>{solanaAssets.length}</strong><span>Solana market options</span></div><div><strong>88888</strong><span>Chiliz Chain ID</span></div><div><strong>Paused</strong><span>reward payout execution</span></div></div>
           <div className="registry-table-wrap">
             <table className="registry-table"><thead><tr><th>Official Fan Token</th><th>Sport</th><th>Current token address</th><th>Network</th><th>SportPad reward route</th><th>SportPad status</th></tr></thead><tbody>
-              {fanAssets.map((asset) => <tr key={asset.id}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><TokenAddressCell mint={asset.mint} symbol={asset.symbol} chain={asset.chain} /></td><td><span className="asset-status status-registry-listed">{asset.chain === "chiliz" ? "Chiliz V2" : "Solana"}</span></td><td>{asset.chain === "chiliz" ? "V2 route unverified" : "Jupiter quote check"}</td><td>Paused</td></tr>)}
+              {fanAssets.map((asset) => <tr key={asset.id}><td><div className="registry-asset"><TokenMark token={asset.symbol} color={asset.color} imagePath={asset.imagePath} /><span><strong>{asset.name}</strong><small>${asset.symbol} · official Fan Token</small></span></div></td><td>{asset.category}</td><td><TokenAddressCell mint={asset.mint} symbol={asset.symbol} chain={asset.chain} /></td><td><span className="asset-status status-registry-listed">{asset.chain === "chiliz" ? "Chiliz V2" : "Solana"}</span></td><td>{asset.chain === "chiliz" ? <RouteAuditCell symbol={asset.symbol} /> : "Jupiter quote check"}</td><td>Paused</td></tr>)}
             </tbody></table>
           </div>
         </section>
