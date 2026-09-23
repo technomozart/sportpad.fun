@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner } from "@/lib/server/wallet-session";
 
 type DraftRouteContext = { params: Promise<{ id: string }> };
 
@@ -13,8 +13,8 @@ function privateJson(body: unknown, status = 200) {
 }
 
 export async function DELETE(request: Request, context: DraftRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access drafts." }, 401);
   const url = new URL(request.url);
   if (request.headers.get("origin") !== url.origin) return privateJson({ error: "Cross-origin deletion requests are not allowed." }, 403);
   const { id } = await context.params;

@@ -27,14 +27,14 @@ export function SportpadActivation() {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sportpadMint: mint.trim() }),
       });
       const body = await response.json() as { sportpadMint?: string; error?: string };
-      if (!response.ok || !body.sportpadMint) throw new Error(body.error ?? "Mint could not be activated.");
+      if (!response.ok || !body.sportpadMint) throw new Error(body.error ?? "Mint could not be registered.");
       setSavedMint(body.sportpadMint); setMint(body.sportpadMint); setNotice("SPORTPAD mint saved. Buyback execution remains paused until its safety checks and canary pass.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Mint could not be activated."); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Mint could not be registered."); }
     finally { setBusy(false); }
   }
   return <section className="operator-console">
     <div className="operator-console-head"><span><Flame /></span><div><p className="section-eyebrow">Mint registration</p><h2>SPORTPAD mint</h2><p>Save the main token CA here after launch. This does not activate the 20% buyback and burn, which remains paused pending safety verification.</p></div></div>
-    <div className="operator-setting-row"><Input value={mint} onChange={(event) => setMint(event.target.value)} placeholder="Solana mint address" /><Button onClick={() => void save()} disabled={busy || mint.trim() === savedMint}><Save /> {busy ? "Activating" : "Activate mint"}</Button></div>
+    <div className="operator-setting-row"><Input value={mint} onChange={(event) => setMint(event.target.value)} placeholder="Solana mint address" /><Button onClick={() => void save()} disabled={busy || mint.trim() === savedMint}><Save /> {busy ? "Checking" : "Register mint"}</Button></div>
     {notice ? <p className="operator-note" role="status">{notice}</p> : null}
   </section>;
 }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { TokenMark } from "@/components/sport-ui";
+import { useSolanaWalletSession } from "@/components/solana-wallet-session";
 import { LAUNCH_IMAGE_MIME_TYPES, MAX_LAUNCH_IMAGE_BYTES, MAX_LAUNCH_IMAGE_DIMENSION, MAX_LAUNCH_IMAGE_PIXELS } from "@/lib/protocol/launch-image";
 import { fanAssets } from "@/lib/site-data";
 import { LaunchModerationGate } from "./launch-moderation-gate";
@@ -48,6 +49,7 @@ function savedStatus(value: string) {
 }
 
 export function LaunchBuilder() {
+  const walletSession = useSolanaWalletSession();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
@@ -69,6 +71,7 @@ export function LaunchBuilder() {
   const [savedDraftId, setSavedDraftId] = useState("");
   const [savedDrafts, setSavedDrafts] = useState<SavedLaunchDraft[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
+  const [draftsWallet, setDraftsWallet] = useState<string | null>(null);
   const [authenticationRequired, setAuthenticationRequired] = useState(false);
   const [draftsError, setDraftsError] = useState("");
   const [deletingDraftId, setDeletingDraftId] = useState("");
@@ -92,6 +95,9 @@ export function LaunchBuilder() {
     );
   }, [rewardQuery]);
   const canContinue = step === 0 ? name.trim().length >= 2 && symbol.length >= 2 && symbol !== "SPORTPAD" && Boolean(imageFile) && !imageValidating : step === 1 ? Boolean(selected) && rewardRoute.state === "available" : step === 2 ? Object.values(terms).every(Boolean) : true;
+  const visibleDrafts = draftsWallet === walletSession.wallet ? savedDrafts : [];
+  const visibleAuthenticationRequired = draftsWallet === walletSession.wallet && authenticationRequired;
+  const visibleDraftsLoading = draftsWallet !== walletSession.wallet || draftsLoading;
 
   useEffect(() => () => {
     if (imagePreview.startsWith("blob:")) URL.revokeObjectURL(imagePreview);
@@ -123,27 +129,33 @@ export function LaunchBuilder() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestedWallet = walletSession.wallet;
     fetch("/api/launch-drafts", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json() as { drafts?: SavedLaunchDraft[]; error?: string };
         if (response.status === 401) {
           setAuthenticationRequired(true);
           setSavedDrafts([]);
+          setDraftsWallet(requestedWallet);
+          setDraftsError("");
           return;
         }
         if (!response.ok) throw new Error(body.error ?? "Saved drafts could not be loaded.");
         setAuthenticationRequired(false);
         setSavedDrafts(Array.isArray(body.drafts) ? body.drafts : []);
+        setDraftsWallet(requestedWallet);
+        setDraftsError("");
       })
       .catch((caught) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
         setDraftsError(caught instanceof Error ? caught.message : "Saved drafts could not be loaded.");
+        setDraftsWallet(requestedWallet);
       })
       .finally(() => {
         if (!controller.signal.aborted) setDraftsLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [walletSession.wallet]);
 
   async function chooseImage(file: File | null) {
     const selection = ++imageSelection.current;
@@ -290,7 +302,7 @@ export function LaunchBuilder() {
       const body = (await response.json()) as { error?: string; imageStored?: boolean; draft?: SavedLaunchDraft };
       if (response.status === 401) {
         setAuthenticationRequired(true);
-        throw new Error("Sign in before saving this private draft.");
+        throw new Error("Connect and verify a Solana wallet before saving this private draft.");
       }
       if (!response.ok) throw new Error(body.error ?? "Draft could not be saved.");
       if (body.imageStored !== true) throw new Error("The image was not stored. Please retry.");
@@ -323,14 +335,14 @@ export function LaunchBuilder() {
 
   return (
     <>
-      <section className={`saved-drafts-panel ${authenticationRequired ? "sign-in-required" : ""}`} aria-labelledby="saved-drafts-title">
+      <section className={`saved-drafts-panel ${visibleAuthenticationRequired ? "sign-in-required" : ""}`} aria-labelledby="saved-drafts-title">
         <div className="saved-drafts-heading">
-          <span className="saved-drafts-icon">{authenticationRequired ? <LogIn /> : <Clock3 />}</span>
-          <span><strong id="saved-drafts-title">{authenticationRequired ? "Sign in to keep drafts private" : "Your saved drafts"}</strong><small>{authenticationRequired ? "You can explore the builder now. Sign in before saving so only your account can reopen the draft." : draftsLoading ? "Checking this account for private drafts." : savedDrafts.length ? "Resume a private draft and continue its launch review." : "You are signed in. Saved drafts will appear here."}</small></span>
-          {authenticationRequired ? <a href="/signin-with-chatgpt?return_to=%2Flaunch">Sign in with ChatGPT <ArrowRight /></a> : null}
+          <span className="saved-drafts-icon">{visibleAuthenticationRequired ? <LogIn /> : <Clock3 />}</span>
+          <span><strong id="saved-drafts-title">{visibleAuthenticationRequired ? "Connect a wallet to save drafts" : "Your saved drafts"}</strong><small>{visibleAuthenticationRequired ? "Verify your Solana wallet with a message signature. Only that wallet can reopen its private drafts. This does not spend SOL." : visibleDraftsLoading ? "Checking this account for private drafts." : visibleDrafts.length ? "Resume a private draft and continue its launch review." : "Private drafts will appear here after you save one."}</small></span>
+          {visibleAuthenticationRequired ? <button type="button" disabled={walletSession.busy} onClick={() => void walletSession.connectAndVerify()}>{walletSession.busy ? "Connecting..." : "Connect Solana wallet"} <ArrowRight /></button> : null}
         </div>
-        {savedDrafts.length ? <div className="saved-draft-list">{savedDrafts.map((draft) => <div className="saved-draft-item" key={draft.id}><button className="saved-draft-resume" type="button" onClick={() => resumeDraft(draft)}><span className="saved-draft-art">{draft.imageUrl ? <img src={draft.imageUrl} alt="" /> : <TokenMark token={draft.symbol} color="#9cff57" />}</span><span><strong>{draft.name}</strong><small>${draft.symbol} · {draft.rewardSymbol} rewards</small><small>{savedDate(draft.createdAt)} · {savedStatus(draft.status)}</small></span><b>Resume <ArrowRight /></b></button>{draft.status === "draft" && draft.moderationVersion === 0 ? <button className="saved-draft-delete" type="button" disabled={deletingDraftId === draft.id} onClick={() => void deleteDraft(draft)} aria-label={`Delete ${draft.name}`}><Trash2 /></button> : null}</div>)}</div> : null}
-        {draftsError ? <p className="saved-drafts-error" role="status">{draftsError}</p> : null}
+        {visibleDrafts.length ? <div className="saved-draft-list">{visibleDrafts.map((draft) => <div className="saved-draft-item" key={draft.id}><button className="saved-draft-resume" type="button" onClick={() => resumeDraft(draft)}><span className="saved-draft-art">{draft.imageUrl ? <img src={draft.imageUrl} alt="" /> : <TokenMark token={draft.symbol} color="#9cff57" />}</span><span><strong>{draft.name}</strong><small>${draft.symbol} · {draft.rewardSymbol} rewards</small><small>{savedDate(draft.createdAt)} · {savedStatus(draft.status)}</small></span><b>Resume <ArrowRight /></b></button>{draft.status === "draft" && draft.moderationVersion === 0 ? <button className="saved-draft-delete" type="button" disabled={deletingDraftId === draft.id} onClick={() => void deleteDraft(draft)} aria-label={`Delete ${draft.name}`}><Trash2 /></button> : null}</div>)}</div> : null}
+        {draftsWallet === walletSession.wallet && draftsError ? <p className="saved-drafts-error" role="status">{draftsError}</p> : null}
       </section>
       <div className="launch-builder">
       <aside className="launch-steps"><div><p className="section-eyebrow">Launch builder</p><h2>Build a community token.</h2><p>The draft steps do not request a signature. Mainnet wallet approvals appear only after review.</p></div><ol>{steps.map((label,index)=><li key={label} className={index === step ? "active" : index < step ? "complete" : ""}><span>{index < step ? <Check /> : index + 1}</span><div><strong>{label}</strong><small>{["Identity and community", "Official reward selection", "Immutable fee flow", "Confirm every detail"][index]}</small></div></li>)}</ol><div className="builder-safety"><ShieldCheck /><span><strong>Wallet safety</strong><small>SportPad never asks for private keys or seed phrases.</small></span></div></aside>

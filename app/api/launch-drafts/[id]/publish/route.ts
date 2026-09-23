@@ -6,11 +6,10 @@ import { devnetSubmissions, launchDrafts } from "@/db/schema";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
 import { creatorModerationTransition } from "@/lib/protocol/moderation";
 import { buildPublicDevnetReceipt, buildVerifiedDevnetEvidence } from "@/lib/protocol/public-devnet-launch";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner, getVerifiedWalletSession } from "@/lib/server/wallet-session";
 import { commitModerationTransition } from "@/lib/server/moderation-transition";
 import { getPublicationMode, isOperatorUserId } from "@/lib/server/publication-policy";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
-import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type PublishRouteContext = { params: Promise<{ id: string }> };
 
@@ -53,8 +52,8 @@ function publishedResponse(
 }
 
 export async function POST(request: Request, context: PublishRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const session = await getVerifiedWalletSession(request).catch(() => null);
   if (!session || session.ownerUserId !== ownerUserId) {
     return privateJson({ error: "Verify the Solana wallet that created this devnet launch before submitting it." }, 401);

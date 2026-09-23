@@ -24,6 +24,24 @@ export function normalizeSolanaAddress(value: string) {
   }
 }
 
+// Public launch drafts use a wallet-scoped principal only after the wallet
+// challenge has been signed and its opaque server-side session is verified.
+export function walletDraftOwnerId(walletAddress: string) {
+  const normalized = normalizeSolanaAddress(walletAddress);
+  return normalized ? `wallet:${normalized}` : null;
+}
+
+export function walletSessionBelongsToRequester(
+  session: { ownerUserId: string; walletAddress: string },
+  authenticatedUserId: string | null,
+) {
+  const walletOwner = walletDraftOwnerId(session.walletAddress);
+  if (session.ownerUserId.startsWith("wallet:")) {
+    return walletOwner !== null && session.ownerUserId === walletOwner;
+  }
+  return authenticatedUserId !== null && session.ownerUserId === authenticatedUserId;
+}
+
 export function buildWalletChallenge(fields: WalletChallengeFields) {
   return [
     `${fields.domain} wants you to verify this Solana wallet for SportPad.`,
@@ -35,7 +53,7 @@ export function buildWalletChallenge(fields: WalletChallengeFields) {
     `Nonce: ${fields.nonce}`,
     `Issued At: ${fields.issuedAt.toISOString()}`,
     `Expiration Time: ${fields.expiresAt.toISOString()}`,
-    "Purpose: Bind this wallet to your SportPad account for reviewed Solana launch actions.",
+    "Purpose: Verify wallet ownership for private SportPad drafts and reviewed Solana launch actions.",
     "This request does not create a transaction or authorize spending.",
   ].join("\n");
 }

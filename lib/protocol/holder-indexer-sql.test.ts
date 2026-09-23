@@ -4,12 +4,15 @@ import test from "node:test";
 
 import {
   ASSERT_ONE_CHECKPOINT_SQL,
+  ASSERT_ONE_EPOCH_SHIFT_SQL,
   ASSERT_POSITION_COUNT_SQL,
   ASSERT_STAGED_SNAPSHOT_SQL,
   COMPLETE_FINALIZED_HOLDER_SNAPSHOT_SQL,
   COMMIT_HOLDER_CHECKPOINT_SQL,
   COMMIT_STAGED_HOLDER_POSITIONS_SQL,
   RECORD_HOLDER_SNAPSHOT_SQL,
+  RECORD_HOLDER_BASELINE_SHIFT_SQL,
+  SHIFT_EPOCH_TO_FINALIZED_BASELINE_SQL,
   STAGE_HOLDER_POSITION_SQL,
 } from "./holder-indexer-sql.ts";
 
@@ -18,7 +21,8 @@ function fixture() {
   db.exec(`
     CREATE TABLE launch_drafts (id TEXT PRIMARY KEY, status TEXT NOT NULL);
     CREATE TABLE reward_epochs (id TEXT PRIMARY KEY, launch_id TEXT NOT NULL,
-      starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, state TEXT NOT NULL);
+      starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, state TEXT NOT NULL,
+      updated_at TEXT);
     CREATE TABLE holder_epoch_positions (
       id TEXT PRIMARY KEY, epoch_id TEXT NOT NULL, launch_id TEXT NOT NULL,
       wallet TEXT NOT NULL, token_seconds_atomic TEXT NOT NULL,
@@ -65,11 +69,26 @@ function hasCompleteCoverage(db: DatabaseSync) {
 // This models one D1.batch: every statement succeeds together or an error
 // rolls back the checkpoint, canonical positions, and evidence event.
 function commit(db: DatabaseSync, generation: string, expectedCount: number, slot: number, time: number,
-  expectedBase: string | null = null, eventId = generation) {
+  expectedBase: string | null = null, eventId = generation,
+  shift?: { startsAt: string; endsAt: string; observedAt: number },
+  expectedWindow?: { startsAt: string; endsAt: string }) {
   db.exec("BEGIN");
   try {
+    if (shift) {
+      db.prepare(SHIFT_EPOCH_TO_FINALIZED_BASELINE_SQL).run(
+        "epoch", shift.startsAt, shift.endsAt,
+        "1970-01-01T00:01:40.000Z", "1970-01-01T00:03:20.000Z", shift.observedAt,
+      );
+      db.prepare(ASSERT_ONE_EPOCH_SHIFT_SQL).get();
+      db.prepare(RECORD_HOLDER_BASELINE_SHIFT_SQL).run(
+        "baseline:epoch", "epoch", slot, String(shift.observedAt - 100), "mint", "hash",
+      );
+      db.prepare(ASSERT_ONE_CHECKPOINT_SQL).get();
+    }
     db.prepare(ASSERT_STAGED_SNAPSHOT_SQL).get(generation, "epoch", expectedCount);
-    db.prepare(COMMIT_HOLDER_CHECKPOINT_SQL).run("epoch", generation, slot, time, expectedCount, "hash", expectedBase);
+    db.prepare(COMMIT_HOLDER_CHECKPOINT_SQL).run("epoch", generation, slot, time, expectedCount, "hash", expectedBase,
+      expectedWindow?.startsAt ?? shift?.startsAt ?? "1970-01-01T00:01:40.000Z",
+      expectedWindow?.endsAt ?? shift?.endsAt ?? "1970-01-01T00:03:20.000Z");
     db.prepare(ASSERT_ONE_CHECKPOINT_SQL).get();
     db.prepare(COMMIT_STAGED_HOLDER_POSITIONS_SQL).run(generation, "epoch");
     db.prepare(ASSERT_POSITION_COUNT_SQL).get(expectedCount);
@@ -202,5 +221,50 @@ test("late opening, legacy, and incomplete canonical checkpoints fail closed", (
     db.exec("UPDATE holder_epoch_positions SET last_observed_slot = 11");
     db.exec("UPDATE holder_snapshot_checkpoints SET first_finalized_at = NULL");
     assert.equal(hasCompleteCoverage(db), false);
+  } finally { db.close(); }
+});
+
+test("late first finalized snapshot atomically shifts the full epoch window", () => {
+  const db = fixture();
+  try {
+    stage(db, "late-opening", "holder", "0", 10, 245);
+    commit(db, "late-opening", 1, 10, 245, null, "late-opening", {
+      startsAt: "1970-01-01T00:04:05.000Z",
+      endsAt: "1970-01-01T00:05:45.000Z",
+      observedAt: 245,
+    });
+    const epoch = db.prepare("SELECT starts_at, ends_at FROM reward_epochs WHERE id = 'epoch'").get();
+    assert.equal(epoch?.starts_at, "1970-01-01T00:04:05.000Z");
+    assert.equal(epoch?.ends_at, "1970-01-01T00:05:45.000Z");
+    assert.equal(hasCompleteCoverage(db), false);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM protocol_events WHERE event_type = 'holder_epoch_baseline_shifted'").get()?.n, 1);
+
+    stage(db, "too-early", "holder", "200", 11, 344);
+    assert.throws(() => commit(db, "too-early", 1, 11, 344, "late-opening"), /malformed JSON/);
+    const shiftedWindow = {
+      startsAt: "1970-01-01T00:04:05.000Z",
+      endsAt: "1970-01-01T00:05:45.000Z",
+    };
+    commit(db, "too-early", 1, 11, 344, "late-opening", "too-early", undefined, shiftedWindow);
+    assert.equal(hasCompleteCoverage(db), false);
+    stage(db, "closing", "holder", "300", 12, 346);
+    commit(db, "closing", 1, 12, 346, "too-early", "closing", undefined, shiftedWindow);
+    assert.equal(hasCompleteCoverage(db), true);
+  } finally { db.close(); }
+});
+
+test("failed first-snapshot commit rolls back the baseline shift and audit event", () => {
+  const db = fixture();
+  try {
+    stage(db, "partial", "holder", "0", 10, 245);
+    assert.throws(() => commit(db, "partial", 2, 10, 245, null, "partial", {
+      startsAt: "1970-01-01T00:04:05.000Z",
+      endsAt: "1970-01-01T00:05:45.000Z",
+      observedAt: 245,
+    }), /malformed JSON/);
+    assert.equal(db.prepare("SELECT starts_at FROM reward_epochs WHERE id = 'epoch'").get()?.starts_at,
+      "1970-01-01T00:01:40.000Z");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM protocol_events").get()?.n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM holder_snapshot_checkpoints").get()?.n, 0);
   } finally { db.close(); }
 });

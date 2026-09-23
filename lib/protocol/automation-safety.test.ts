@@ -340,6 +340,10 @@ test("SPORTPAD's own fees cannot seed community buyback jobs or complete a burn 
       ('community', 'fee-community', '20', NULL, NULL, NULL, 'reconciled', '2026-01-02', NULL),
       ('dust', 'fee-dust', '0', NULL, NULL, NULL, 'reconciled', '2026-01-03', NULL),
       ('unverified', 'fee-unverified', '20', NULL, NULL, NULL, 'reconciled', '2026-01-04', NULL);
+    ALTER TABLE settlements ADD COLUMN buyback_spent_atomic TEXT NOT NULL DEFAULT '0';
+    CREATE TABLE settlement_steps (settlement_id TEXT, stage TEXT, state TEXT);
+    CREATE TABLE automation_jobs (entity_type TEXT, entity_id TEXT, job_type TEXT);
+    CREATE TABLE transaction_intents (settlement_id TEXT, action TEXT, state TEXT);
   `);
   const eligible = db.prepare(ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL).all("sportpad-mint");
   assert.deepEqual(eligible.map((row) => row.settlement_id), ["community"]);

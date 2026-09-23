@@ -10,6 +10,7 @@ import {
 import { buybackSafetyLimits, inspectBuybackOrder, inspectBuybackSettlement,
   inspectBuybackBurnReceipt } from "../lib/protocol/buyback-safety.mjs";
 import { inspectPersistedBuybackBurn, signBuybackBurn } from "./solana-buyback-burn.mjs";
+import { signPersistedBuybackSwap } from "./solana-buyback-swap-replay.mjs";
 import { inspectPersistedSolanaClaimTransfer, signSolanaClaimTransfer } from "./solana-claim-transfer.mjs";
 import { reconcileRewardPurchases, rewardWorkerJobTypes } from "./solana-reward-recovery.mjs";
 
@@ -87,8 +88,8 @@ async function api(body) {
 }
 
 async function finalizedBuybackSwap(payload, signature) {
-  if (!buyback || !/^[1-9][0-9]*$/.test(payload.amountLamports ?? "") ||
-    BigInt(payload.amountLamports) > 100_000_000n) throw new Error("buyback_recovery_payload_invalid");
+  validateBuybackChunkPayload(payload);
+  if (!buyback) throw new Error("buyback_recovery_payload_invalid");
   const mint = new PublicKey(payload.sportpadMint);
   const tokenProgram = await tokenProgramForMint(mint);
   const outputAta = await getAssociatedTokenAddress(mint, buyback.publicKey, false, tokenProgram);
@@ -119,6 +120,25 @@ async function finalizedBuybackSwap(payload, signature) {
     maxDebit: BigInt(payload.amountLamports) + 500_000n, minOutput: 1n,
   });
   return purchased;
+}
+
+function validateBuybackChunkPayload(payload, entityId) {
+  const positive = /^[1-9][0-9]*$/;
+  const nonnegative = /^(0|[1-9][0-9]*)$/;
+  if (!payload || typeof payload.stepId !== "string" ||
+    (entityId && payload.stepId !== entityId) ||
+    !positive.test(payload.buybackTotalLamports ?? "") ||
+    !positive.test(payload.amountLamports ?? "") ||
+    !nonnegative.test(payload.chunkOffsetAtomic ?? "")) {
+    throw new Error("buyback_chunk_payload_invalid");
+  }
+  const total = BigInt(payload.buybackTotalLamports);
+  const offset = BigInt(payload.chunkOffsetAtomic);
+  const amount = BigInt(payload.amountLamports);
+  if (total > 9_223_372_036_854_775_807n || offset >= total ||
+    amount !== (total - offset > 100_000_000n ? 100_000_000n : total - offset)) {
+    throw new Error("buyback_chunk_amount_mismatch");
+  }
 }
 
 async function finalizePreparedBuybackBurn(payload, sourceTxHash, amount, prepared) {
@@ -168,7 +188,8 @@ async function finalizePreparedBuybackBurn(payload, sourceTxHash, amount, prepar
     outputAmountAtomic: amount.toString() };
 }
 
-async function burnPurchasedBuybackTokens(payload, jobId, workerId, sourceTxHash, amount) {
+async function burnPurchasedBuybackTokens(payload, jobId, workerId, sourceTxHash, amount,
+  replacesBurnSignature = null) {
   if (!buyback) throw new Error("buyback_signer_not_configured");
   const mint = new PublicKey(payload.sportpadMint);
   const tokenProgram = await tokenProgramForMint(mint);
@@ -183,7 +204,8 @@ async function burnPurchasedBuybackTokens(payload, jobId, workerId, sourceTxHash
   const burnIntent = await api({ action: "prepare_buyback_burn", jobId, workerId,
     sourceTxHash, burnAmountAtomic: amount.toString(),
     signedTransactionBase64: burn.base64,
-    lastValidBlockHeight: latest.lastValidBlockHeight });
+    lastValidBlockHeight: latest.lastValidBlockHeight,
+    ...(replacesBurnSignature ? { replacesBurnSignature } : {}) });
   if (!burnIntent.prepared || burnIntent.txSignature !== burn.signature) {
     throw new Error("sportpad_burn_intent_not_persisted");
   }
@@ -193,6 +215,48 @@ async function burnPurchasedBuybackTokens(payload, jobId, workerId, sourceTxHash
   });
 }
 
+async function replayPreparedBuybackSwap(stage) {
+  if (!buyback || !buybackWorkerId) throw new Error("buyback_replay_signer_not_configured");
+  validateBuybackChunkPayload(stage.payload);
+  if (typeof stage.jobId !== "string" ||
+    typeof stage.providerRequestId !== "string" || !stage.providerRequestId ||
+    !Number.isSafeInteger(stage.lastValidBlockHeight) ||
+    stage.lastValidBlockHeight <= 0) throw new Error("buyback_replay_stage_invalid");
+  const replay = signPersistedBuybackSwap({
+    unsignedTransactionBase64: stage.unsignedTransactionBase64,
+    signature: stage.signature, signer: buyback,
+  });
+  const currentHeight = await connection.getBlockHeight("finalized");
+  if (currentHeight > stage.lastValidBlockHeight ||
+    !(await connection.isBlockhashValid(replay.blockhash,
+      { commitment: "confirmed" })).value) {
+    throw new Error("buyback_replay_blockhash_expired");
+  }
+  const executeResponse = await fetch(EXECUTE_URL, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": jupiterKey },
+    body: JSON.stringify({ signedTransaction: replay.signedTransactionBase64,
+      requestId: stage.providerRequestId, lastValidBlockHeight: stage.lastValidBlockHeight }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const executed = await executeResponse.json().catch(() => ({}));
+  if (executed.signature && executed.signature !== stage.signature) {
+    throw new Error("buyback_replay_provider_signature_mismatch");
+  }
+  if (executeResponse.ok && executed.status === "Success") {
+    const confirmation = await connection.confirmTransaction({
+      signature: stage.signature, blockhash: replay.blockhash,
+      lastValidBlockHeight: stage.lastValidBlockHeight,
+    }, "finalized");
+    if (confirmation.value.err) throw new Error("buyback_replay_swap_failed");
+  }
+  // The provider may return an already-submitted error after a crash. Only
+  // independent finalized-chain proof can advance to the burn either way.
+  const purchased = await finalizedBuybackSwap(stage.payload, stage.signature);
+  return burnPurchasedBuybackTokens(stage.payload, stage.jobId, buybackWorkerId,
+    stage.signature, purchased);
+}
+
 async function reconcileBuybackJobs() {
   if (!BUYBACK_EXECUTION_SAFE || !buybackWorkerId) {
     return { reconciled: false, pending: false };
@@ -200,16 +264,30 @@ async function reconcileBuybackJobs() {
   const recovery = await api({ action: "reconcile_buyback", workerId: buybackWorkerId });
   if (!recovery || typeof recovery.reconciled !== "boolean" ||
     typeof recovery.pending !== "boolean" ||
-    (recovery.burnRequired && recovery.burnPrepared)) {
+    [recovery.swapPrepared, recovery.burnRequired, recovery.burnPrepared]
+      .filter(Boolean).length > 1) {
     throw new Error("buyback_recovery_response_invalid");
   }
   if (recovery.reconciled) return { reconciled: true, pending: recovery.pending };
+  if (recovery.swapPrepared) {
+    if (!recovery.pending || !recovery.swapPrepared.payload ||
+      typeof recovery.swapPrepared.signature !== "string") {
+      throw new Error("buyback_recovery_swap_stage_invalid");
+    }
+    await assertPublishedTreasuries();
+    const result = await replayPreparedBuybackSwap(recovery.swapPrepared);
+    await api({ action: "complete", jobId: recovery.swapPrepared.jobId,
+      workerId: buybackWorkerId, ...result });
+    return { reconciled: true, pending: true };
+  }
   const stage = recovery.burnRequired ?? recovery.burnPrepared;
   if (!stage) return { reconciled: false, pending: recovery.pending };
   if (!recovery.pending || typeof stage.jobId !== "string" ||
     !stage.payload || typeof stage.payload !== "object" ||
     typeof stage.sourceTxHash !== "string" ||
-    !/^[1-9][0-9]*$/.test(stage.purchasedAmountAtomic ?? "")) {
+    !/^[1-9][0-9]*$/.test(stage.purchasedAmountAtomic ?? "") ||
+    (stage.replacesBurnSignature &&
+      !/^[1-9A-HJ-NP-Za-km-z]{64,96}$/.test(stage.replacesBurnSignature))) {
     throw new Error("buyback_recovery_stage_invalid");
   }
   await assertPublishedTreasuries();
@@ -219,16 +297,17 @@ async function reconcileBuybackJobs() {
   }
   const result = recovery.burnRequired
     ? await burnPurchasedBuybackTokens(stage.payload, stage.jobId, buybackWorkerId,
-      stage.sourceTxHash, purchased)
+      stage.sourceTxHash, purchased, stage.replacesBurnSignature)
     : await finalizePreparedBuybackBurn(stage.payload, stage.sourceTxHash,
       purchased, stage);
   await api({ action: "complete", jobId: stage.jobId, workerId: buybackWorkerId, ...result });
   return { reconciled: true, pending: true };
 }
 
-async function buyAndBurn(payload, arm, jobId, workerId) {
+async function buyAndBurn(payload, arm, jobId, workerId, entityId) {
   if (!BUYBACK_EXECUTION_SAFE) throw new Error("buyback_execution_disabled_pending_durable_recovery");
   if (!buyback) throw new Error("buyback_signer_not_configured");
+  validateBuybackChunkPayload(payload, entityId);
   const mint = new PublicKey(payload.sportpadMint);
   const tokenProgram = await tokenProgramForMint(mint);
   await arm();
@@ -302,21 +381,29 @@ async function buyRewards(payload, arm, jobId, workerId, entityId) {
   if (!rewards) throw new Error("reward_signer_not_configured");
   const canonicalPositive = /^[1-9][0-9]*$/;
   const canonicalNonnegative = /^(0|[1-9][0-9]*)$/;
-  if (payload.stepId !== entityId || !canonicalPositive.test(payload.rewardTotalLamports ?? "") ||
-    !canonicalPositive.test(payload.rewardAmountLamports ?? "") ||
-    !canonicalNonnegative.test(payload.chunkOffsetAtomic ?? "")) {
+  const isBatch = payload.batchId === entityId && typeof payload.batchId === "string";
+  if (!canonicalPositive.test(payload.rewardAmountLamports ?? "") ||
+    (isBatch ? payload.stepId !== undefined :
+      payload.stepId !== entityId || !canonicalPositive.test(payload.rewardTotalLamports ?? "") ||
+      !canonicalNonnegative.test(payload.chunkOffsetAtomic ?? ""))) {
     throw new Error("reward_chunk_payload_invalid");
   }
-  const total = BigInt(payload.rewardTotalLamports);
-  const offset = BigInt(payload.chunkOffsetAtomic);
   const amount = BigInt(payload.rewardAmountLamports);
-  if (total > 9_223_372_036_854_775_807n || offset >= total ||
-    amount !== (total - offset > 100_000_000n ? 100_000_000n : total - offset)) {
-    throw new Error("reward_chunk_amount_mismatch");
+  if (isBatch) {
+    if (amount < 1_000_000n || amount > 100_000_000n) throw new Error("reward_batch_amount_mismatch");
+  } else {
+    const total = BigInt(payload.rewardTotalLamports);
+    const offset = BigInt(payload.chunkOffsetAtomic);
+    if (total > 9_223_372_036_854_775_807n || offset >= total ||
+      amount !== (total - offset > 100_000_000n ? 100_000_000n : total - offset)) {
+      throw new Error("reward_chunk_amount_mismatch");
+    }
   }
   const mint = new PublicKey(payload.rewardMint);
   const tokenProgram = await tokenProgramForMint(mint);
-  await arm();
+  // A route failure for dust must happen while the job is still leased, so
+  // the queued batch can absorb later fee shares instead of being frozen.
+  if (!isBatch) await arm();
   // A separate confirmed ATA creation is required so the swap receipt has a
   // pre-balance. It must never be mistaken for the swap's reward inventory.
   const tokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -340,6 +427,7 @@ async function buyRewards(payload, arm, jobId, workerId, entityId) {
     amountLamports: payload.rewardAmountLamports,
   });
   if (!inspection.outputAta.equals(tokenAccount.address)) throw new Error("reward_output_ata_mismatch");
+  if (isBatch) await arm();
   const transaction = inspection.transaction;
   transaction.sign([rewards]);
   const expectedSignature = bs58.encode(transaction.signatures[0]);
@@ -477,12 +565,38 @@ function retryable(error) {
   return !code.includes("constraint_changed") && !code.includes("mismatch") && !code.includes("invalid");
 }
 
+async function replayPreparedRewardSwap(prepared) {
+  if (!rewards) throw new Error("reward_replay_signer_missing");
+  // The generic signed-order verifier reproduces only the original Jupiter
+  // message and signature. No new quote or extra spend is permitted here.
+  const checked = signPersistedBuybackSwap({
+    unsignedTransactionBase64: prepared.unsignedTransactionBase64,
+    signature: prepared.signature, signer: rewards,
+  });
+  if (await connection.getBlockHeight("finalized") > prepared.lastValidBlockHeight ||
+    !(await connection.isBlockhashValid(checked.blockhash,
+      { commitment: "confirmed" })).value) {
+    throw new Error("reward_replay_original_blockhash_expired");
+  }
+  const status = (await connection.getSignatureStatuses([prepared.signature],
+    { searchTransactionHistory: true })).value[0];
+  if (status?.err) throw new Error("reward_replay_transaction_failed");
+  if (status?.confirmationStatus === "finalized") return;
+  const sent = await connection.sendRawTransaction(
+    Buffer.from(checked.signedTransactionBase64, "base64"),
+    { skipPreflight: false, maxRetries: 4 },
+  );
+  if (sent !== prepared.signature) throw new Error("reward_replay_signature_mismatch");
+}
+
 async function runOnce() {
   // The API holds the signed swap intent before Jupiter sees it. Ask the
   // server to settle any finalized purchase from that durable signature on
   // every cycle, including after a worker restart or an /execute timeout.
-  // Recovery never signs or rebroadcasts a transaction.
-  const recovery = await reconcileRewardPurchases(api, rewardWorkerId, REWARD_PURCHASE_EXECUTION_SAFE);
+  // Recovery may rebroadcast only the exact persisted signature while its
+  // original blockhash is live. Finalization remains server-verified.
+  const recovery = await reconcileRewardPurchases(api, rewardWorkerId,
+    REWARD_PURCHASE_EXECUTION_SAFE, replayPreparedRewardSwap);
   if (recovery.reconciled) return true;
   const claimRecovery = await reconcileSolanaClaims();
   if (claimRecovery.reconciled) return true;
@@ -505,7 +619,7 @@ async function runOnce() {
       await assertPublishedTreasuries();
       const arm = async () => { await api({ action: "arm", jobId: job.id, workerId }); };
       const result = job.type === "sportpad_buyback_burn"
-        ? await buyAndBurn(job.payload, arm, job.id, workerId)
+        ? await buyAndBurn(job.payload, arm, job.id, workerId, job.entityId)
         : job.type === "solana_reward_purchase"
           ? await buyRewards(job.payload, arm, job.id, workerId, job.entityId)
           : await paySolanaClaim(job.payload, arm, job.id, workerId);

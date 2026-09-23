@@ -5,6 +5,7 @@ import { walletChallenges } from "@/db/schema";
 import {
   buildWalletChallenge,
   normalizeSolanaAddress,
+  walletDraftOwnerId,
   WALLET_CHALLENGE_TTL_MS,
 } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
@@ -15,8 +16,6 @@ function privateJson(body: unknown, status = 200) {
 }
 
 export async function POST(request: Request) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
   const url = new URL(request.url);
   const origin = request.headers.get("origin");
   if (origin !== url.origin) return privateJson({ error: "Cross-origin wallet requests are not allowed." }, 403);
@@ -31,6 +30,8 @@ export async function POST(request: Request) {
     ? normalizeSolanaAddress(body.walletAddress)
     : null;
   if (!walletAddress) return privateJson({ error: "Enter a valid Solana wallet address." }, 400);
+  const ownerUserId = getLaunchDraftOwner(request) ?? walletDraftOwnerId(walletAddress);
+  if (!ownerUserId) return privateJson({ error: "Wallet ownership could not be established." }, 401);
 
   const now = Date.now();
   const expiresAt = now + WALLET_CHALLENGE_TTL_MS;

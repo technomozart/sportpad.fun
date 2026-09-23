@@ -206,11 +206,63 @@ export const settlements = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_settlements_fee_event").on(table.feeEventId),
-    uniqueIndex("idx_settlements_reward_swap_signature").on(table.rewardSwapSignature)
-      .where(sql`${table.rewardSwapSignature} IS NOT NULL`),
+    // One finalized Solana reward purchase may aggregate fee shares from
+    // several settlements. The batch/source ledger proves each attribution.
+    index("idx_settlements_reward_swap_signature").on(table.rewardSwapSignature),
     uniqueIndex("idx_settlements_buyback_swap_signature").on(table.buybackSwapSignature)
       .where(sql`${table.buybackSwapSignature} IS NOT NULL`),
     index("idx_settlements_state").on(table.state),
+  ],
+);
+
+/** An open batch keeps small fee shares together until Jupiter offers an
+ * executable order. It is immutable once a worker leases the queued job. */
+export const rewardSwapBatches = sqliteTable(
+  "reward_swap_batches",
+  {
+    id: text("id").primaryKey(),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    rewardMint: text("reward_mint").notNull(),
+    treasury: text("treasury").notNull(),
+    inputAmountAtomic: text("input_amount_atomic").notNull().default("0"),
+    state: text("state").notNull().default("collecting"),
+    txSignature: text("tx_signature"),
+    outputAmountAtomic: text("output_amount_atomic"),
+    verifiedSlot: integer("verified_slot"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_reward_swap_batches_open_launch").on(table.launchId)
+      .where(sql`${table.state} IN ('collecting', 'queued')`),
+    uniqueIndex("idx_reward_swap_batches_signature").on(table.txSignature)
+      .where(sql`${table.txSignature} IS NOT NULL`),
+    index("idx_reward_swap_batches_state_created").on(table.state, table.createdAt),
+  ],
+);
+
+/** Exact immutable contribution from one fee settlement to one purchase.
+ * A source cannot be reserved in another batch until the prior buy settles. */
+export const rewardSwapBatchSources = sqliteTable(
+  "reward_swap_batch_sources",
+  {
+    batchId: text("batch_id").notNull().references(() => rewardSwapBatches.id),
+    settlementId: text("settlement_id").notNull().references(() => settlements.id),
+    offsetAtomic: text("offset_atomic").notNull(),
+    inputAmountAtomic: text("input_amount_atomic").notNull(),
+    totalAtomic: text("total_atomic").notNull(),
+    state: text("state").notNull().default("reserved"),
+    verifiedSignature: text("verified_signature"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.batchId, table.settlementId, table.offsetAtomic] }),
+    uniqueIndex("idx_reward_swap_sources_settlement_offset")
+      .on(table.settlementId, table.offsetAtomic),
+    uniqueIndex("idx_reward_swap_sources_active_settlement")
+      .on(table.settlementId).where(sql`${table.state} = 'reserved'`),
+    index("idx_reward_swap_sources_batch_state").on(table.batchId, table.state),
   ],
 );
 
@@ -504,6 +556,7 @@ export const transactionIntents = sqliteTable(
     id: text("id").primaryKey(),
     idempotencyKey: text("idempotency_key").notNull(),
     settlementId: text("settlement_id").references(() => settlements.id),
+    rewardBatchId: text("reward_batch_id").references(() => rewardSwapBatches.id),
     claimId: text("claim_id").references(() => rewardClaims.id),
     signerRole: text("signer_role").notNull(),
     signerAddress: text("signer_address"),
@@ -531,6 +584,9 @@ export const transactionIntents = sqliteTable(
     uniqueIndex("idx_transaction_intents_signature").on(table.txSignature),
     index("idx_transaction_intents_state_created").on(table.state, table.createdAt),
     index("idx_transaction_intents_settlement_action").on(table.settlementId, table.action),
+    // Exactly one immutable signed purchase may consume a reserved batch.
+    uniqueIndex("idx_transaction_intents_reward_batch").on(table.rewardBatchId)
+      .where(sql`${table.rewardBatchId} IS NOT NULL`),
     index("idx_transaction_intents_claim_action").on(table.claimId, table.action),
   ],
 );

@@ -33,6 +33,10 @@ async function checkRewardRouteUncached(outputMint: string): Promise<RewardRoute
   endpoint.searchParams.set("inputMint", WRAPPED_SOL_MINT);
   endpoint.searchParams.set("outputMint", outputMint);
   endpoint.searchParams.set("amount", QUOTE_AMOUNT_LAMPORTS);
+  // Match the automatic worker's executable route policy. A quote through
+  // OKX, DFlow, or JupiterZ is not a usable reward-acquisition route here.
+  endpoint.searchParams.set("slippageBps", "100");
+  endpoint.searchParams.set("excludeRouters", "jupiterz,dflow,okx");
   try {
     const response = await fetch(endpoint, {
       headers: { Accept: "application/json", "x-api-key": jupiterApiKey },
@@ -48,7 +52,7 @@ async function checkRewardRouteUncached(outputMint: string): Promise<RewardRoute
       return { available: false, checkedAt, inputAmountLamports: QUOTE_AMOUNT_LAMPORTS, outputAmountAtomic: null, router: null, reason: "provider_unavailable" };
     }
     const outputAmountAtomic = typeof body.outAmount === "string" && /^[1-9]\d*$/.test(body.outAmount) ? body.outAmount : null;
-    if (!outputAmountAtomic) {
+    if (!outputAmountAtomic || body.router !== "metis") {
       return { available: false, checkedAt, inputAmountLamports: QUOTE_AMOUNT_LAMPORTS, outputAmountAtomic: null, router: null, reason: "no_route" };
     }
     return {

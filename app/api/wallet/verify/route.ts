@@ -6,6 +6,7 @@ import {
   normalizeSolanaAddress,
   sha256Base64Url,
   verifyWalletChallengeSignature,
+  walletDraftOwnerId,
   WALLET_SESSION_TTL_SECONDS,
 } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
@@ -19,8 +20,6 @@ function privateJson(body: unknown, status = 200, headers?: Record<string, strin
 }
 
 export async function POST(request: Request) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
   const url = new URL(request.url);
   const origin = request.headers.get("origin");
   if (origin !== url.origin) return privateJson({ error: "Cross-origin wallet requests are not allowed." }, 403);
@@ -39,6 +38,8 @@ export async function POST(request: Request) {
   if (!id || !walletAddress || !signature) {
     return privateJson({ error: "Wallet verification data is incomplete." }, 400);
   }
+  const ownerUserId = getLaunchDraftOwner(request) ?? walletDraftOwnerId(walletAddress);
+  if (!ownerUserId) return privateJson({ error: "Wallet ownership could not be established." }, 401);
 
   const now = Date.now();
   try {

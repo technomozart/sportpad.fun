@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
 import { creatorModerationTransition } from "@/lib/protocol/moderation";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner } from "@/lib/server/wallet-session";
 import { commitModerationTransition } from "@/lib/server/moderation-transition";
 import { getPublicationMode, isOperatorUserId } from "@/lib/server/publication-policy";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
@@ -42,8 +42,8 @@ async function ownedDraft(id: string, ownerUserId: string) {
 }
 
 export async function GET(request: Request, context: ModerationRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const { id } = await context.params;
   if (!isUuidV4(id)) return privateJson({ error: "Draft not found." }, 404);
   const draft = await ownedDraft(id, ownerUserId).catch(() => null);
@@ -51,8 +51,8 @@ export async function GET(request: Request, context: ModerationRouteContext) {
 }
 
 export async function POST(request: Request, context: ModerationRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const url = new URL(request.url);
   if (request.headers.get("origin") !== url.origin) return privateJson({ error: "Cross-origin review requests are not allowed." }, 403);
   if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {

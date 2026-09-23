@@ -4,13 +4,17 @@ import { env } from "cloudflare:workers";
 import { PublicKey } from "@solana/web3.js";
 
 import { accrueHolderPosition } from "@/lib/protocol/holder-rewards";
+import { finalizedHolderBaselineWindow } from "@/lib/protocol/holder-epoch-baseline";
 import {
   ASSERT_ONE_CHECKPOINT_SQL,
+  ASSERT_ONE_EPOCH_SHIFT_SQL,
   ASSERT_POSITION_COUNT_SQL,
   ASSERT_STAGED_SNAPSHOT_SQL,
   COMMIT_HOLDER_CHECKPOINT_SQL,
   COMMIT_STAGED_HOLDER_POSITIONS_SQL,
+  RECORD_HOLDER_BASELINE_SHIFT_SQL,
   RECORD_HOLDER_SNAPSHOT_SQL,
+  SHIFT_EPOCH_TO_FINALIZED_BASELINE_SQL,
   STAGE_HOLDER_POSITION_SQL,
 } from "@/lib/protocol/holder-indexer-sql";
 import { isCommunityLaunchFeeSource } from "@/lib/protocol/fee-policy";
@@ -88,6 +92,13 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
   const observedAt = snapshot.finalizedAt;
   const startsAt = unixSeconds(epoch.starts_at);
   const endsAt = unixSeconds(epoch.ends_at);
+  const baseline = finalizedHolderBaselineWindow({
+    startsAt, endsAt, firstFinalizedAt: observedAt, hasCheckpoint: Boolean(baseCheckpoint),
+  });
+  const effectiveStartsAt = baseline.shiftSeconds > 0
+    ? new Date(baseline.startsAt * 1_000).toISOString() : epoch.starts_at;
+  const effectiveEndsAt = baseline.shiftSeconds > 0
+    ? new Date(baseline.endsAt * 1_000).toISOString() : epoch.ends_at;
   const generationId = crypto.randomUUID();
   const statements: D1PreparedStatement[] = [];
 
@@ -101,8 +112,8 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
       } : null,
       nextBalanceAtomic: snapshot.balances.get(wallet) ?? 0n,
       observedAt,
-      startsAt,
-      endsAt,
+      startsAt: baseline.startsAt,
+      endsAt: baseline.endsAt,
     });
     statements.push(database.prepare(STAGE_HOLDER_POSITION_SQL).bind(
       generationId,
@@ -121,11 +132,29 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
     const eventId = `holder-snapshot:${epoch.epoch_id}:${snapshot.slot}:${observedAt}`;
     // D1.batch is a transaction. A failed count, stale checkpoint, or failed
     // canonical copy rolls back the entire generation, including its event.
-    const results = await database.batch([
+    const baselineStatements = baseline.shiftSeconds > 0 ? [
+      database.prepare(SHIFT_EPOCH_TO_FINALIZED_BASELINE_SQL).bind(
+        epoch.epoch_id,
+        effectiveStartsAt,
+        effectiveEndsAt,
+        epoch.starts_at,
+        epoch.ends_at,
+        observedAt,
+      ),
+      database.prepare(ASSERT_ONE_EPOCH_SHIFT_SQL),
+      database.prepare(RECORD_HOLDER_BASELINE_SHIFT_SQL).bind(
+        `holder-baseline:${epoch.epoch_id}`, epoch.epoch_id, snapshot.slot,
+        String(baseline.shiftSeconds), epoch.mainnet_mint, snapshot.evidenceHash,
+      ),
+      database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
+    ] : [];
+    await database.batch([
+      ...baselineStatements,
       database.prepare(ASSERT_STAGED_SNAPSHOT_SQL).bind(generationId, epoch.epoch_id, wallets.size),
       database.prepare(COMMIT_HOLDER_CHECKPOINT_SQL).bind(
         epoch.epoch_id, generationId, snapshot.slot, observedAt, wallets.size, snapshot.evidenceHash,
         baseCheckpoint?.generation_id ?? null,
+        effectiveStartsAt, effectiveEndsAt,
       ),
       database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
       database.prepare(COMMIT_STAGED_HOLDER_POSITIONS_SQL).bind(generationId, epoch.epoch_id),
@@ -136,8 +165,13 @@ async function indexEpoch(database: D1Database, epoch: EpochRow) {
       ),
       database.prepare(ASSERT_ONE_CHECKPOINT_SQL),
     ]);
-    const changed = Number(results[3].meta.changes ?? 0);
-    return { accountsSeen: snapshot.accountsSeen, holders: snapshot.balances.size, changed, slot: snapshot.slot };
+    return {
+      accountsSeen: snapshot.accountsSeen,
+      holders: snapshot.balances.size,
+      changed: wallets.size,
+      slot: snapshot.slot,
+      baselineShiftSeconds: baseline.shiftSeconds,
+    };
   } finally {
     await database.prepare("DELETE FROM holder_snapshot_staging WHERE generation_id = ?1")
       .bind(generationId).run();

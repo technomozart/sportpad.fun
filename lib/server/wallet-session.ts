@@ -5,6 +5,7 @@ import { walletSessions } from "@/db/schema";
 import {
   readCookie,
   sha256Base64Url,
+  walletSessionBelongsToRequester,
   WALLET_SESSION_TTL_SECONDS,
 } from "@/lib/protocol/wallet-auth";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
@@ -35,8 +36,6 @@ export function clearWalletSessionCookie(request: Request) {
 }
 
 export async function getVerifiedWalletSession(request: Request) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return null;
   const token = readCookie(request.headers.get("cookie"), WALLET_SESSION_COOKIE);
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   const tokenHash = await sha256Base64Url(token);
@@ -46,9 +45,16 @@ export async function getVerifiedWalletSession(request: Request) {
     .from(walletSessions)
     .where(and(
       eq(walletSessions.tokenHash, tokenHash),
-      eq(walletSessions.ownerUserId, ownerUserId),
       gt(walletSessions.expiresAt, now),
     ))
     .limit(1);
-  return session ?? null;
+  if (!session || !walletSessionBelongsToRequester(session, getLaunchDraftOwner(request))) return null;
+  return session;
+}
+
+export async function getAuthenticatedDraftOwner(request: Request) {
+  // An opaque wallet session authorizes wallet-owned drafts. Preserve the
+  // ChatGPT principal for drafts created before public wallet access.
+  const session = await getVerifiedWalletSession(request).catch(() => null);
+  return session?.ownerUserId ?? getLaunchDraftOwner(request);
 }

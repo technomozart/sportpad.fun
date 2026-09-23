@@ -18,6 +18,39 @@ export const ASSERT_STAGED_SNAPSHOT_SQL = `
   ) = ?3 THEN 1 ELSE json_extract('holder_snapshot_incomplete', '$') END AS complete
 `;
 
+// A missed first observation cannot make an epoch retroactively eligible.
+// The first finalized snapshot sets the opening balance, while this CAS moves
+// the whole window forward without shortening it. It runs in the same D1
+// transaction as the checkpoint and canonical position replacement.
+export const SHIFT_EPOCH_TO_FINALIZED_BASELINE_SQL = `
+  UPDATE reward_epochs SET starts_at = ?2, ends_at = ?3, updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?1 AND state = 'accruing'
+    AND starts_at = ?4 AND ends_at = ?5
+    AND CAST(strftime('%s', starts_at) AS INTEGER) < ?6
+    AND NOT EXISTS (
+      SELECT 1 FROM holder_snapshot_checkpoints c WHERE c.epoch_id = reward_epochs.id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM holder_epoch_positions p WHERE p.epoch_id = reward_epochs.id
+    )
+    AND EXISTS (
+      SELECT 1 FROM launch_drafts l WHERE l.id = reward_epochs.launch_id
+        AND l.status = 'mainnet_published'
+    )
+`;
+
+export const ASSERT_ONE_EPOCH_SHIFT_SQL = `
+  SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('holder_epoch_baseline_conflict', '$') END AS shifted
+`;
+
+export const RECORD_HOLDER_BASELINE_SHIFT_SQL = `
+  INSERT INTO protocol_events (
+    id, category, entity_type, entity_id, event_type, idempotency_key,
+    state, slot, amount_atomic, mint, evidence_hash
+  ) VALUES (?1, 'rewards', 'epoch', ?2, 'holder_epoch_baseline_shifted',
+    ?1, 'verified', ?3, ?4, ?5, ?6)
+`;
+
 // A concurrent or older observation cannot replace a newer finalized slot.
 // The observation time must also advance, avoiding a second accrual for the
 // same wall-clock instant. D1 batch rolls back the whole commit if the
@@ -30,6 +63,7 @@ export const COMMIT_HOLDER_CHECKPOINT_SQL = `
   SELECT ?1, ?2, ?4, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP
   FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
   WHERE e.id = ?1 AND e.state = 'accruing' AND l.status = 'mainnet_published'
+    AND e.starts_at = ?8 AND e.ends_at = ?9
   ON CONFLICT(epoch_id) DO UPDATE SET
     generation_id = excluded.generation_id,
     last_observed_slot = excluded.last_observed_slot,
@@ -45,6 +79,7 @@ export const COMMIT_HOLDER_CHECKPOINT_SQL = `
       SELECT 1 FROM reward_epochs e JOIN launch_drafts l ON l.id = e.launch_id
       WHERE e.id = excluded.epoch_id AND e.state = 'accruing'
         AND l.status = 'mainnet_published'
+        AND e.starts_at = ?8 AND e.ends_at = ?9
     )
 `;
 

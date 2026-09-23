@@ -15,8 +15,11 @@ import { NATIVE_MINT } from "@solana/spl-token";
 import bs58 from "bs58";
 
 import {
+  inspectPersistedPreparedBuybackSwap,
+  inspectPersistedPreparedRewardSwap,
   inspectPreparedAutomaticBuybackOrder,
   verifyPersistedAutomaticBuybackIntent,
+  verifyPersistedAutomaticRewardBatchIntent,
   verifyPersistedAutomaticRewardChunkIntent,
   verifyPersistedAutomaticRewardIntent,
   type PersistedAutomaticBuybackIntent,
@@ -90,6 +93,53 @@ test("binds a finalized swap to one persisted signed Jupiter message", async () 
   assert.equal(proof.providerRequestId, "jupiter-order-123");
 });
 
+test("prepared buyback recovery reuses the exact signed order and request", async () => {
+  const input = await fixture();
+  const intent = { ...input.intent,
+    idempotency_key: "automation:buyback:swap:step-1",
+    last_valid_block_height: 200 };
+  const expected = { settlementId: input.expected.settlementId, stepId: "step-1",
+    treasury: input.expected.treasury, sportpadMint: input.expected.sportpadMint,
+    inputAmountLamports: input.expected.inputAmountLamports };
+  const result = await inspectPersistedPreparedBuybackSwap(intent, expected);
+  assert.equal(result.txSignature, input.expected.swapSignature);
+  assert.equal(result.providerRequestId, "jupiter-order-123");
+  assert.equal(result.unsignedTransactionBase64, input.unsignedTransactionBase64);
+  await assert.rejects(inspectPersistedPreparedBuybackSwap({ ...intent,
+    tx_signature: Keypair.generate().publicKey.toBase58() }, expected),
+  /recovery_message_mismatch/);
+  await assert.rejects(inspectPersistedPreparedBuybackSwap(intent,
+    { ...expected, stepId: "other-step" }), /recovery_identity_mismatch/);
+});
+
+test("prepared reward recovery permits only the original signed order", async () => {
+  const input = await fixture();
+  const expected = { idempotencyKey: "automation:reward:swap:step-1",
+    treasury: input.expected.treasury, rewardMint: input.expected.sportpadMint,
+    inputAmountLamports: input.expected.inputAmountLamports };
+  const intent = { ...input.intent, idempotency_key: expected.idempotencyKey,
+    signer_role: "reward_treasury", action: "solana_reward_purchase_automation",
+    last_valid_block_height: 200 };
+  const result = await inspectPersistedPreparedRewardSwap(intent, expected);
+  assert.equal(result.txSignature, input.expected.swapSignature);
+  assert.equal(result.unsignedTransactionBase64, input.unsignedTransactionBase64);
+  await assert.rejects(inspectPersistedPreparedRewardSwap({ ...intent,
+    tx_signature: Keypair.generate().publicKey.toBase58() }, expected),
+  /reward_recovery_message_mismatch/);
+  await assert.rejects(inspectPersistedPreparedRewardSwap(intent,
+    { ...expected, idempotencyKey: "automation:reward:swap:other" }),
+  /reward_recovery_identity_mismatch/);
+  const batchId = "11111111-1111-4111-8111-111111111111";
+  const batchIntent = { ...intent, idempotency_key: `automation:reward:batch:${batchId}`,
+    reward_batch_id: batchId };
+  await assert.rejects(inspectPersistedPreparedRewardSwap(batchIntent,
+    { ...expected, idempotencyKey: batchIntent.idempotency_key }),
+  /reward_recovery_identity_mismatch/);
+  assert.equal((await inspectPersistedPreparedRewardSwap(batchIntent,
+    { ...expected, idempotencyKey: batchIntent.idempotency_key,
+      rewardBatchId: batchId })).txSignature, input.expected.swapSignature);
+});
+
 test("binds a Solana reward purchase to its own persisted signer and mint", async () => {
   const input = await fixture();
   const reward = {
@@ -127,6 +177,30 @@ test("a reward chunk proof binds the step ID as well as its parent settlement", 
     input.expected.swapSignature);
   await assert.rejects(verifyPersistedAutomaticRewardChunkIntent({ ...chunk,
     expected: { ...chunk.expected, stepId: "step-2" },
+  }), /job_identity_mismatch/);
+});
+
+test("a reward batch proof binds one signed order to its source anchor and batch ID", async () => {
+  const input = await fixture();
+  const batchId = "11111111-1111-4111-8111-111111111111";
+  const batch = {
+    ...input,
+    expected: { settlementId: input.expected.settlementId, batchId,
+      treasury: input.expected.treasury, rewardMint: input.expected.sportpadMint,
+      inputAmountLamports: input.expected.inputAmountLamports,
+      purchasedAmountAtomic: input.expected.purchasedAmountAtomic,
+      swapSignature: input.expected.swapSignature },
+    intent: { ...input.intent, idempotency_key: `automation:reward:batch:${batchId}`,
+      reward_batch_id: batchId, signer_role: "reward_treasury",
+      action: "solana_reward_purchase_automation" },
+  };
+  assert.equal((await verifyPersistedAutomaticRewardBatchIntent(batch)).txSignature,
+    input.expected.swapSignature);
+  assert.throws(() => verifyPersistedAutomaticRewardBatchIntent({ ...batch,
+    intent: { ...batch.intent, reward_batch_id: "different" },
+  }), /reward_batch_identity_mismatch/);
+  await assert.rejects(verifyPersistedAutomaticRewardBatchIntent({ ...batch,
+    expected: { ...batch.expected, settlementId: "another" },
   }), /job_identity_mismatch/);
 });
 

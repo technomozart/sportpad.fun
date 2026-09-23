@@ -9,6 +9,8 @@ import {
   readCookie,
   sha256Base64Url,
   verifyWalletChallengeSignature,
+  walletDraftOwnerId,
+  walletSessionBelongsToRequester,
 } from "./wallet-auth.ts";
 
 const walletAddress = bs58.encode(crypto.getRandomValues(new Uint8Array(32)));
@@ -26,6 +28,21 @@ test("normalizes canonical 32-byte Solana addresses", () => {
   assert.equal(normalizeSolanaAddress(walletAddress), walletAddress);
   assert.equal(normalizeSolanaAddress("not-a-wallet"), null);
   assert.equal(normalizeSolanaAddress(`${walletAddress} `), walletAddress);
+});
+
+test("wallet-only draft owner requires the exact verified Solana address", () => {
+  const ownerUserId = walletDraftOwnerId(walletAddress);
+  assert.equal(ownerUserId, `wallet:${walletAddress}`);
+  assert.equal(walletDraftOwnerId("not-a-wallet"), null);
+  assert.equal(walletSessionBelongsToRequester({ ownerUserId: ownerUserId!, walletAddress }, null), true);
+  assert.equal(walletSessionBelongsToRequester({ ownerUserId: "wallet:forged", walletAddress }, null), false);
+});
+
+test("legacy signed-in sessions cannot be reused by a different ChatGPT user", () => {
+  const session = { ownerUserId: "user-one", walletAddress };
+  assert.equal(walletSessionBelongsToRequester(session, "user-one"), true);
+  assert.equal(walletSessionBelongsToRequester(session, "user-two"), false);
+  assert.equal(walletSessionBelongsToRequester(session, null), false);
 });
 
 test("builds a domain, URI, wallet, nonce, and mainnet bound message", () => {
@@ -49,6 +66,13 @@ test("verifies the exact signed challenge and rejects changed content", async ()
   assert.equal(await verifyWalletChallengeSignature({ walletAddress: signingWallet, message: signedChallenge, signatureBase64 }), true);
   assert.equal(await verifyWalletChallengeSignature({ walletAddress: signingWallet, message: `${signedChallenge}.`, signatureBase64 }), false);
   assert.equal(await verifyWalletChallengeSignature({ walletAddress: signingWallet, message: signedChallenge, signatureBase64: "bad" }), false);
+  const otherWallet = bs58.encode(crypto.getRandomValues(new Uint8Array(32)));
+  assert.equal(await verifyWalletChallengeSignature({ walletAddress: otherWallet, message: signedChallenge, signatureBase64 }), false);
+  const otherChallenge = buildWalletChallenge({ ...challengeFields, walletAddress: otherWallet });
+  const wrongKeySignature = Buffer.from(await crypto.subtle.sign(
+    { name: "Ed25519" }, keypair.privateKey, new TextEncoder().encode(otherChallenge),
+  )).toString("base64");
+  assert.equal(await verifyWalletChallengeSignature({ walletAddress: otherWallet, message: otherChallenge, signatureBase64: wrongKeySignature }), false);
 });
 
 test("rejects the low-order zero-key and zero-signature forgery", async () => {

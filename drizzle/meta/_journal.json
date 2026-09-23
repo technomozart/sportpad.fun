@@ -141,6 +141,13 @@
       "when": 1790187308964,
       "tag": "0019_right_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1790188963977,
+      "tag": "0020_yummy_black_widow",
+      "breakpoints": true
     }
   ]
 }

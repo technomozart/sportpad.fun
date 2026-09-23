@@ -48,35 +48,8 @@ type WebMCPTool = {
   execute: (input: Record<string, unknown>) => unknown | Promise<unknown>;
 };
 
-function WalletButton({ pathname }: { pathname: string }) {
+function WalletButton() {
   const { wallet, busy, message, messageTone, providerAvailable, connectAndVerify, disconnect } = useSolanaWalletSession();
-  const [accountStatus, setAccountStatus] = useState<"loading" | "signed_in" | "signed_out">("loading");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/account", { cache: "no-store", signal: controller.signal })
-      .then((response) => response.ok ? response.json() as Promise<{ authenticated?: boolean }> : Promise.reject(new Error("Account unavailable")))
-      .then((body) => setAccountStatus(body.authenticated === true ? "signed_in" : "signed_out"))
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setAccountStatus("signed_out");
-      });
-    return () => controller.abort();
-  }, []);
-
-  if (accountStatus === "loading") {
-    return <Button disabled aria-label="Checking wallet access" variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white"><Wallet className="size-4" /><span>Wallet</span></Button>;
-  }
-
-  if (accountStatus === "signed_out") {
-    const returnTo = pathname.startsWith("/") && !pathname.startsWith("//") ? pathname : "/";
-    return (
-      <Button asChild variant="outline" className="header-wallet rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
-        <a href={`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`}><Wallet className="size-4" /><span>Sign in to connect</span></a>
-      </Button>
-    );
-  }
-
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -134,7 +107,7 @@ function AccountButton({ pathname }: { pathname: string }) {
   if (status === "signed_out") {
     return (
       <Button asChild variant="outline" className="header-account rounded-full border-white/10 bg-white/[0.04] text-white hover:bg-white/10 hover:text-white">
-        <a href={signInPath}><LogIn className="size-4" /><span>Sign in</span></a>
+        <a href={signInPath}><LogIn className="size-4" /><span>Operator sign in</span></a>
       </Button>
     );
   }
@@ -156,9 +129,9 @@ function AccountButton({ pathname }: { pathname: string }) {
       </DialogTrigger>
       <DialogContent className="border-white/10 bg-[#0b100d] text-white sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>SportPad account</DialogTitle>
+          <DialogTitle>ChatGPT account</DialogTitle>
           <DialogDescription className="leading-relaxed text-white/45">
-            You are signed in. Drafts stay private until reviewed and verified onchain.
+            Operator access still requires the configured account allowlist. Launch creators can use a verified Solana wallet without this sign-in.
           </DialogDescription>
         </DialogHeader>
         <Button asChild variant="outline" className="h-11 border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white">
@@ -253,7 +226,7 @@ function SiteChromeContent({ children }: { children: ReactNode }) {
           <div className="network-pill"><span /> Solana</div>
           <a className="github-header-link" href="https://github.com/technomozart/sportpad.fun" target="_blank" rel="noopener noreferrer" aria-label="SportPad source code on GitHub"><GitFork /><span>GitHub</span></a>
           <AccountButton pathname={pathname} />
-          <WalletButton pathname={pathname} />
+          <WalletButton />
           <Button asChild className="hidden rounded-full bg-[#9cff57] font-semibold text-[#071008] hover:bg-[#adff7d] xl:inline-flex">
             <Link href="/launch"><Sparkles className="size-4" /> Build draft</Link>
           </Button>

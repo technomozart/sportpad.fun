@@ -10,7 +10,7 @@ import {
   validateLaunchImage,
 } from "@/lib/protocol/launch-image";
 import { getRewardOption } from "@/lib/protocol/reward-options";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner } from "@/lib/server/wallet-session";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
 const maxPayloadBytes = 16_384;
@@ -53,8 +53,8 @@ function serializeDraft(draft: typeof launchDrafts.$inferSelect) {
 }
 
 export async function GET(request: Request) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access drafts." }, 401);
 
   try {
     const rows = await getDb()
@@ -71,12 +71,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to save drafts." }, 401);
 
   const requestUrl = new URL(request.url);
   const origin = request.headers.get("origin");
-  if (origin && origin !== requestUrl.origin) {
+  if (origin !== requestUrl.origin) {
     return privateJson({ error: "Cross-origin draft requests are not allowed." }, 403);
   }
 

@@ -18,9 +18,8 @@ import {
   verifyPumpDevnetCreate,
   verifyPumpDevnetFeeSplit,
 } from "@/lib/server/solana/devnet";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner, getVerifiedWalletSession } from "@/lib/server/wallet-session";
 import { commitModerationTransition } from "@/lib/server/moderation-transition";
-import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 import { getPublicationMode, isOperatorUserId } from "@/lib/server/publication-policy";
 import { consumeFixedWindow, rateLimitedJson } from "@/lib/server/rate-limit";
 
@@ -238,8 +237,8 @@ function logFailure(event: string, error: unknown) {
 }
 
 export async function GET(request: Request, context: DevnetRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const { id } = await context.params;
   if (!isUuidV4(id)) return privateJson({ error: "Draft not found." }, 404);
   try {
@@ -253,8 +252,8 @@ export async function GET(request: Request, context: DevnetRouteContext) {
 }
 
 export async function POST(request: Request, context: DevnetRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const session = await getVerifiedWalletSession(request).catch(() => null);
   if (!session || session.ownerUserId !== ownerUserId) {
     return privateJson({ error: "Verify a Solana wallet before using the devnet launcher." }, 401);

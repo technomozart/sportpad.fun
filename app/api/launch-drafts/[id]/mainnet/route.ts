@@ -10,7 +10,7 @@ import { getRewardOption, type RewardChain } from "@/lib/protocol/reward-options
 import type { LaunchAutomationReadiness } from "@/lib/protocol/launch-automation-gate";
 import { normalizeSolanaAddress } from "@/lib/protocol/wallet-auth";
 import { readLaunchAutomationReadiness } from "@/lib/server/launch-automation-readiness";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner, getVerifiedWalletSession } from "@/lib/server/wallet-session";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { uploadPumpMetadata } from "@/lib/server/pump-metadata";
 import { checkRewardRoute } from "@/lib/server/providers/jupiter-reward-route";
@@ -21,7 +21,6 @@ import {
   verifyPumpMainnetCreate,
   verifyPumpMainnetFeeSplit,
 } from "@/lib/server/solana/devnet";
-import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type MainnetRouteContext = { params: Promise<{ id: string }> };
 
@@ -99,8 +98,8 @@ function logFailure(event: string, error: unknown) {
 
 export async function GET(request: Request, context: MainnetRouteContext) {
   if (!env.DB) return privateJson({ error: "Mainnet launch records are unavailable." }, 503);
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const { id } = await context.params;
   if (!isUuidV4(id)) return privateJson({ error: "Draft not found." }, 404);
   try {
@@ -119,8 +118,8 @@ export async function GET(request: Request, context: MainnetRouteContext) {
 
 export async function POST(request: Request, context: MainnetRouteContext) {
   if (!env.DB) return privateJson({ error: "Mainnet launch records are unavailable." }, 503);
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateJson({ error: "Connect and verify a Solana wallet to access this draft." }, 401);
   const session = await getVerifiedWalletSession(request).catch(() => null);
   if (!session || session.ownerUserId !== ownerUserId) {
     return privateJson({ error: "Connect and verify the Solana wallet that will sign this mainnet launch." }, 401);

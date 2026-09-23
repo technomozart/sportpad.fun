@@ -82,7 +82,9 @@ test("private drafts can be listed and resumed only through the authenticated ow
 
   assert.match(builderSource, /fetch\("\/api\/launch-drafts", \{ cache: "no-store"/);
   assert.match(builderSource, /function resumeDraft\(draft: SavedLaunchDraft\)/);
-  assert.match(builderSource, /\/signin-with-chatgpt\?return_to=%2Flaunch/);
+  assert.match(builderSource, /useSolanaWalletSession\(\)/);
+  assert.match(builderSource, /walletSession\.connectAndVerify\(\)/);
+  assert.doesNotMatch(builderSource, /\/signin-with-chatgpt\?return_to=%2Flaunch/);
   assert.match(routeSource, /eq\(launchDrafts\.ownerUserId, ownerUserId\)/);
   assert.match(routeSource, /Cache-Control": "private, no-store"/);
   assert.match(accountRouteSource, /getLaunchDraftOwner\(request\)/);

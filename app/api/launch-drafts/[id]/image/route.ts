@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { launchDrafts } from "@/db/schema";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
 import { LAUNCH_IMAGE_MIME_TYPES } from "@/lib/protocol/launch-image";
-import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
+import { getAuthenticatedDraftOwner } from "@/lib/server/wallet-session";
 
 type ImageRouteContext = {
   params: Promise<{ id: string }>;
@@ -19,8 +19,8 @@ function privateError(error: string, status: number) {
 }
 
 export async function GET(request: Request, context: ImageRouteContext) {
-  const ownerUserId = getLaunchDraftOwner(request);
-  if (!ownerUserId) return privateError("Sign in is required.", 401);
+  const ownerUserId = await getAuthenticatedDraftOwner(request);
+  if (!ownerUserId) return privateError("Connect and verify a Solana wallet to access this image.", 401);
   if (!env.BUCKET) return privateError("Image storage is unavailable.", 503);
 
   const { id } = await context.params;

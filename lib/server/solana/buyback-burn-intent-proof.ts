@@ -91,9 +91,9 @@ export async function inspectPreparedAutomaticBuybackBurn(value: string, terms: 
 
 export async function verifyPersistedAutomaticBuybackBurnIntent({ intent, expected, receipt, status }:
   { intent: PersistedAutomaticBurnIntent | null; expected: BurnTerms & {
-    settlementId: string; signature: string;
+    settlementId: string; stepId?: string; signature: string;
   }; receipt: SolanaAutomationReceipt | null; status: SignatureStatus | null }) {
-  if (!intent || intent.idempotency_key !== `automation:buyback:burn:${expected.settlementId}` ||
+  if (!intent || intent.idempotency_key !== `automation:buyback:burn:${expected.stepId ?? expected.settlementId}` ||
     intent.settlement_id !== expected.settlementId || intent.signer_role !== "buyback_treasury" ||
     intent.signer_address !== expected.treasury || intent.action !== "sportpad_burn_automation" ||
     !["prepared", "broadcasting", "submitted", "submission_unknown"].includes(intent.state) ||

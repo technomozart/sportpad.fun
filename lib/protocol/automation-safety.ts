@@ -123,15 +123,25 @@ export const COMPLETE_BUYBACK_SETTLEMENT_SQL = `
 // SPORTPAD's own creator fees belong to project development. Exclude its mint
 // again at job creation even though the fee indexer normally skips it.
 export const ELIGIBLE_COMMUNITY_BUYBACK_SETTLEMENTS_SQL = `
-  SELECT s.id AS settlement_id, s.buyback_amount_atomic, f.launch_id
+  SELECT s.id AS settlement_id, s.buyback_amount_atomic, s.buyback_spent_atomic, f.launch_id
   FROM settlements s JOIN fee_events f ON f.id = s.fee_event_id
   JOIN launch_drafts l ON l.id = f.launch_id
   WHERE l.mainnet_mint IS NOT NULL AND l.mainnet_mint <> ?1
-    AND l.status IN ('mainnet_published', 'mainnet_suspended')
+    AND l.status = 'mainnet_published'
     AND s.buyback_amount_atomic GLOB '[1-9]*'
     AND s.buyback_amount_atomic NOT GLOB '*[^0-9]*'
     AND s.buyback_swap_signature IS NULL AND s.burn_signature IS NULL
+    AND s.buyback_spent_atomic <> s.buyback_amount_atomic
     AND s.state IN ('reconciled', 'distributed', 'reward_acquired')
+    AND NOT EXISTS (SELECT 1 FROM settlement_steps step
+      WHERE step.settlement_id = s.id AND step.stage = 'automatic_buyback_chunk'
+        AND step.state <> 'verified')
+    AND NOT EXISTS (SELECT 1 FROM automation_jobs old_job
+      WHERE old_job.entity_type = 'settlement' AND old_job.entity_id = s.id
+        AND old_job.job_type = 'sportpad_buyback_burn')
+    AND NOT EXISTS (SELECT 1 FROM transaction_intents manual
+      WHERE manual.settlement_id = s.id AND manual.action = 'sportpad_buyback'
+        AND manual.state <> 'failed')
   ORDER BY s.created_at ASC LIMIT 25
 `;
 
