@@ -1527,7 +1527,8 @@ async function replacementSwapArchive(database: D1Database, job: AutomationRow,
   );
 }
 
-async function reconcilePreparedBuyback(database: D1Database, workerId: string) {
+async function reconcilePreparedBuyback(database: D1Database, workerId: string,
+  mayBroadcast: boolean) {
   const config = readMainnetConfig();
   if (!config.buybackTreasury || workerId !== `solana:${config.buybackTreasury}`) {
     throw new Error("buyback_reconciliation_worker_mismatch");
@@ -1568,6 +1569,10 @@ async function reconcilePreparedBuyback(database: D1Database, workerId: string) 
         rpc.getSignatureStatuses([row.swap_signature], { searchTransactionHistory: true }),
       ]);
       if (!receipt && !statuses.value[0]) {
+        if (!mayBroadcast) {
+          await defer();
+          return { reconciled: false };
+        }
         const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
         const [step, intent] = await Promise.all([
           database.prepare(`
@@ -1636,6 +1641,10 @@ async function reconcilePreparedBuyback(database: D1Database, workerId: string) 
     }
     const swap = await recordVerifiedBuybackSwap(database, row, workerId, row.swap_signature);
     if (!row.burn_signature) {
+      if (!mayBroadcast) {
+        await defer();
+        return { reconciled: false };
+      }
       if (row.tx_hash) throw new Error("buyback_recovery_burn_hash_without_intent");
       if (row.state === "reconciliation_required") {
         const reset = await database.prepare(`
@@ -1681,6 +1690,10 @@ async function reconcilePreparedBuyback(database: D1Database, workerId: string) 
     }
     if (status?.err || status?.confirmationStatus === "finalized" || receipt?.meta?.err) {
       throw new Error("buyback_recovery_burn_failed_or_ambiguous");
+    }
+    if (!mayBroadcast) {
+      await defer();
+      return { reconciled: false };
     }
     const currentHeight = await rpc.getBlockHeight("finalized");
     if (currentHeight > row.burn_last_valid_height) {
@@ -1732,7 +1745,8 @@ async function reconcilePreparedBuyback(database: D1Database, workerId: string) 
   }
 }
 
-async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: string) {
+async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: string,
+  mayBroadcast: boolean) {
   const config = readMainnetConfig();
   if (!config.rewardTreasury || workerId !== `solana:${config.rewardTreasury}`) {
     throw new Error("reward_reconciliation_worker_mismatch");
@@ -1771,6 +1785,13 @@ async function reconcilePreparedSolanaPurchase(database: D1Database, workerId: s
     const status = statuses.value[0] ?? null;
     if (!receipt || !status || status.confirmationStatus !== "finalized" ||
       status.err !== null) {
+      // A pause blocks replay and replacement, but it cannot undo a finalized
+      // swap. Keep inspecting later cycles for a landed receipt so inventory
+      // can still be credited while the economic lane is paused.
+      if (!mayBroadcast) {
+        await defer();
+        return { reconciled: false };
+      }
       // The original signed message may have been persisted immediately
       // before a worker crash. Replay only that same signature while its
       // blockhash is live; an expired or ambiguous order stays held.
@@ -2488,12 +2509,12 @@ export async function POST(request: Request) {
     const config = readMainnetConfig();
     const controls = await readAutomationControls(env.DB);
     if (!FINANCIAL_LEDGER_VERIFIED || !config.rewardTreasury ||
-      input.workerId !== `solana:${config.rewardTreasury}` ||
-      !laneAllowsJob("solana_reward_purchase", controls)) {
+      input.workerId !== `solana:${config.rewardTreasury}`) {
       return Response.json({ error: "Reward reconciliation lane is paused or unavailable." }, { status: 409 });
     }
-    const requeued = await env.DB.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
-      .bind(Date.now(), `broadcasting:${input.workerId}`).run();
+    const mayBroadcast = laneAllowsJob("solana_reward_purchase", controls);
+    const requeued = mayBroadcast ? await env.DB.prepare(REQUEUE_UNPREPARED_REWARD_JOB_SQL)
+      .bind(Date.now(), `broadcasting:${input.workerId}`).run() : null;
     const staleBatches = await env.DB.prepare(`
       SELECT j.id, j.entity_id FROM automation_jobs j
       JOIN reward_swap_batches b ON b.id = j.entity_id
@@ -2507,7 +2528,7 @@ export async function POST(request: Request) {
       LIMIT 25
     `).bind(`broadcasting:${input.workerId}`).all<{ id: string; entity_id: string }>();
     let batchRequeued = false;
-    for (const stale of staleBatches.results) {
+    for (const stale of mayBroadcast ? staleBatches.results : []) {
       try {
         await env.DB.batch([
           env.DB.prepare(`
@@ -2537,7 +2558,8 @@ export async function POST(request: Request) {
         // A concurrent worker may have durably prepared the signed order.
       }
     }
-    const reconciled = await reconcilePreparedSolanaPurchase(env.DB, input.workerId);
+    const reconciled = await reconcilePreparedSolanaPurchase(env.DB, input.workerId,
+      mayBroadcast);
     const pending = await env.DB.prepare(`
       SELECT COUNT(*) AS count FROM automation_jobs
       WHERE job_type = 'solana_reward_purchase'
@@ -2546,7 +2568,7 @@ export async function POST(request: Request) {
         AND (state = 'reconciliation_required' OR error_code = ?1)
     `).bind(`broadcasting:${input.workerId}`).first<{ count: number }>();
     return Response.json({
-      reconciled: reconciled.reconciled || batchRequeued || Number(requeued.meta.changes ?? 0) > 0,
+      reconciled: reconciled.reconciled || batchRequeued || Number(requeued?.meta.changes ?? 0) > 0,
       pending: Number(pending?.count ?? 0) > 0,
       ...(reconciled.prepared ? { prepared: reconciled.prepared } : {}),
       ...(reconciled.orderRequired ? { orderRequired: reconciled.orderRequired } : {}),
@@ -2579,7 +2601,9 @@ export async function POST(request: Request) {
       !config.buybackTreasury || input.workerId !== `solana:${config.buybackTreasury}`) {
       return Response.json({ error: "Buyback reconciliation lane is unavailable." }, { status: 409 });
     }
-    const requeued = await env.DB.prepare(`
+    const controls = await readAutomationControls(env.DB);
+    const mayBroadcast = laneAllowsJob("sportpad_buyback_burn", controls);
+    const requeued = mayBroadcast ? await env.DB.prepare(`
       UPDATE automation_jobs SET state = 'queued', error_code = NULL,
         leased_until = NULL, available_at = ?1, updated_at = CURRENT_TIMESTAMP
       WHERE job_type = 'sportpad_buyback_burn' AND entity_type = 'settlement_step'
@@ -2590,15 +2614,15 @@ export async function POST(request: Request) {
           WHERE i.idempotency_key = 'automation:buyback:swap:' || automation_jobs.entity_id)
         AND NOT EXISTS (SELECT 1 FROM transaction_intents i
           WHERE i.idempotency_key = 'automation:buyback:burn:' || automation_jobs.entity_id)
-    `).bind(Date.now(), `broadcasting:${input.workerId}`).run();
-    const outcome = await reconcilePreparedBuyback(env.DB, input.workerId);
+    `).bind(Date.now(), `broadcasting:${input.workerId}`).run() : null;
+    const outcome = await reconcilePreparedBuyback(env.DB, input.workerId, mayBroadcast);
     const pending = await env.DB.prepare(`
       SELECT COUNT(*) AS count FROM automation_jobs
       WHERE job_type = 'sportpad_buyback_burn' AND entity_type = 'settlement_step'
         AND state IN ('broadcasting', 'reconciliation_required')
         AND (state = 'reconciliation_required' OR error_code = ?1)
     `).bind(`broadcasting:${input.workerId}`).first<{ count: number }>();
-    return Response.json({ reconciled: outcome.reconciled || Number(requeued.meta.changes ?? 0) > 0,
+    return Response.json({ reconciled: outcome.reconciled || Number(requeued?.meta.changes ?? 0) > 0,
       pending: Number(pending?.count ?? 0) > 0,
       ...(outcome.burnRequired ? { burnRequired: outcome.burnRequired } : {}),
       ...(outcome.burnPrepared ? { burnPrepared: outcome.burnPrepared } : {}),
