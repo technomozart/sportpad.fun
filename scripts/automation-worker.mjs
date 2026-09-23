@@ -77,7 +77,7 @@ async function solToChzWei(lamports) {
   return BigInt(quote.outAmount) * 10_000_000_000n;
 }
 
-async function executePurchase(payload) {
+async function executePurchase(payload, arm) {
   const spend = await solToChzWei(payload.rewardAmountLamports);
   const gasReserve = 3n * ONE_FAN_TOKEN;
   const balance = await publicClient.getBalance({ address: account.address });
@@ -88,6 +88,7 @@ async function executePurchase(payload) {
   if (!expected || expected <= 0n) throw new Error("kayen_route_unavailable");
   const minimum = expected * 975n / 1_000n;
   const before = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "balanceOf", args: [account.address] });
+  await arm();
   const hash = await walletClient.writeContract({
     address: KAYEN_ROUTER,
     abi: ROUTER,
@@ -104,12 +105,13 @@ async function executePurchase(payload) {
   return { txHash: hash, outputAmountAtomic: acquired.toString() };
 }
 
-async function executeClaim(payload) {
+async function executeClaim(payload, arm) {
   const amount = BigInt(payload.amountAtomic);
   if (amount <= 0n || amount % ONE_FAN_TOKEN !== 0n) throw new Error("claim_amount_not_whole_token");
   const balance = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "balanceOf", args: [account.address] });
   if (balance < amount) throw new Error("reward_inventory_underfunded");
   const allowance = await publicClient.readContract({ address: payload.wrappedContract, abi: ERC20, functionName: "allowance", args: [account.address, WRAPPER_FACTORY] });
+  await arm();
   if (allowance < amount) {
     const approvalHash = await walletClient.writeContract({
       address: payload.wrappedContract,
@@ -147,9 +149,10 @@ async function runOnce() {
   const { job } = await api({ action: "lease", workerId, jobTypes: ["chiliz_reward_purchase", "chiliz_claim_unwrap"] });
   if (!job) return false;
   try {
+    const arm = async () => { await api({ action: "arm", jobId: job.id, workerId }); };
     const result = job.type === "chiliz_reward_purchase"
-      ? await executePurchase(job.payload)
-      : await executeClaim(job.payload);
+      ? await executePurchase(job.payload, arm)
+      : await executeClaim(job.payload, arm);
     await api({ action: "complete", jobId: job.id, workerId, ...result });
   } catch (error) {
     await api({ action: "fail", jobId: job.id, workerId, errorCode: errorCode(error), retryable: retryable(error) });

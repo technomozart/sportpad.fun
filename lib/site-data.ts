@@ -80,7 +80,7 @@ export type FanAsset = {
   category: string;
   mint: string;
   imagePath?: string;
-  status: "Funded route";
+  status: "Registry-verified address";
   route: "Kayen" | "Jupiter";
   vault: "Created on funding";
   source: string;
@@ -104,7 +104,7 @@ export const fanAssets: FanAsset[] = REWARD_OPTIONS.map((asset) => ({
   category: asset.category,
   mint: asset.tokenAddress,
   imagePath: asset.imagePath,
-  status: "Funded route",
+  status: "Registry-verified address",
   route: asset.venue,
   vault: "Created on funding",
   source: asset.source,
@@ -118,15 +118,15 @@ export const faqItems = [
   },
   {
     question: "Why do Chiliz rewards need MetaMask?",
-    answer: "The community token and holder tracking remain on Solana, but most liquid Fan Token markets are on Chiliz Chain. The dashboard verifies a 0x wallet with one message, adds Chiliz Chain when needed, and pays claims to that address without asking for spending permission.",
+    answer: "The community token and holder tracking remain on Solana, but most listed Fan Token markets are on Chiliz Chain. A Chiliz claim requires a separately verified 0x wallet. The dashboard can request a switch to Chiliz Chain; a wallet-verification signature grants no spending permission. Payouts remain unavailable until the treasury and claim worker are funded and enabled.",
   },
   {
     question: "What happens to creator fees?",
-    answer: "Each verified community launch locks its Pump creator-fee configuration to send 80% to the selected official Fan Token reward treasury and 20% to buy and burn SPORTPAD. SPORTPAD's own creator fees are excluded from that route and retained for project development.",
+    answer: "The proposed Pump configuration sends 80% of a community launch's creator fees to a reward treasury and 20% to a separate SPORTPAD buyback treasury. Those transfers alone do not buy Fan Tokens or burn SPORTPAD; each action requires funded, verified execution. SPORTPAD's own creator fees are reserved for project development.",
   },
   {
     question: "Are rewards instant?",
-    answer: "No. The system settles rewards in funded epochs after finality, acquisition, holder indexing, and allocation checks. A claim is shown only after inventory has been acquired and reserved.",
+    answer: "No. A reward would become claimable only after fee finality, Fan Token acquisition, holder indexing, a funded epoch, and allocation checks. No claim is owed merely because a creator selected a reward token, and claims are currently paused.",
   },
   {
     question: "How will holder rewards be calculated?",
@@ -134,15 +134,15 @@ export const faqItems = [
   },
   {
     question: "Can a creator choose any Fan Token?",
-    answer: "A creator can choose any of the 78 Fan Tokens with live Kayen routes on Chiliz Chain, plus AFC and ARG on Solana. SportPad checks the selected route again before mainnet preparation. A live market is not the same as inventory already held for claims.",
+    answer: "A creator can draft a selection from 78 Kayen-listed Chiliz Fan Tokens, plus AFC and ARG on Solana. Mainnet preparation still requires a current executable quote and operational reward and buyback workers. A listed market is not a funded reward or a guarantee that a launch can proceed.",
   },
   {
     question: "Does SportPad custody my launch tokens?",
-    answer: "Community tokens stay in the user's wallet. Acquired reward inventory is held in policy-controlled protocol vaults until allocated holders claim it.",
+    answer: "Community tokens stay in the user's wallet. If reward execution is enabled, acquired Fan Tokens would be held in protocol-controlled vaults until allocated holders claim them. No reward inventory is currently funded.",
   },
   {
     question: "Who pays the Chiliz claim gas?",
-    answer: "The automated SportPad treasury pays CHZ gas for the unwrap and payout transaction. The holder receives the allocated official Fan Token and does not need CHZ merely to claim.",
+    answer: "The planned claim worker sponsors CHZ gas for the unwrap and payout transaction, so a holder should not need CHZ merely to claim when that service is active. Chiliz payouts are not yet enabled or funded.",
   },
 ];
 

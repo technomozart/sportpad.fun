@@ -109,6 +109,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
     pending.rewardTreasury === mainnet.rewardTreasury &&
     pending.buybackTreasury === mainnet.buybackTreasury
   ), [mainnet, pending, walletSession.wallet]);
+  const resumingSignedLaunch = exactContext && Boolean(pending.create && pending.fee);
 
   function persist(next: PendingMainnetEvidence) {
     setPending(next);
@@ -140,16 +141,16 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
     setError("");
     try {
       if (!walletSession.wallet) throw new Error("Connect and verify the Solana wallet that will create the coin.");
-      if (!mainnet?.ready || !mainnet.rewardTreasury || !mainnet.buybackTreasury) {
-        throw new Error(`Mainnet is waiting for ${mainnet?.missing.join(", ") || "protocol configuration"}.`);
+      if ((!mainnet?.ready && !resumingSignedLaunch) || !mainnet?.rewardTreasury || !mainnet?.buybackTreasury) {
+        throw new Error(`Mainnet launches are paused until reward and buyback automation are verified. Waiting for: ${mainnet?.missing.join(", ") || "protocol configuration"}.`);
       }
       if (!mainnet.metadataUri && !publicationAccepted) {
         throw new Error("Confirm the permanent public metadata upload before starting.");
       }
       if (!riskAccepted) throw new Error("Confirm that this uses real SOL and an irreversible fee split.");
       let state = mainnet;
-      setStatus(state.metadataUri ? "Rechecking the live Fan Token route before signing..." : "Checking the route and publishing approved metadata to Pump IPFS...");
-      state = await post({ action: "prepare", publicationAccepted: true });
+      setStatus(resumingSignedLaunch ? "Checking the previously signed mainnet transaction..." : state.metadataUri ? "Rechecking the live Fan Token route before signing..." : "Checking the route and publishing approved metadata to Pump IPFS...");
+      if (!resumingSignedLaunch) state = await post({ action: "prepare", publicationAccepted: true });
       if (!state.metadataUri || !state.rewardTreasury || !state.buybackTreasury) {
         throw new Error("The prepared mainnet configuration is incomplete.");
       }
@@ -167,6 +168,9 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
       persist(work);
 
       if (!work.create) {
+        // A failed or expired prior submission is a new launch attempt. It must
+        // pass the current server-side automation and reward-route preflight.
+        if (resumingSignedLaunch) await post({ action: "prepare", publicationAccepted: true });
         setStatus("Approve the real Pump coin creation in your wallet. No initial buy is added.");
         const { createPumpMainnetCoin } = await import("@/lib/client/pump-mainnet");
         const result = await createPumpMainnetCoin({
@@ -186,6 +190,9 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
       if (!work.mint || !work.create?.finalized) throw new Error("The coin creation evidence is incomplete.");
 
       if (!work.fee) {
+        // The fee lock is a new irreversible signature. Recheck automation
+        // even if the coin itself was created during an earlier healthy window.
+        await post({ action: "prepare", publicationAccepted: true });
         setStatus("Coin finalized. Approve the one-time 80/20 creator-fee lock.");
         const { configurePumpMainnetFeeSplit } = await import("@/lib/client/pump-mainnet");
         await configurePumpMainnetFeeSplit({
@@ -233,7 +240,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
         <strong className="devnet-badge">REAL SOL</strong>
       </div>
 
-      {!mainnet.ready ? <div className="devnet-lock-notice"><LockKeyhole /><p><strong>Mainnet is not enabled yet.</strong> Required operator configuration: {mainnet.missing.join(", ")}.</p></div> : null}
+      {!mainnet.ready ? <div className="devnet-lock-notice"><LockKeyhole /><p><strong>New mainnet launches are paused until reward and buyback automation are verified.</strong> Waiting for: {mainnet.missing.join(", ")}. {resumingSignedLaunch ? "You can still verify the mint and fee-lock transactions you already signed." : null}</p></div> : null}
 
       <div className="devnet-wallet-state">
         <Wallet />
@@ -251,7 +258,7 @@ export function MainnetLaunchPanel({ draftId, name, symbol }: { draftId: string;
 
       <div className="devnet-lock-notice"><ShieldCheck /><p><strong>SportPad never asks for your private key.</strong> Your wallet signs the coin creation and fee lock. The server independently verifies both finalized transactions before publishing the launch.</p></div>
 
-      <Button onClick={runLaunch} disabled={busy || !mainnet.ready || !walletSession.wallet || !riskAccepted || (!mainnet.metadataUri && !publicationAccepted)} className="devnet-launch-button"><Flame /> {busy ? "Working on mainnet..." : pending.create ? "Continue mainnet launch" : "Launch on Pump mainnet"}</Button>
+      <Button onClick={runLaunch} disabled={busy || (!mainnet.ready && !resumingSignedLaunch) || !walletSession.wallet || !riskAccepted || (!mainnet.metadataUri && !publicationAccepted)} className="devnet-launch-button"><Flame /> {busy ? "Working on mainnet..." : pending.create ? "Continue mainnet launch" : "Launch on Pump mainnet"}</Button>
       {status ? <p className="devnet-status" role="status">{status}</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
     </section>

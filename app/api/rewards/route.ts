@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
+import { FINANCIAL_LEDGER_VERIFIED, QUEUE_CLAIM_JOB_SQL } from "@/lib/protocol/automation-safety";
 import { getVerifiedWalletSession } from "@/lib/server/wallet-session";
 
 type ClaimRow = {
@@ -89,6 +90,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!env.DB) return json({ error: "Reward database is unavailable." }, 503);
+  if (!FINANCIAL_LEDGER_VERIFIED) return json({ error: "Claims are paused pending financial-ledger verification." }, 503);
   if (request.headers.get("origin") !== new URL(request.url).origin) return json({ error: "Cross-origin claim requests are not allowed." }, 403);
   const session = await getVerifiedWalletSession(request);
   if (!session) return json({ error: "Verify your Solana wallet before claiming." }, 401);
@@ -135,16 +137,13 @@ export async function POST(request: Request) {
   const jobId = crypto.randomUUID();
   const now = Date.now();
   const results = await env.DB.batch([
+    env.DB.prepare(QUEUE_CLAIM_JOB_SQL).bind(jobId, jobType, claim.id, claim.reward_chain, JSON.stringify(payload), now),
     env.DB.prepare(`
       UPDATE reward_claims SET state = 'queued', destination_chain = ?2, destination_address = ?3,
         claim_requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?1 AND state = 'claimable'
-    `).bind(claim.id, claim.reward_chain, destinationAddress),
-    env.DB.prepare(`
-      INSERT OR IGNORE INTO automation_jobs
-        (id, job_type, entity_type, entity_id, chain, payload_json, state, available_at)
-      VALUES (?1, ?2, 'reward_claim', ?3, ?4, ?5, 'queued', ?6)
-    `).bind(jobId, jobType, claim.id, claim.reward_chain, JSON.stringify(payload), now),
+        AND EXISTS (SELECT 1 FROM automation_jobs WHERE id = ?4 AND state = 'queued')
+    `).bind(claim.id, claim.reward_chain, destinationAddress, jobId),
   ]);
   if (results[0]?.meta.changes !== 1 || results[1]?.meta.changes !== 1) {
     return json({ error: "This reward changed before it could be queued. Reload and retry." }, 409);

@@ -7,19 +7,19 @@ import { SiteChrome } from "@/components/site-chrome";
 import { FeeCalculator } from "./fee-calculator";
 
 const stages = [
-  { icon: BadgeCheck, title: "Select an official reward", copy: "The creator chooses one of 78 live Chiliz Fan Token routes or the two currently routed Solana options." },
+  { icon: BadgeCheck, title: "Select an official reward", copy: "A creator can draft a selection from 78 Kayen-listed Chiliz Fan Tokens or two Solana market options. A market listing is not a funded SportPad reward." },
   { icon: CircleDollarSign, title: "Community fees finalize", copy: "The system accepts only qualifying creator fees from community launches after Solana finality. SPORTPAD's own fees are excluded." },
   { icon: Radio, title: "Reconcile each event", copy: "The indexer deduplicates finalized fee events and matches them against treasury balance changes before economic action." },
   { icon: Layers3, title: "Apply the community split", copy: "80% of a community coin's fees becomes a Fan Token reward intent; 20% becomes a SPORTPAD buyback and burn intent." },
-  { icon: Boxes, title: "Fund the reward epoch", copy: "The automation worker acquires Fan Token inventory through Kayen or Jupiter. A calculation cannot become payable before inventory exists." },
-  { icon: WalletCards, title: "Claim on the reward network", copy: "Solana rewards go to the verified Base58 wallet. Chiliz rewards go to the verified MetaMask address after the dashboard adds Chiliz Chain." },
+  { icon: Boxes, title: "Fund the reward epoch", copy: "Once enabled and funded, a worker would acquire Fan Token inventory through Kayen or Jupiter. No calculation is payable before verified inventory exists." },
+  { icon: WalletCards, title: "Claim on the reward network", copy: "Once claims are enabled, Solana rewards would go to the verified Base58 wallet and Chiliz rewards to a separately verified 0x address." },
 ];
 
 export default function HowItWorksPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="How SportPad works" title="Community launch fees fund rewards and SPORTPAD burns." copy="Every community launch uses the immutable 80/20 fee route. SPORTPAD's own creator fees are kept for project development and never enter that split. Automated workers execute verified reward purchases and claims from restricted treasury wallets.">
+        <PageIntro kicker="How SportPad is designed to work" title="Community launch fees are intended to fund rewards and SPORTPAD burns." copy="The proposed mainnet launch locks an 80/20 fee split for community coins. SPORTPAD's own creator fees remain with the project for development. New mainnet launches, automatic reward purchases, claims, and buyback burns are paused until funded workers and end-to-end execution are verified.">
           <div className="route-mini"><span>TRADE</span><ArrowRight /><strong>80 / 20</strong><ArrowRight /><span>REWARD + BURN</span></div>
         </PageIntro>
         <SafetyNotice>Linked does not mean paired. A community coin trades in a SOL-based market; its creator fees fund rewards in a separate Fan Token. SPORTPAD&apos;s own fee stream is reserved for development.</SafetyNotice>
@@ -37,12 +37,12 @@ export default function HowItWorksPage() {
         </section>
 
         <section className="page-section route-paths">
-          <div><p className="section-eyebrow">Route A</p><h2>Chiliz acquisition and claim</h2><p>The worker values the finalized SOL fee share, buys wrapped Fan Token inventory through Kayen using a prefunded CHZ treasury, then unwraps the exact claim into the official token at the user&apos;s verified address.</p><span className="route-label route-ready">78 live routes</span></div>
-          <div><p className="section-eyebrow">Route B</p><h2>Solana-native rewards</h2><p>AFC and ARG remain selectable on Solana. The selected reward uses a bounded Jupiter route and pays the verified Solana wallet.</p><span className="route-label route-ready">2 live options</span></div>
-          <div className="route-safety"><ShieldCheck /><h3>Safe failure beats a bad execution.</h3><p>The executor pauses when quotes disappear, price impact exceeds limits, CHZ inventory runs low, or RPC health degrades. Previously funded claims remain reserved and retry safely.</p></div>
+          <div><p className="section-eyebrow">Route A</p><h2>Chiliz acquisition and claim</h2><p>The proposed worker values the finalized SOL fee share, then buys wrapped Fan Token inventory through Kayen with a separately prefunded CHZ treasury. It would unwrap a funded claim into the official token at the user&apos;s verified 0x address. Automatic transfer of the collected SOL into that CHZ treasury is not implemented, so replenishment is not hands-free.</p><span className="route-label route-inventory">78 Kayen-listed markets, payout paused</span></div>
+          <div><p className="section-eyebrow">Route B</p><h2>Solana-native rewards</h2><p>AFC and ARG are the two listed Solana options. Once the worker is enabled and funded, it would use a bounded Jupiter quote to acquire the selected token and pay a verified Solana wallet.</p><span className="route-label route-inventory">2 market options, payout paused</span></div>
+          <div className="route-safety"><ShieldCheck /><h3>Safe failure beats a bad execution.</h3><p>Execution must stay paused when quotes disappear, price impact exceeds limits, inventory runs low, or RPC health degrades. Uncertain on-chain submissions require reconciliation before any retry.</p></div>
         </section>
 
-        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">Community-funded SPORTPAD burn</p><h2>Only the 20% share from other launches is burned.</h2><p>The 20% treasury uses community launch fees to buy SPORTPAD through Jupiter, then prepares an exact SPL Token burn for the purchased amount. SPORTPAD&apos;s own creator fees remain with the project for development.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
+        <section className="page-section burn-proof"><div><Flame /><span><p className="section-eyebrow">Proposed community-funded SPORTPAD burn</p><h2>Only the 20% share from other launches is earmarked for burns.</h2><p>Once the SPORTPAD mint exists and the buyback lane passes review, the 20% treasury is intended to buy SPORTPAD through Jupiter and burn the purchased amount. No automatic buyback or burn is active now. SPORTPAD&apos;s own creator fees remain with the project for development.</p></span></div><Button asChild variant="outline" className="rounded-full border-white/10 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">View deployment status <ArrowRight /></Link></Button></section>
       </main>
     </SiteChrome>
   );

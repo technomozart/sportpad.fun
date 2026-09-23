@@ -137,6 +137,22 @@ test("mainnet launch fails closed, freezes treasuries, and verifies exact onchai
   assert.match(configSource, /SOLANA_BUYBACK_TREASURY_ADDRESS/);
   assert.match(walletSessionSource, /sportpad_mainnet_wallet_session_v1/);
   assert.match(routeSource, /checkRewardRoute/);
+  assert.match(routeSource, /readLaunchAutomationReadiness\(env\.DB, rewardChain, config\.buybackTreasury\)/);
+  assert.ok(
+    routeSource.indexOf('if (input.action === "prepare")') < routeSource.indexOf("readLaunchAutomationReadiness(env.DB, rewardChain"),
+    "the automation gate must run inside prepare, before a new mainnet coin can be signed",
+  );
+  assert.ok(
+    routeSource.indexOf("readLaunchAutomationReadiness(env.DB, rewardChain") < routeSource.indexOf("// Verification must never be blocked"),
+    "previously signed mainnet evidence must be verifiable after the preflight gate closes",
+  );
+  assert.match(panelSource, /New mainnet launches are paused until reward and buyback automation are verified/);
+  assert.match(panelSource, /Boolean\(pending\.create && pending\.fee\)/);
+  assert.ok(
+    panelSource.indexOf('await post({ action: "prepare", publicationAccepted: true });', panelSource.indexOf("if (!work.fee)"))
+      < panelSource.indexOf("configurePumpMainnetFeeSplit", panelSource.indexOf("if (!work.fee)")),
+    "a new fee-lock signature requires a fresh server-side automation preflight",
+  );
   assert.match(routeSource, /verifyPumpMainnetCreate/);
   assert.match(routeSource, /verifyPumpMainnetFeeSplit/);
   assert.match(routeSource, /mainnetRewardTreasury: config\.rewardTreasury/);

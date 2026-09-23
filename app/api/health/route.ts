@@ -1,6 +1,7 @@
 import { readProviderCredentials } from "@/lib/server/providers/runtime-config";
 import { getProviderStatus } from "@/lib/server/providers/status";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
+import { readGlobalLaunchReadiness } from "@/lib/server/launch-automation-readiness";
 
 type Providers = Awaited<ReturnType<typeof getProviderStatus>>;
 
@@ -25,6 +26,7 @@ async function readCachedProviderStatus() {
 export async function GET() {
   const providers = await readCachedProviderStatus();
   const mainnet = readMainnetConfig();
+  const launch = await readGlobalLaunchReadiness();
   const configuredCount = Number(providers.helius.configured) + Number(providers.jupiter.configured);
   const healthyCount = Number(providers.helius.healthy) + Number(providers.jupiter.healthy);
 
@@ -37,10 +39,10 @@ export async function GET() {
   return Response.json(
     {
       status,
-      mode: mainnet.ready ? "mainnet-launch" : "mainnet-configuration-required",
+      mode: launch.ready ? "mainnet-launch" : "mainnet-launch-paused",
       providers,
-      mainnetExecution: mainnet.ready,
-      mainnetMissing: mainnet.missing,
+      mainnetExecution: launch.ready,
+      mainnetMissing: launch.missing,
       sportpadMintConfigured: Boolean(mainnet.sportpadMint),
     },
     {

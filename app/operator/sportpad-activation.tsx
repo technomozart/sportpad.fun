@@ -13,8 +13,11 @@ export function SportpadActivation() {
   const [notice, setNotice] = useState("");
   useEffect(() => {
     fetch("/api/operator/protocol-settings", { cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() : Promise.reject(new Error("unavailable")))
-      .then((body: { sportpadMint?: string | null }) => { setSavedMint(body.sportpadMint ?? null); setMint(body.sportpadMint ?? ""); })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("unavailable");
+        return await response.json() as { sportpadMint?: string | null };
+      })
+      .then((body) => { setSavedMint(body.sportpadMint ?? null); setMint(body.sportpadMint ?? ""); })
       .catch(() => setNotice("SPORTPAD mint setting is unavailable."));
   }, []);
   async function save() {
@@ -25,12 +28,12 @@ export function SportpadActivation() {
       });
       const body = await response.json() as { sportpadMint?: string; error?: string };
       if (!response.ok || !body.sportpadMint) throw new Error(body.error ?? "Mint could not be activated.");
-      setSavedMint(body.sportpadMint); setMint(body.sportpadMint); setNotice("SPORTPAD mint activated. New community buyback jobs will use this address without a redeploy.");
+      setSavedMint(body.sportpadMint); setMint(body.sportpadMint); setNotice("SPORTPAD mint saved. Buyback execution remains paused until its safety checks and canary pass.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Mint could not be activated."); }
     finally { setBusy(false); }
   }
   return <section className="operator-console">
-    <div className="operator-console-head"><span><Flame /></span><div><p className="section-eyebrow">Hot activation</p><h2>SPORTPAD mint</h2><p>Paste the main token CA here after launch. The automatic 20% buyback and burn queue reads this database setting immediately.</p></div></div>
+    <div className="operator-console-head"><span><Flame /></span><div><p className="section-eyebrow">Mint registration</p><h2>SPORTPAD mint</h2><p>Save the main token CA here after launch. This does not activate the 20% buyback and burn, which remains paused pending safety verification.</p></div></div>
     <div className="operator-setting-row"><Input value={mint} onChange={(event) => setMint(event.target.value)} placeholder="Solana mint address" /><Button onClick={() => void save()} disabled={busy || mint.trim() === savedMint}><Save /> {busy ? "Activating" : "Activate mint"}</Button></div>
     {notice ? <p className="operator-note" role="status">{notice}</p> : null}
   </section>;

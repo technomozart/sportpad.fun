@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowDown, CircleDollarSign, Flame, Radio, ShieldCheck, 
 import { PageIntro, SectionHeading } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { getExecutionStatus } from "@/lib/server/execution-status";
+import { readGlobalLaunchReadiness } from "@/lib/server/launch-automation-readiness";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { SystemStatus } from "./system-status";
 
@@ -10,7 +11,10 @@ export const dynamic = "force-dynamic";
 
 export default async function TransparencyPage() {
   const mainnet = readMainnetConfig();
-  const protocol = await getExecutionStatus().catch(() => null);
+  const [protocol, launch] = await Promise.all([
+    getExecutionStatus().catch(() => null),
+    readGlobalLaunchReadiness(),
+  ]);
   const feeEvents = protocol?.counts.feeEvents;
   const protocolEvents = protocol?.counts.protocolEvents;
   const rewardVaults = protocol?.counts.rewardVaults;
@@ -35,22 +39,22 @@ export default async function TransparencyPage() {
         <section className="content-section transparency-metrics">
           <div><span>Fee events</span><strong>{feeEvents ?? "Unavailable"}</strong><small>Finalized fee records in the ledger</small></div>
           <div><span>Protocol events</span><strong>{protocolEvents ?? "Unavailable"}</strong><small>Auditable control and observation records</small></div>
-          <div><span>Reward vaults</span><strong>{rewardVaults ?? "Unavailable"}</strong><small>Verified official Fan Token inventory accounts</small></div>
+          <div><span>Reward vaults</span><strong>{rewardVaults ?? "Unavailable"}</strong><small>Fan Token inventory records in the ledger</small></div>
           <div><span>SPORTPAD mint</span><strong>{sportpadMint ? "Configured" : "Not configured"}</strong><small>{sportpadMint ? "Buyback asset address is registered" : "Buyback and burn lane stays locked"}</small></div>
         </section>
 
         <section className="page-section">
           <SectionHeading
-            eyebrow="Deployed capital flow"
-            title="One verified source and two on-chain outcomes."
-            copy="Counts remain at zero until real finalized transactions are recorded. Nothing below is simulated."
+            eyebrow="Planned capital flow"
+            title="One fee source and two intended outcomes."
+            copy="Automatic purchases, claims, and burns are paused. Counts remain at zero until real finalized transactions are recorded. Nothing below is simulated."
           />
           <div className="capital-flow">
             <div className="flow-source"><CircleDollarSign /><span>Community launch creator fees</span><strong>{feeEvents ? `${feeEvents} observed` : "None observed"}</strong><small>SPORTPAD&apos;s own fee stream is excluded from this ledger</small></div>
             <ArrowDown />
             <div className="flow-gate"><ShieldCheck /><span>Finality and reconciliation</span><small>Durable intents and exact signed messages</small></div>
             <ArrowDown />
-            <div className="flow-split"><span>80 / 20</span><strong>Immutable onchain split</strong></div>
+            <div className="flow-split"><span>80 / 20</span><strong>Target onchain fee split</strong></div>
             <div className="flow-branches">
               <div><Trophy /><span>OFFICIAL FAN TOKEN REWARDS · 80%</span><strong>{rewardSwaps ? `${rewardSwaps} swaps submitted` : "No swaps submitted"}</strong><ArrowDown /><small>{rewardVaults ? `${rewardVaults} inventory records` : "No verified inventory yet"}</small><ArrowDown /><b>{protocol?.counts.rewardEpochs ? `${protocol.counts.rewardEpochs} reward epochs` : "No epochs yet"}</b></div>
               <div><Flame /><span>COMMUNITY-FUNDED SPORTPAD BURN · 20%</span><strong>{buybackSwaps ? `${buybackSwaps} buybacks submitted` : "No buybacks submitted"}</strong><ArrowDown /><small>{sportpadMint ? "SPORTPAD mint configured" : "SPORTPAD mint not deployed"}</small><ArrowDown /><b>{sportpadBurns ? `${sportpadBurns} burns submitted` : "No burn events yet"}</b></div>
@@ -93,7 +97,7 @@ export default async function TransparencyPage() {
 
         <div className="incident-note">
           <AlertTriangle />
-          <div><strong>{mainnet.ready ? "Mainnet launcher is enabled." : "Mainnet launcher setup is incomplete."}</strong><p>The 80/20 route applies to community launches only. SPORTPAD&apos;s own creator fees stay with the project for development. The community-funded 20% buyback waits for the public SPORTPAD mint.</p></div>
+          <div><strong>{launch.ready ? "Mainnet launcher is enabled." : "New mainnet launches are paused until reward and buyback automation are verified."}</strong><p>The 80/20 route applies to community launches only. SPORTPAD&apos;s own creator fees stay with the project for development. {launch.ready ? "Reward and buyback workers are ready for a live preflight." : `Waiting for: ${launch.missing.join(", ")}.`}</p></div>
         </div>
       </main>
     </SiteChrome>

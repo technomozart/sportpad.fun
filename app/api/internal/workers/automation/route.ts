@@ -2,8 +2,11 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { allocateEpochRewards } from "@/lib/protocol/accounting";
+import { failureDisposition, FINANCIAL_LEDGER_VERIFIED, HOLD_BROADCAST_RECEIPT_SQL, laneAllowsJob,
+  ownsActiveLease, ownsBroadcast, pauseConditionSql,
+  type AutomationLaneControls } from "@/lib/protocol/automation-safety";
 import { canonicalRewardAllocation } from "@/lib/protocol/holder-rewards";
-import { readWorkerToken } from "@/lib/server/execution-config";
+import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig, readWorkerToken } from "@/lib/server/execution-config";
 import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth";
 
 const requestSchema = z.discriminatedUnion("action", [
@@ -11,6 +14,11 @@ const requestSchema = z.discriminatedUnion("action", [
     action: z.literal("lease"),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
     jobTypes: z.array(z.enum(["chiliz_reward_purchase", "chiliz_claim_unwrap", "solana_claim_payout", "sportpad_buyback_burn"])).min(1).max(4),
+  }).strict(),
+  z.object({
+    action: z.literal("arm"),
+    jobId: z.string().uuid(),
+    workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
   }).strict(),
   z.object({
     action: z.literal("complete"),
@@ -39,6 +47,30 @@ async function authorize(request: Request) {
   const authorization = request.headers.get("authorization");
   const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
   return Boolean(configured && supplied && await secureTokenEqual(configured, supplied));
+}
+
+async function readAutomationControls(database: D1Database): Promise<AutomationLaneControls> {
+  const row = await database.prepare(`
+    SELECT settlement_paused, rewards_paused, buyback_paused
+    FROM protocol_controls WHERE key = 'global' LIMIT 1
+  `).first<{ settlement_paused: number; rewards_paused: number; buyback_paused: number }>();
+  const controls = row ? {
+    ...DEFAULT_PROTOCOL_CONTROLS,
+    settlementPaused: Boolean(row.settlement_paused),
+    rewardsPaused: Boolean(row.rewards_paused),
+    buybackPaused: Boolean(row.buyback_paused),
+  } : DEFAULT_PROTOCOL_CONTROLS;
+  const execution = readExecutionConfig(controls);
+  return {
+    mainnetEnabled: execution.mainnet.enabled,
+    settlementEnabled: execution.flags.settlementEnabled,
+    rewardsEnabled: execution.flags.rewardsEnabled,
+    claimsEnabled: execution.flags.claimsEnabled,
+    buybackEnabled: execution.flags.buybackEnabled,
+    settlementPaused: controls.settlementPaused,
+    rewardsPaused: controls.rewardsPaused,
+    buybackPaused: controls.buybackPaused,
+  };
 }
 
 async function seedPurchaseJobs(database: D1Database) {
@@ -298,8 +330,8 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
   statements.push(database.prepare(`
     UPDATE automation_jobs SET state = 'complete', tx_hash = ?2, error_code = NULL,
       leased_until = NULL, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?1 AND state = 'leased'
-  `).bind(job.id, txHash));
+    WHERE id = ?1 AND state = 'broadcasting' AND error_code = ?3
+  `).bind(job.id, txHash, `broadcasting:${workerId}`));
   const results = await database.batch(statements);
   if (results.at(-1)?.meta.changes !== 1) throw new Error("job_completion_conflict");
 }
@@ -311,15 +343,20 @@ export async function POST(request: Request) {
   try { input = requestSchema.parse(await request.json()); }
   catch { return Response.json({ error: "Invalid worker request." }, { status: 400 }); }
   if (input.action === "lease") {
+    const controls = await readAutomationControls(env.DB);
+    const allowedJobTypes = FINANCIAL_LEDGER_VERIFIED
+      ? input.jobTypes.filter((jobType) => laneAllowsJob(jobType, controls)) : [];
     await env.DB.prepare(`
       INSERT INTO service_cursors (key, value, updated_at)
       VALUES (?1, ?2, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `).bind(`automation:${input.workerId}`, JSON.stringify({ jobTypes: input.jobTypes, observedAt: Date.now() })).run();
-    await seedPurchaseJobs(env.DB);
-    await seedBuybackJobs(env.DB);
-    await closeMatureChilizEpoch(env.DB);
-    const job = await leaseJob(env.DB, input.workerId, input.jobTypes);
+    `).bind(`automation:${input.workerId}`, JSON.stringify({ jobTypes: allowedJobTypes, observedAt: Date.now() })).run();
+    if (allowedJobTypes.includes("chiliz_reward_purchase")) await seedPurchaseJobs(env.DB);
+    if (allowedJobTypes.includes("sportpad_buyback_burn")) await seedBuybackJobs(env.DB);
+    if (allowedJobTypes.includes("chiliz_claim_unwrap") || allowedJobTypes.includes("chiliz_reward_purchase")) {
+      await closeMatureChilizEpoch(env.DB);
+    }
+    const job = allowedJobTypes.length ? await leaseJob(env.DB, input.workerId, allowedJobTypes) : null;
     return Response.json({ job: job ? {
       id: job.id, type: job.job_type, entityType: job.entity_type, entityId: job.entity_id,
       chain: job.chain, attempt: job.attempt, leaseExpiresAt: job.leased_until,
@@ -330,11 +367,42 @@ export async function POST(request: Request) {
     SELECT id, job_type, entity_type, entity_id, chain, payload_json, state, attempt, leased_until, error_code
     FROM automation_jobs WHERE id = ?1
   `).bind(input.jobId).first<AutomationRow>();
-  if (!job || job.state !== "leased" || job.leased_until === null || job.leased_until < Date.now()
-    || job.error_code !== `leased:${input.workerId}`) {
+  const ownedLease = ownsActiveLease(job, input.workerId, Date.now());
+  const ownedBroadcast = ownsBroadcast(job, input.workerId);
+  if (!job || (input.action === "arm" ? !ownedLease : input.action === "complete" ? !ownedBroadcast : !ownedLease && !ownedBroadcast)) {
     return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
   }
+  if (input.action === "arm") {
+    const controls = await readAutomationControls(env.DB);
+    const pauseSql = pauseConditionSql(job.job_type);
+    if (!FINANCIAL_LEDGER_VERIFIED || !pauseSql || !laneAllowsJob(job.job_type, controls)) {
+      return Response.json({ error: "Financial lane is paused or unavailable." }, { status: 409 });
+    }
+    // Arm before the first irreversible transaction. A crashed or timed-out worker
+    // leaves this job out of the automatic lease pool until on-chain reconciliation.
+    const result = await env.DB.prepare(`
+      UPDATE automation_jobs SET state = 'broadcasting', leased_until = NULL,
+        error_code = ?3, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?1 AND state = 'leased' AND error_code = ?2 AND leased_until >= ?4
+        AND EXISTS (SELECT 1 FROM protocol_controls WHERE key = 'global' AND ${pauseSql})
+    `).bind(job.id, `leased:${input.workerId}`, `broadcasting:${input.workerId}`, Date.now()).run();
+    if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
+    return Response.json({ armed: true });
+  }
   if (input.action === "complete") {
+    if (!FINANCIAL_LEDGER_VERIFIED) {
+      // Preserve worker-reported evidence without treating it as a verified
+      // chain receipt or mutating claim, settlement, or vault accounting.
+      const receipt = JSON.stringify({
+        txHash: input.txHash,
+        sourceTxHash: input.sourceTxHash ?? null,
+        outputAmountAtomic: input.outputAmountAtomic ?? null,
+      });
+      const result = await env.DB.prepare(HOLD_BROADCAST_RECEIPT_SQL)
+        .bind(job.id, input.txHash, receipt, `broadcasting:${input.workerId}`).run();
+      if (result.meta.changes !== 1) return Response.json({ error: "Worker lease is no longer valid." }, { status: 409 });
+      return Response.json({ completed: false, reconciliationRequired: true }, { status: 202 });
+    }
     try { await completeJob(env.DB, job, input.workerId, input.txHash, input.outputAmountAtomic, input.sourceTxHash); }
     catch (error) {
       console.error("automation_job_complete_failed", error instanceof Error ? error.message : "unknown");
@@ -342,15 +410,19 @@ export async function POST(request: Request) {
     }
     return Response.json({ completed: true });
   }
-  const retry = input.retryable;
+  const disposition = failureDisposition(ownedBroadcast, input.retryable);
+  const retry = disposition.retry;
   const delaySeconds = Math.min(3_600, 15 * 2 ** Math.min(job.attempt, 8));
   await env.DB.prepare(`
     UPDATE automation_jobs SET state = ?2, error_code = ?3, available_at = ?4,
-      leased_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND state = 'leased'
-  `).bind(job.id, retry ? "queued" : "failed", input.errorCode, Date.now() + delaySeconds * 1_000).run();
-  if (!retry && job.entity_type === "reward_claim") {
+      leased_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND state = ?5 AND error_code = ?6
+  `).bind(job.id, disposition.state, input.errorCode,
+    Date.now() + delaySeconds * 1_000, ownedBroadcast ? "broadcasting" : "leased",
+    ownedBroadcast ? `broadcasting:${input.workerId}` : `leased:${input.workerId}`).run();
+  if (!ownedBroadcast && !retry && job.entity_type === "reward_claim") {
     await env.DB.prepare("UPDATE reward_claims SET state = 'claimable', updated_at = CURRENT_TIMESTAMP WHERE id = ?1 AND state = 'queued'")
       .bind(job.entity_id).run();
   }
-  return Response.json({ failed: true, retrying: retry, retryAfterSeconds: retry ? delaySeconds : null });
+  return Response.json({ failed: true, retrying: retry, reconciliationRequired: ownedBroadcast,
+    retryAfterSeconds: retry ? delaySeconds : null });
 }

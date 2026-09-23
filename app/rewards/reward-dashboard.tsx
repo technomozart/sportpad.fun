@@ -160,7 +160,7 @@ export function RewardDashboard() {
     { icon: Coins, title: "Earning", copy: protocol?.capabilities.holderIndexerEnabled ? "Finalized holder indexing enabled" : "Holder indexer locked" },
     { icon: Clock3, title: "Allocating", copy: protocol ? `${protocol.counts.rewardEpochs} recorded reward epochs` : "Reading epoch ledger" },
     { icon: Network, title: "Routing", copy: "Kayen on Chiliz or Jupiter on Solana" },
-    { icon: CheckCircle2, title: "Claiming", copy: "Verified address, automatic treasury payout" },
+    { icon: CheckCircle2, title: "Claiming", copy: "Payouts paused pending ledger and receipt verification" },
   ];
 
   return <div>
@@ -168,7 +168,7 @@ export function RewardDashboard() {
       <div className="reward-summary-primary"><span>Wallet-linked reward data</span><strong>{walletLabel}</strong><small>{walletSession.wallet ? "Finalized positions and funded allocations for this verified wallet." : "Verify your Solana wallet to load real holder data."}</small></div>
       <div><span>Chiliz payout wallet</span><strong>{currentData?.evmWallet ? shortAddress(currentData.evmWallet.address) : "Not linked"}</strong><small>MetaMask and compatible EVM wallets</small></div>
       <div><span>Confirmed payouts</span><strong>{protocol?.counts.confirmedClaims ?? "Unavailable"}</strong><small>Onchain receipts only</small></div>
-      <div><span>Claim gas</span><strong>Sponsored</strong><small>SportPad treasury pays CHZ gas</small></div>
+      <div><span>Claim gas</span><strong>Planned</strong><small>SportPad treasury would pay CHZ gas when claims are enabled</small></div>
     </div>
 
     <div className="dashboard-notice"><ShieldCheck /><span>SportPad shows only indexed positions and funded allocations. Linking MetaMask signs a verification message only and never approves token spending.</span></div>

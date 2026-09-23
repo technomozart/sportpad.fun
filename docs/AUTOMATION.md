@@ -1,8 +1,10 @@
 # SportPad production automation
 
-SportPad uses the public Sites deployment for the application, API, D1 ledger, route checks, wallet verification, and job queue. Private signing keys run only inside two restricted Railway worker services.
+SportPad uses the public Sites deployment for the application, API, D1 ledger, route checks, wallet verification, and job queue. Private signing keys belong only inside two restricted Railway worker services. **No financial worker lane is presently enabled for public execution.** Launch remains locked while ledger concurrency and receipt verification are incomplete.
 
-Never place a seed phrase or private key in chat, D1, source control, Sites public variables, or a browser form.
+Do not change `FINANCIAL_LEDGER_VERIFIED` in `lib/protocol/automation-safety.ts` until all of these are implemented and tested: server-side verification of chain receipts, atomic claim queue and vault/settlement completion transitions, concurrency-safe purchase inventory increments, durable swap/burn recovery, and funded end-to-end canaries. A zero-row D1 update inside a batch is not itself a rollback; the current held paths must not be released merely because the workers start successfully.
+
+Never place a seed phrase or private key in chat, D1, source control, Sites public variables, or a SportPad website form. Use only Railway's private service-variable UI for dedicated worker keys; do not use a seed phrase where a single wallet private key is sufficient.
 
 ## 1. Sites secrets and public configuration
 
@@ -12,7 +14,7 @@ Configure these server-side variables on the SportPad Sites project:
 HELIUS_API_KEY
 JUPITER_API_KEY
 SPORTPAD_WORKER_TOKEN
-MAINNET_EXECUTION_ENABLED=true
+MAINNET_EXECUTION_ENABLED=false
 SOLANA_REWARD_TREASURY_ADDRESS=yCBTQi7aUfQ7ytdmdMRC1BLjntduQYniZVELRc1mvF4
 SOLANA_BUYBACK_TREASURY_ADDRESS=CtubJkSzXezmwrX2W67HZkkCiQKCk9oFWHK5K6tdV4yQ
 SPORTPAD_FEE_INDEXER_ENABLED=true
@@ -20,11 +22,14 @@ SPORTPAD_SETTLEMENT_ENABLED=true
 SPORTPAD_REWARDS_ENABLED=true
 SPORTPAD_HOLDER_INDEXER_ENABLED=true
 SPORTPAD_CLAIMS_ENABLED=true
-SPORTPAD_BUYBACK_ENABLED=true
+SPORTPAD_BUYBACK_ENABLED=false
 CHILIZ_RPC_URL=https://rpc.chiliz.com
 ```
 
 `SPORTPAD_WORKER_TOKEN` must be a new high-entropy value shared only by Sites and the two workers.
+Keep `MAINNET_EXECUTION_ENABLED=false` until the financial ledger, bridge funding,
+buyback path, and funded canaries are verified. Merely supplying keys or starting
+the Railway services is not approval to switch it on.
 
 ## 2. Chiliz Railway worker
 
@@ -46,7 +51,7 @@ JUPITER_API_KEY=<server key>
 
 Fund the corresponding public Chiliz address with native CHZ. This one balance pays for both Kayen reward purchases and claim gas. The worker values each finalized SOL reward share in CHZ, buys the selected wrapped Fan Token through Kayen, and later unwraps the exact whole-token allocation directly to the holder's verified Chiliz address.
 
-The current implementation uses a prefunded CHZ operating treasury. It does not bridge SOL to CHZ. The system pauses new acquisitions when that CHZ balance cannot cover the purchase plus the gas reserve. Refill alerts and an operating buffer are required before public volume.
+The current implementation uses a prefunded CHZ operating treasury. It does not bridge SOL to CHZ. Even with a funded CHZ balance, the purchase and claim lanes are statically held pending atomic accounting and on-chain receipt verification. Refill alerts and an operating buffer are required before any future public volume.
 
 ## 3. Solana Railway worker
 
@@ -67,22 +72,30 @@ SOLANA_REWARD_VAULT_PRIVATE_KEY=<private key for yCBTQi...>
 SOLANA_BUYBACK_PRIVATE_KEY=<private key for CtubJk...>
 ```
 
-The reward key pays AFC and ARG SPL claims. The buyback key is dormant until the SPORTPAD mint is activated. It then swaps the 20% community-launch fee share through an approved Jupiter router, burns the exact purchased amount, and verifies the mint supply delta.
+At startup and before each leased Solana job, the worker verifies that both configured private keys derive to the public treasury addresses returned by `/api/protocol/status`. A mismatch or unavailable status endpoint stops execution.
+
+The reward key is intended for AFC and ARG SPL claims, but claims are currently statically held pending atomic accounting and on-chain receipt verification. The buyback key is **not currently executable**, even after the SPORTPAD mint is activated. The Jupiter transaction needs exact signer-debit and token-output validation, and a durable two-stage swap/burn recovery path, before the buyback worker can be enabled safely. Keep `SPORTPAD_BUYBACK_ENABLED=false` and do not advertise automatic buyback as live.
 
 SPORTPAD's own fee events are excluded from this buyback queue and remain available for project development.
 
-## 4. SPORTPAD activation in under one minute
+## 4. SPORTPAD mint registration
 
-Prepare and keep the Solana worker running before the SPORTPAD launch. After the mint exists:
+After the mint exists:
 
 1. Sign in as an authorized SportPad operator.
 2. Open `/operator`.
 3. Paste the SPORTPAD Solana mint into **Hot activation**.
 4. Confirm the setting.
 
-The fee indexer and buyback worker read this D1 setting immediately. No build or website deployment is required. Existing queued community settlements become eligible for SPORTPAD buyback and burn; SPORTPAD's own fee events remain excluded.
+The setting can be registered without a build, but this does **not** enable buyback. The buyback worker is hard-disabled pending the safety work above. SPORTPAD's own fee events remain excluded from the community buyback queue.
 
-## 5. Required canary before public traffic
+## 5. Ambiguous broadcast and reconciliation
+
+Once financial lanes are safely enabled, each worker must mark a job `broadcasting` immediately before its first potentially irreversible on-chain action. Once armed, the job is never automatically leased again if a worker crashes, a transaction times out, or the completion API fails. A subsequent worker error moves it to `reconciliation_required`; a crash can leave it in `broadcasting`. In either state, **do not requeue or retry it**. Operator pauses and feature flags prevent new leases and arming, but already-broadcast jobs may still report their results for reconciliation. While the ledger hold is active, a completion report stores the worker-supplied hash and receipt details in the held job, **not** in confirmed claim or settlement accounting.
+
+An operator must inspect the signer account, transaction history, token balance changes, and the intended destination on the correct chain, then reconcile the on-chain outcome to the settlement or claim ledger. Worker-supplied hashes are not independently verified by the server. There is no automatic reconciliation endpoint yet. Until an audited reconciliation procedure is built and the result verified, pause the affected lane and keep the job held. A definitively pre-broadcast failure may be retried automatically after the lane is re-enabled; a definitively failed claim may be requested again by its owner only after that release.
+
+## 6. Required canary before public traffic
 
 Use low-value wallets and amounts for the first test. Confirm all of the following:
 
@@ -93,8 +106,8 @@ Use low-value wallets and amounts for the first test. Confirm all of the followi
 5. A connected holder can add Chiliz Chain, sign the address-link message, and see the allocation.
 6. A claim unwraps the official Fan Token to the verified Chiliz address while the treasury pays CHZ gas.
 7. AFC or ARG can be acquired and paid on Solana when its bounded Jupiter route is live.
-8. After SPORTPAD activation, a low-value community fee produces one Jupiter buy, one SPL burn, and the exact verified supply decrease.
-9. Retried worker calls do not duplicate purchases, claims, or burns.
+8. After the buyback lane is safely implemented and enabled in a future release, a low-value community fee produces one Jupiter buy, one SPL burn, and the exact verified supply decrease.
+9. Crashed or timed-out post-broadcast worker calls enter reconciliation rather than duplicate purchases, claims, or burns.
 10. Pausing the lanes stops new economic execution without deleting ledger evidence.
 
 Do not enable unrestricted public volume until this canary passes and the Chiliz treasury has an explicit balance buffer.

@@ -21,13 +21,17 @@ import { SectionHeading, TokenMark } from "@/components/sport-ui";
 import { SiteChrome } from "@/components/site-chrome";
 import { LaunchShowcase } from "@/components/launch-showcase";
 import { fanAssets, faqItems } from "@/lib/site-data";
+import { readGlobalLaunchReadiness } from "@/lib/server/launch-automation-readiness";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
   const bar = fanAssets.find((asset) => asset.symbol === "BAR") ?? fanAssets[0];
   const chilizCount = fanAssets.filter((asset) => asset.chain === "chiliz").length;
   const solanaCount = fanAssets.filter((asset) => asset.chain === "solana").length;
   const mainnet = readMainnetConfig();
+  const launch = await readGlobalLaunchReadiness();
 
   return (
     <SiteChrome>
@@ -36,7 +40,7 @@ export default function Home() {
           <div className="home-hero-copy">
             <div className="hero-kicker"><span className="live-pulse" /> Solana sports launches · official Fan Token rewards</div>
             <h1>Launch the culture.<br /><span>Route the rewards.</span></h1>
-            <p>Create a community coin on Solana, select an official Fan Token reward, and lock that coin&apos;s creator fees 80% to rewards and 20% to SPORTPAD buyback and burn. SPORTPAD&apos;s own creator fees remain with the project for development.</p>
+            <p>Draft a Solana community coin and select an official Fan Token reward. The planned mainnet launch locks its creator fees 80% to a reward treasury and 20% to a SPORTPAD buyback treasury. Purchases and burns require separate verified execution; new mainnet launches are currently paused. SPORTPAD&apos;s own creator fees are reserved for development.</p>
             <div className="hero-actions">
               <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 font-semibold text-[#071008] hover:bg-[#adff7d]">
                 <Link href="/launch"><Sparkles className="size-4" /> Start a launch draft</Link>
@@ -46,31 +50,31 @@ export default function Home() {
               </Button>
             </div>
             <div className="hero-proof-row">
-              <span><BadgeCheck /> {chilizCount} Chiliz routes + {solanaCount} Solana routes</span>
-              <span><WalletCards /> Solana holder wallet + optional MetaMask</span>
+              <span><BadgeCheck /> {chilizCount} Chiliz markets + {solanaCount} Solana options</span>
+              <span><WalletCards /> Solana wallet + 0x wallet for Chiliz claims</span>
               <span><ShieldCheck /> Honest deployment states</span>
             </div>
           </div>
 
           <div className="match-console" aria-label="SportPad mainnet fee configuration">
-            <div className="match-console-head"><span><Radio /> Mainnet configuration</span><span className={mainnet.ready ? "route-ready" : "route-research"}>{mainnet.ready ? "Launcher live" : "Treasury setup required"}</span></div>
+            <div className="match-console-head"><span><Radio /> Example mainnet fee configuration</span><span className={launch.ready ? "route-ready" : "route-research"}>{launch.ready ? "Launcher live" : "Launches paused"}</span></div>
             <div className="scoreboard">
               <div><small>COMMUNITY TOKEN</small><TokenMark token="YOURS" color="#9cff57" size="lg" /><strong>Your coin</strong><span>Creator name and image</span></div>
               <div className="scoreboard-center"><span>EARNS<br />REWARDS</span><Goal /><small>After funding</small></div>
-              <div><small>OFFICIAL FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Claimed on Chiliz Chain</span></div>
+              <div><small>EXAMPLE FAN TOKEN</small><TokenMark token={bar.symbol} color={bar.color} imagePath={bar.imagePath} size="lg" /><strong>${bar.symbol}</strong><span>Planned Chiliz claim</span></div>
             </div>
             <div className="fee-split-visual">
-              <div className="split-source"><CircleDollarSign /><span>Community coin creator fees</span><strong>{mainnet.ready ? "Mainnet" : "Awaiting setup"}</strong></div>
+              <div className="split-source"><CircleDollarSign /><span>Community coin creator fees</span><strong>{mainnet.ready ? "Recipients set" : "Awaiting setup"}</strong></div>
               <div className="split-line"><span style={{ width: "80%" }} /><span style={{ width: "20%" }} /></div>
               <div className="split-destinations"><div><Trophy /><span>80% official Fan Token rewards</span><strong>{mainnet.rewardTreasury ? "Treasury set" : "Address required"}</strong></div><div><Flame /><span>20% SPORTPAD buyback + burn</span><strong>{mainnet.buybackTreasury ? "Treasury set" : "Address required"}</strong></div></div>
             </div>
-            <p className="match-console-note">Community coins trade against SOL. The selected official Fan Token is purchased from that launch&apos;s 80% fee share, not used as its market pair. SPORTPAD&apos;s own fees are reserved for project development.</p>
+            <p className="match-console-note">Community coins trade against SOL; a selected Fan Token is a separate reward, not its market pair. A fee transfer does not itself buy that token. Chiliz purchases would use a separately prefunded CHZ treasury until automatic SOL-to-CHZ replenishment is implemented.</p>
           </div>
         </section>
 
         <section className="protocol-stats page-wrap" aria-label="Current protocol deployment status">
-          <div><span>Mainnet launcher</span><strong>{mainnet.ready ? "Enabled" : "Setup required"}</strong><small>{mainnet.ready ? "Wallet-signed Pump launch and 80/20 fee lock" : mainnet.missing.join(", ")}</small></div>
-          <div><span>Routed official Fan Tokens</span><strong>{chilizCount} + {solanaCount}</strong><small>Chiliz via Kayen, Solana via Jupiter</small></div>
+          <div><span>Mainnet launcher</span><strong>{launch.ready ? "Enabled" : "Paused"}</strong><small>{launch.ready ? "Wallet-signed Pump launch and 80/20 fee lock" : launch.missing.join(", ")}</small></div>
+          <div><span>Listed official Fan Token markets</span><strong>{chilizCount} + {solanaCount}</strong><small>Market access does not mean funded rewards</small></div>
           <div><span>Reward wallet flow</span><strong>Two networks</strong><small>Verified Solana holder wallet and Chiliz claim wallet</small></div>
           <div><span>SPORTPAD main token</span><strong>Not deployed</strong><small>No burns have occurred</small></div>
         </section>
@@ -96,20 +100,20 @@ export default function Home() {
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Community launch protocol" title="One community fee stream. Two visible outcomes." copy="Each community launch locks its own 80/20 Pump fee recipients on mainnet. SPORTPAD's creator fees stay outside this split and fund project development." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Proposed community launch protocol" title="One community fee stream. Two intended destinations." copy="A future mainnet community launch would lock its own 80/20 Pump fee recipients. Funding a Fan Token reward or burning SPORTPAD requires additional verified transactions. SPORTPAD's own creator fees stay outside this split and fund project development." action={<Link href="/how-it-works" className="text-link">Read the full mechanics <ArrowRight /></Link>} />
           <div className="how-flow">
             {[
               { icon: Coins, step: "01", title: "Fees are finalized", copy: "Eligible creator fee events are indexed and credited only after Solana finality." },
               { icon: Layers3, step: "02", title: "80 / 20 is reconciled", copy: "Reward and SPORTPAD legs become separate, replay-safe settlement records." },
-              { icon: Trophy, step: "03", title: "Fan Token rewards are funded", copy: "Kayen or Jupiter acquires the selected reward before an epoch can become claimable." },
-              { icon: Flame, step: "04", title: "SPORTPAD burn is verified", copy: "After the SPORTPAD CA is activated, the 20% output is bought, burned, and checked against supply." },
+              { icon: Trophy, step: "03", title: "Fan Token inventory must be funded", copy: "A claim could open only after a verified Kayen or Jupiter purchase, inventory reservation, and allocation." },
+              { icon: Flame, step: "04", title: "SPORTPAD burn must be verified", copy: "When buybacks are enabled, a burn would need a finalized transaction and a matching supply reduction." },
             ].map((item) => <article key={item.step} className="how-step"><span>{item.step}</span><item.icon /><h3>{item.title}</h3><p>{item.copy}</p></article>)}
           </div>
           <div className="formula-strip"><div><small>Proposed holder allocation</small><strong>Funded Fan Tokens × wallet token-seconds ÷ all eligible token-seconds</strong></div><Link href="/rewards">See the reward methodology <ArrowRight /></Link></div>
         </section>
 
         <section className="page-section page-wrap">
-          <SectionHeading eyebrow="Official reward routes" title={`${chilizCount} funded Chiliz markets and ${solanaCount} Solana routes.`} copy="Every option identifies its exact network and contract. Chiliz selections are checked against Kayen; Solana selections are checked against Jupiter. Published addresses without an executable route are not shown in the launch builder." action={<Link href="/fan-tokens" className="text-link">Open all reward routes <ArrowRight /></Link>} />
+          <SectionHeading eyebrow="Official reward markets" title={`${chilizCount} Kayen-listed Chiliz markets and ${solanaCount} Solana options.`} copy="Every option identifies its network and contract. A live quote must still pass launch checks, and no listed market should be confused with SportPad-funded reward inventory or an active claim route." action={<Link href="/fan-tokens" className="text-link">Open all reward routes <ArrowRight /></Link>} />
           <div className="asset-directory">
             <div className="asset-directory-head"><span>Official Fan Token</span><span>Token address</span><span>Network route</span><span>Check</span></div>
             {fanAssets.slice(0, 5).map((asset) => (
@@ -135,7 +139,7 @@ export default function Home() {
             <div className="proof-list"><span><BarChart3 /> Finality and reconciliation state</span><span><Trophy /> Reward purchase and vault reservation</span><span><Flame /> SPORTPAD buyback and verified burn</span><span><ShieldCheck /> Pauses, exceptions, and safe retries</span></div>
             <Button asChild variant="outline" className="mt-7 rounded-full border-white/12 bg-white/[0.03] text-white hover:bg-white/10 hover:text-white"><Link href="/transparency">Open transparency explorer <ArrowRight /></Link></Button>
           </div>
-          <div className="ledger-card"><div className="ledger-head"><span>Protocol events</span><span className={mainnet.ready ? "route-ready" : "route-research"}>{mainnet.ready ? "Launcher enabled" : "Setup required"}</span></div><div className="empty-ledger"><ShieldCheck /><strong>No economic events recorded</strong><p>No reward purchases, claims, or SPORTPAD burns have occurred.</p></div></div>
+          <div className="ledger-card"><div className="ledger-head"><span>Protocol events</span><span className={launch.ready ? "route-ready" : "route-research"}>{launch.ready ? "Launcher enabled" : "Launches paused"}</span></div><div className="empty-ledger"><ShieldCheck /><strong>No economic events recorded</strong><p>No reward purchases, claims, or SPORTPAD burns have occurred.</p></div></div>
         </section>
 
         <section className="page-section page-wrap">

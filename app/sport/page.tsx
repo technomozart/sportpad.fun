@@ -49,7 +49,7 @@ export default function SportTokenPage() {
         <PageIntro
           kicker="Planned platform token"
           title="SPORTPAD is a protocol token concept, not a deployed asset."
-          copy="Other tokens launched on SportPad send 80% of creator fees toward official Fan Token rewards and 20% toward buying and burning SPORTPAD. SPORTPAD's own creator fees remain with the project for development."
+          copy="The proposed community-launch fee lock sends 80% to a Fan Token reward treasury and 20% to a SPORTPAD buyback treasury. Those transfers do not themselves purchase rewards or burn tokens. SPORTPAD's own creator fees are reserved for project development."
         >
           <div className="page-stat-card">
             <strong>Not deployed</strong>
@@ -59,14 +59,14 @@ export default function SportTokenPage() {
         </PageIntro>
 
         <SafetyNotice>
-          No SPORTPAD token has been deployed, offered, sold, or made tradeable through this build. Ignore any address claiming to be official until it is published here and independently verifiable on Solana.
+          No SPORTPAD token has been deployed, offered, sold, or made tradeable through this build. New mainnet launches and automatic buyback and burn execution are paused. Ignore any address claiming to be official until it is published here and independently verifiable on Solana.
         </SafetyNotice>
 
         <section className="content-section protocol-stats" aria-label="SPORTPAD deployment status">
           <div><span>Mint</span><strong>Not deployed</strong><small>No official address</small></div>
           <div><span>Total supply</span><strong>Not defined</strong><small>Tokenomics pending review</small></div>
-          <div><span>Community launch rewards</span><strong>80% route deployed</strong><small>Funds official Fan Token rewards</small></div>
-          <div><span>Community-funded SPORTPAD burn</span><strong>20% route deployed</strong><small>Activates when the SPORTPAD mint is configured</small></div>
+          <div><span>Community launch rewards</span><strong>80% fee route designed</strong><small>Purchases and claims are not yet active</small></div>
+          <div><span>Community-funded SPORTPAD burn</span><strong>20% fee route designed</strong><small>Buyback and burn are not yet active</small></div>
         </section>
 
         <section className="page-section">
@@ -90,11 +90,11 @@ export default function SportTokenPage() {
         <section className="page-section calculator-layout">
           <div>
             <p className="section-eyebrow">Current deployment state</p>
-            <h2>The infrastructure is deployed. No SPORTPAD output exists yet.</h2>
-            <p>The finalized fee indexer, wallet-confirmed Jupiter swap path, and exact burn builder are deployed. The SPORTPAD mint is not configured and no buyback or burn is shown until it has a finalized transaction and verified supply change.</p>
+            <h2>The mechanism is built, but economic execution is paused.</h2>
+            <p>The fee indexer, swap preparation, and burn builder exist in code. The SPORTPAD mint is not configured, the automatic buyback worker is not enabled, and no buyback or burn has been verified. A completed burn requires a finalized transaction and a matching supply reduction.</p>
             <ul className="check-list">
-              <li><CheckCircle2 /> 80% official Fan Token rewards</li>
-              <li><CheckCircle2 /> 20% from community launches buys and burns SPORTPAD</li>
+              <li><CheckCircle2 /> Proposed 80% share for official Fan Token rewards</li>
+              <li><CheckCircle2 /> Proposed 20% share for SPORTPAD buyback and burn</li>
               <li><CheckCircle2 /> SPORTPAD&apos;s own fees fund project development</li>
               <li><CheckCircle2 /> No fabricated output estimates</li>
               <li><CheckCircle2 /> Supply proof required after deployment</li>
@@ -103,12 +103,12 @@ export default function SportTokenPage() {
           <div className="fee-calculator" aria-label="SPORTPAD deployment state">
             <div className="fee-calculator-head">
               <Flame />
-              <div><span>LIVE EXECUTION</span><strong>Wallet confirmed</strong></div>
+              <div><span>CURRENT EXECUTION</span><strong>Paused</strong></div>
             </div>
             <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Fee indexer</span><strong className="mt-2 block text-xl">Deployed</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Fee indexer</span><strong className="mt-2 block text-xl">Code ready</strong></div>
               <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">SPORTPAD mint</span><strong className="mt-2 block text-xl">Not deployed</strong></div>
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Buyback execution</span><strong className="mt-2 block text-xl">Waiting for mint</strong></div>
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Buyback execution</span><strong className="mt-2 block text-xl">Paused</strong></div>
               <div className="rounded-xl border border-white/8 bg-black/20 p-4"><span className="text-white/45">Verified burns</span><strong className="mt-2 block text-xl">No events yet</strong></div>
             </div>
             <p>These are deployment states, not balances, quotes, forecasts, or token allocations.</p>
@@ -161,7 +161,7 @@ export default function SportTokenPage() {
             <Clock3 />
             <span>
               <p className="section-eyebrow">Current status</p>
-              <h2>Launchpad live. SPORTPAD token prelaunch.</h2>
+              <h2>Draft builder available. Mainnet launch paused.</h2>
               <p>No countdown, presale, allocation, airdrop, or token-generation event has been announced. SPORTPAD&apos;s own creator fees will fund project development after launch.</p>
             </span>
           </div>
@@ -173,8 +173,8 @@ export default function SportTokenPage() {
         <section className="final-cta compact-cta">
           <div>
             <p className="section-eyebrow">Understand the whole route</p>
-            <h2>Community launch fees have two outcomes.</h2>
-            <p>Other tokens launched on SportPad direct 80% to official Fan Token rewards and 20% to buying and burning SPORTPAD. SPORTPAD&apos;s own fees stay with the project.</p>
+            <h2>The proposed fee route has two destinations.</h2>
+            <p>For future community launches, the fee configuration would direct 80% to a Fan Token reward treasury and 20% to a SPORTPAD buyback treasury. Purchases and burns require separate verified execution. SPORTPAD&apos;s own fees stay with the project.</p>
           </div>
           <div>
             <Button asChild className="h-12 rounded-full bg-[#9cff57] px-6 text-[#071008] hover:bg-[#adff7d]">

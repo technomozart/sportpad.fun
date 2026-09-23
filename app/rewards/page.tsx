@@ -8,7 +8,7 @@ export default function RewardsPage() {
   return (
     <SiteChrome>
       <main className="page-wrap inner-page">
-        <PageIntro kicker="Wallet rewards" title="Earn on Solana. Claim on the Fan Token's network." copy="Verify the Solana wallet holding a SportPad launch token. For Chiliz rewards, link MetaMask with one message, let SportPad add Chiliz Chain, and claim the official Fan Token to that address.">
+        <PageIntro kicker="Wallet rewards" title="Track your wallet's reward position." copy="Verify the Solana wallet holding a SportPad launch token. Chiliz rewards are designed for claims to a linked MetaMask wallet, but new claims are paused until financial execution is verified.">
           <div className="reward-hero-formula"><Calculator /><span>Your reward</span><strong>funded pool × your token-seconds</strong><small>÷ all eligible token-seconds</small></div>
         </PageIntro>
         <SafetyNotice>No balances are simulated. Every displayed position comes from finalized holder indexing, every allocation is limited by acquired inventory, and every payout links to its onchain receipt.</SafetyNotice>

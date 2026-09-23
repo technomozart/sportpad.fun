@@ -1,12 +1,14 @@
 import "server-only";
 
 import { env } from "cloudflare:workers";
+import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
 
 import {
   DEFAULT_PROTOCOL_CONTROLS,
   readExecutionConfig,
   type ProtocolControls,
 } from "@/lib/server/execution-config";
+import { readGlobalLaunchReadiness } from "@/lib/server/launch-automation-readiness";
 
 type CountRow = { count: number };
 type ControlRow = {
@@ -113,7 +115,8 @@ export async function getExecutionStatus() {
     rewardTreasury: row.mainnet_reward_treasury,
     buybackTreasury: row.mainnet_buyback_treasury,
   }));
-  const walletExecutionEnabled = !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused;
+  const walletExecutionEnabled = FINANCIAL_LEDGER_VERIFIED
+    && !controls.settlementPaused && !controls.rewardsPaused && !controls.buybackPaused;
   const heartbeats = results[13].results as AutomationHeartbeatRow[];
   const activeCutoff = Date.now() - 2 * 60 * 1_000;
   const automationWorkers = heartbeats.map((row) => {
@@ -146,7 +149,9 @@ export async function getExecutionStatus() {
       ? without(execution.readiness.buyback, ["buyback signer", ...(sportpadSetting?.value ? ["SPORTPAD mint"] : [])])
       : execution.readiness.buyback,
   };
-  const managedExecutionReady = Object.values(readiness).every((lane) => lane.ready);
+  const launchReadiness = await readGlobalLaunchReadiness();
+  const managedExecutionReady = FINANCIAL_LEDGER_VERIFIED && launchReadiness.ready
+    && Object.values(readiness).every((lane) => lane.ready);
 
   return {
     version: 1,
@@ -160,9 +165,10 @@ export async function getExecutionStatus() {
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,
       walletExecutionEnabled,
-      unattendedAutomation: chilizActive || solanaActive,
+      unattendedAutomation: FINANCIAL_LEDGER_VERIFIED && (chilizActive || solanaActive),
     },
     automation: { workers: automationWorkers, chilizActive, solanaActive },
+    launchReadiness,
     protocolSettings: { sportpadMint: sportpadSetting?.value ?? execution.mainnet.sportpadMint },
     treasuries: {
       reward: execution.mainnet.rewardTreasury,

@@ -7,7 +7,9 @@ import { launchDrafts } from "@/db/schema";
 import { normalizeTransactionSignature } from "@/lib/protocol/devnet-launch";
 import { isUuidV4 } from "@/lib/protocol/identifiers";
 import { getRewardOption, type RewardChain } from "@/lib/protocol/reward-options";
+import type { LaunchAutomationReadiness } from "@/lib/protocol/launch-automation-gate";
 import { normalizeSolanaAddress } from "@/lib/protocol/wallet-auth";
+import { readLaunchAutomationReadiness } from "@/lib/server/launch-automation-readiness";
 import { getLaunchDraftOwner } from "@/lib/server/launch-draft-owner";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
 import { uploadPumpMetadata } from "@/lib/server/pump-metadata";
@@ -53,16 +55,19 @@ function privateJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 
-function serializeMainnetState(draft: typeof launchDrafts.$inferSelect) {
+function serializeMainnetState(
+  draft: typeof launchDrafts.$inferSelect,
+  automation: LaunchAutomationReadiness = { ready: false, missing: [] },
+) {
   const config = readMainnetConfig();
   return {
     draftId: draft.id,
     chain: "solana:mainnet",
     enabled: config.enabled,
-    ready: config.ready,
-    missing: config.missing,
-    rewardTreasury: config.rewardTreasury,
-    buybackTreasury: config.buybackTreasury,
+    ready: config.ready && automation.ready,
+    missing: [...config.missing, ...automation.missing],
+    rewardTreasury: draft.mainnetRewardTreasury ?? config.rewardTreasury,
+    buybackTreasury: draft.mainnetBuybackTreasury ?? config.buybackTreasury,
     sportpadMintConfigured: Boolean(config.sportpadMint),
     creatorWallet: draft.mainnetCreatorWallet,
     metadataUri: draft.mainnetMetadataUri,
@@ -93,6 +98,7 @@ function logFailure(event: string, error: unknown) {
 }
 
 export async function GET(request: Request, context: MainnetRouteContext) {
+  if (!env.DB) return privateJson({ error: "Mainnet launch records are unavailable." }, 503);
   const ownerUserId = getLaunchDraftOwner(request);
   if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
   const { id } = await context.params;
@@ -100,7 +106,11 @@ export async function GET(request: Request, context: MainnetRouteContext) {
   try {
     const draft = await ownerDraft(id, ownerUserId);
     if (!draft) return privateJson({ error: "Draft not found." }, 404);
-    return privateJson({ mainnet: serializeMainnetState(draft) });
+    const config = readMainnetConfig();
+    const automation = draft.status === "mainnet_published"
+      ? { ready: false, missing: [] }
+      : await readLaunchAutomationReadiness(env.DB, draft.rewardChain as RewardChain, config.buybackTreasury);
+    return privateJson({ mainnet: serializeMainnetState(draft, automation) });
   } catch (error) {
     logFailure("mainnet_state_get_failed", error);
     return privateJson({ error: "Mainnet launch state is temporarily unavailable." }, 503);
@@ -108,6 +118,7 @@ export async function GET(request: Request, context: MainnetRouteContext) {
 }
 
 export async function POST(request: Request, context: MainnetRouteContext) {
+  if (!env.DB) return privateJson({ error: "Mainnet launch records are unavailable." }, 503);
   const ownerUserId = getLaunchDraftOwner(request);
   if (!ownerUserId) return privateJson({ error: "Sign in is required." }, 401);
   const session = await getVerifiedWalletSession(request).catch(() => null);
@@ -125,13 +136,6 @@ export async function POST(request: Request, context: MainnetRouteContext) {
   catch { return privateJson({ error: "Invalid mainnet launch request." }, 400); }
 
   try {
-    const config = readMainnetConfig();
-    if (!config.ready || !config.rewardTreasury || !config.buybackTreasury) {
-      return privateJson({ error: `Mainnet launch is waiting for: ${config.missing.join(", ")}.` }, 409);
-    }
-    if (session.walletAddress === config.rewardTreasury || session.walletAddress === config.buybackTreasury) {
-      return privateJson({ error: "The creator wallet must be different from both protocol treasury addresses." }, 409);
-    }
     const draft = await ownerDraft(id, ownerUserId);
     if (!draft) return privateJson({ error: "Draft not found." }, 404);
     if (draft.status === "mainnet_published") {
@@ -141,11 +145,22 @@ export async function POST(request: Request, context: MainnetRouteContext) {
       return privateJson({ error: "Content approval is required before a mainnet launch." }, 409);
     }
     const rewardChain = draft.rewardChain as RewardChain;
-    const rewardAsset = getRewardOption(rewardChain, draft.rewardSymbol);
-    if (!rewardAsset || rewardAsset.tokenAddress.toLowerCase() !== draft.rewardMint?.toLowerCase()) {
-      return privateJson({ error: "The approved reward token no longer matches the verified registry." }, 409);
-    }
     if (input.action === "prepare") {
+      const rewardAsset = getRewardOption(rewardChain, draft.rewardSymbol);
+      if (!rewardAsset || rewardAsset.tokenAddress.toLowerCase() !== draft.rewardMint?.toLowerCase()) {
+        return privateJson({ error: "The approved reward token no longer matches the verified registry." }, 409);
+      }
+      const config = readMainnetConfig();
+      if (!config.ready || !config.rewardTreasury || !config.buybackTreasury) {
+        return privateJson({ error: `Mainnet launch is waiting for: ${config.missing.join(", ")}.` }, 409);
+      }
+      if (session.walletAddress === config.rewardTreasury || session.walletAddress === config.buybackTreasury) {
+        return privateJson({ error: "The creator wallet must be different from both protocol treasury addresses." }, 409);
+      }
+      const automation = await readLaunchAutomationReadiness(env.DB, rewardChain, config.buybackTreasury);
+      if (!automation.ready) {
+        return privateJson({ error: `Mainnet launches are paused until reward and buyback automation are verified. Waiting for: ${automation.missing.join(", ")}.` }, 409);
+      }
       const rewardRoute = rewardChain === "chiliz"
         ? await checkChilizRewardRoute(rewardAsset.wrappedTokenAddress!)
         : await checkRewardRoute(rewardAsset.tokenAddress);
@@ -163,7 +178,7 @@ export async function POST(request: Request, context: MainnetRouteContext) {
         ) {
           return privateJson({ error: "The prepared mainnet configuration belongs to different wallets." }, 409);
         }
-        return privateJson({ mainnet: serializeMainnetState(draft) });
+        return privateJson({ mainnet: serializeMainnetState(draft, automation) });
       }
       const limitSubject = `${ownerUserId}:${session.walletAddress}`;
       const hourly = await consumeFixedWindow({ scope: "mainnet_prepare_hour", subject: limitSubject, limit: 3, windowSeconds: 3_600 });
@@ -194,7 +209,7 @@ export async function POST(request: Request, context: MainnetRouteContext) {
         isNull(launchDrafts.mainnetMint),
       )).returning();
       if (!updated) return privateJson({ error: "The launch changed in another tab. Reload before signing." }, 409);
-      return privateJson({ mainnet: serializeMainnetState(updated) });
+      return privateJson({ mainnet: serializeMainnetState(updated, automation) });
     }
 
     // Verification must never be blocked by a route disappearing after the
@@ -203,8 +218,8 @@ export async function POST(request: Request, context: MainnetRouteContext) {
     if (
       !draft.mainnetMetadataUri ||
       draft.mainnetCreatorWallet !== session.walletAddress ||
-      draft.mainnetRewardTreasury !== config.rewardTreasury ||
-      draft.mainnetBuybackTreasury !== config.buybackTreasury
+      !normalizeSolanaAddress(draft.mainnetRewardTreasury ?? "") ||
+      !normalizeSolanaAddress(draft.mainnetBuybackTreasury ?? "")
     ) {
       return privateJson({ error: "Prepare the exact mainnet launch configuration before signing." }, 409);
     }
@@ -231,8 +246,8 @@ export async function POST(request: Request, context: MainnetRouteContext) {
       signature: feeSignature,
       mintAddress: mint,
       creatorWallet: session.walletAddress,
-      rewardWallet: config.rewardTreasury,
-      burnWallet: config.buybackTreasury,
+      rewardWallet: draft.mainnetRewardTreasury!,
+      burnWallet: draft.mainnetBuybackTreasury!,
       blockhash: feeBlockhash,
       lastValidBlockHeight: input.fee.lastValidBlockHeight,
       invalidBlockhashObservedAt: null,
