@@ -4,7 +4,6 @@ import {
   getAccount,
   getAssociatedTokenAddress,
   getMint,
-  getOrCreateAssociatedTokenAccount,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -14,6 +13,7 @@ import { inspectPersistedBuybackBurn, signBuybackBurn } from "./solana-buyback-b
 import { signPersistedBuybackSwap } from "./solana-buyback-swap-replay.mjs";
 import { inspectPersistedSolanaClaimTransfer, signSolanaClaimTransfer } from "./solana-claim-transfer.mjs";
 import { reconcileRewardPurchases, rewardWorkerJobTypes } from "./solana-reward-recovery.mjs";
+import { requireExistingTreasuryAta } from "./solana-existing-ata.mjs";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const ORDER_URL = "https://api.jup.ag/swap/v2/order";
@@ -326,10 +326,10 @@ async function buyAndBurn(payload, arm, jobId, workerId, entityId,
   validateBuybackChunkPayload(payload, entityId);
   const mint = new PublicKey(payload.sportpadMint);
   const tokenProgram = await tokenProgramForMint(mint);
+  const tokenAccount = await requireExistingTreasuryAta({
+    connection, mint, owner: buyback.publicKey, tokenProgram,
+  });
   await arm();
-  const tokenAccount = await getOrCreateAssociatedTokenAccount(
-    connection, buyback, mint, buyback.publicKey, false, "confirmed", undefined, tokenProgram,
-  );
   const order = new URL(ORDER_URL);
   order.searchParams.set("inputMint", SOL);
   order.searchParams.set("outputMint", mint.toBase58());
@@ -419,14 +419,14 @@ async function buyRewards(payload, arm, jobId, workerId, entityId,
   }
   const mint = new PublicKey(payload.rewardMint);
   const tokenProgram = await tokenProgramForMint(mint);
+  // The ATA must be provisioned and finalized before a job arms or quotes.
+  // Otherwise account rent would become an off-ledger treasury spend.
+  const tokenAccount = await requireExistingTreasuryAta({
+    connection, mint, owner: rewards.publicKey, tokenProgram,
+  });
   // A route failure for dust must happen while the job is still leased, so
   // the queued batch can absorb later fee shares instead of being frozen.
   if (!isBatch) await arm();
-  // A separate confirmed ATA creation is required so the swap receipt has a
-  // pre-balance. It must never be mistaken for the swap's reward inventory.
-  const tokenAccount = await getOrCreateAssociatedTokenAccount(
-    connection, rewards, mint, rewards.publicKey, false, "confirmed", undefined, tokenProgram,
-  );
   const order = new URL(ORDER_URL);
   order.searchParams.set("inputMint", SOL);
   order.searchParams.set("outputMint", mint.toBase58());
