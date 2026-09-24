@@ -8,6 +8,7 @@ import { allocateEpochRewards } from "@/lib/protocol/accounting";
 import { CHILIZ_CHAIN, getChilizRewardAsset } from "@/lib/protocol/chiliz-reward-assets";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED, verifyChilizPurchaseReceipt,
   verifyChilizTransferReceipt } from "@/lib/protocol/chiliz-receipts";
+import { CHILIZ_FEE_FUNDING_VERIFIED } from "@/lib/protocol/chiliz-funding-gate";
 import { createChilizSignedIntent, reconcileChilizSignedIntent,
   verifyChilizPurchasePrincipal,
   type ChilizSignedIntent } from "@/lib/protocol/chiliz-signed-intent";
@@ -241,6 +242,9 @@ async function readAutomationControls(database: D1Database): Promise<AutomationL
 }
 
 async function seedPurchaseJobs(database: D1Database) {
+  // The current worker sizes a CHZ spend from a SOL quote but does not move
+  // this settlement's fee SOL across chains. Never seed a purchase from that.
+  if (!CHILIZ_FEE_FUNDING_VERIFIED) return;
   const rows = await database.prepare(`
     SELECT s.id AS settlement_id, s.reward_amount_atomic, f.launch_id,
       l.reward_symbol, l.reward_mint
@@ -3166,10 +3170,16 @@ export async function POST(request: Request) {
         return Response.json({ error: "Chiliz reconciliation state changed." }, { status: 409 });
       }
     }
-    const mayBroadcast = maySettle && laneAllowsJob(pending.job_type, controls) &&
+    const mayBroadcast = maySettle &&
+      (pending.job_type !== "chiliz_reward_purchase" || CHILIZ_FEE_FUNDING_VERIFIED) &&
+      laneAllowsJob(pending.job_type, controls) &&
       policy?.state === "reserved" &&
       ["prepared", "broadcast_attempted"].includes(row.state) &&
       (intent.kind !== "purchase" || intent.deadlineEpochSeconds > Math.floor(Date.now() / 1_000) + 15);
+    // A signed transaction is spend-capable bearer data. The worker must not
+    // receive it while this lane is held, even for a pending reconciliation.
+    if (!mayBroadcast) return Response.json({ prepared: null, held: true,
+      mayBroadcast: false }, { headers: { "Cache-Control": "no-store" } });
     return Response.json({ prepared: { jobId: pending.id, intent,
       job: { type: pending.job_type, payload: JSON.parse(pending.payload_json) } },
       mayBroadcast }, { headers: { "Cache-Control": "no-store" } });
@@ -3182,6 +3192,7 @@ export async function POST(request: Request) {
     const allowedJobTypes = FINANCIAL_LEDGER_VERIFIED
       ? input.jobTypes.filter((jobType) => laneAllowsJob(jobType, controls) &&
         (CHILIZ_ASSET_MIGRATION_VERIFIED || !jobType.startsWith("chiliz_")) &&
+        (jobType !== "chiliz_reward_purchase" || CHILIZ_FEE_FUNDING_VERIFIED) &&
         (!jobType.startsWith("chiliz_") || chilizWorkerMatches) &&
         (CLAIM_PAYOUT_EXECUTION_SAFE || jobType !== "solana_claim_payout") &&
         (BUYBACK_BURN_EXECUTION_SAFE || jobType !== "sportpad_buyback_burn")) : [];
@@ -3232,6 +3243,7 @@ export async function POST(request: Request) {
       (!CLAIM_PAYOUT_EXECUTION_SAFE && job.job_type === "solana_claim_payout") ||
       (!BUYBACK_BURN_EXECUTION_SAFE && job.job_type === "sportpad_buyback_burn") ||
       (!CHILIZ_ASSET_MIGRATION_VERIFIED && job.job_type.startsWith("chiliz_")) ||
+      (!CHILIZ_FEE_FUNDING_VERIFIED && job.job_type === "chiliz_reward_purchase") ||
       !pauseSql || !laneAllowsJob(job.job_type, controls)) {
       return Response.json({ error: "Financial lane is paused or unavailable." }, { status: 409 });
     }
@@ -3344,6 +3356,7 @@ export async function POST(request: Request) {
     try {
       const controls = await readAutomationControls(env.DB);
       if (!FINANCIAL_LEDGER_VERIFIED || !CHILIZ_ASSET_MIGRATION_VERIFIED ||
+        (job.job_type === "chiliz_reward_purchase" && !CHILIZ_FEE_FUNDING_VERIFIED) ||
         !laneAllowsJob(job.job_type, controls)) {
         throw new Error("chiliz_intent_lane_closed");
       }
@@ -3380,6 +3393,7 @@ export async function POST(request: Request) {
     try {
       const controls = await readAutomationControls(env.DB);
       if (!FINANCIAL_LEDGER_VERIFIED || !CHILIZ_ASSET_MIGRATION_VERIFIED ||
+        (job.job_type === "chiliz_reward_purchase" && !CHILIZ_FEE_FUNDING_VERIFIED) ||
         !laneAllowsJob(job.job_type, controls)) throw new Error("chiliz_broadcast_lane_closed");
       const row = await env.DB.prepare(SELECT_CHILIZ_SIGNED_INTENT_SQL)
         .bind(job.id).first<PersistedChilizIntentRow>();
@@ -3448,6 +3462,7 @@ export async function POST(request: Request) {
   if (input.action === "complete") {
     if (!FINANCIAL_LEDGER_VERIFIED ||
       (!BUYBACK_BURN_EXECUTION_SAFE && job.job_type === "sportpad_buyback_burn") ||
+      (!CHILIZ_FEE_FUNDING_VERIFIED && job.job_type === "chiliz_reward_purchase") ||
       (!CHILIZ_ASSET_MIGRATION_VERIFIED && job.job_type.startsWith("chiliz_"))) {
       // Preserve worker-reported evidence without treating it as a verified
       // chain receipt or mutating claim, settlement, or vault accounting.

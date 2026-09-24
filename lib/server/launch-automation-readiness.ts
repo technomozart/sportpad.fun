@@ -9,7 +9,9 @@ import {
   type MaintenanceRun,
 } from "@/lib/protocol/launch-automation-gate";
 import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
+import { AUTOMATED_PUMP_FEE_COLLECTION_VERIFIED } from "@/lib/protocol/fee-collection-gate";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
+import { CHILIZ_FEE_FUNDING_VERIFIED } from "@/lib/protocol/chiliz-funding-gate";
 import type { RewardChain } from "@/lib/protocol/reward-options";
 import { DEFAULT_PROTOCOL_CONTROLS, readExecutionConfig } from "@/lib/server/execution-config";
 import { readMainnetConfig } from "@/lib/server/mainnet-config";
@@ -78,6 +80,7 @@ export async function readLaunchAutomationReadiness(
   }
   if (!execution.workerTokenConfigured) missing.push("worker authentication");
   if (!execution.flags.feeIndexerEnabled || !execution.flags.holderIndexerEnabled) missing.push("fee and holder indexing");
+  if (!AUTOMATED_PUMP_FEE_COLLECTION_VERIFIED) missing.push("unattended Pump fee collection not verified");
   if (!execution.flags.settlementEnabled || controls.settlementPaused) missing.push("settlement execution");
   if (!execution.flags.rewardsEnabled || !execution.flags.claimsEnabled || controls.rewardsPaused) missing.push("reward and claim execution");
   if (requireBuybackExecution && (!execution.flags.buybackEnabled || controls.buybackPaused)) {
@@ -86,6 +89,9 @@ export async function readLaunchAutomationReadiness(
   if (!FINANCIAL_LEDGER_VERIFIED) missing.push("financial ledger and receipt verification");
   if (rewardChain === "chiliz" && !CHILIZ_ASSET_MIGRATION_VERIFIED) {
     missing.push("Chiliz V2 acquisition and payout execution not verified");
+  }
+  if (rewardChain === "chiliz" && !CHILIZ_FEE_FUNDING_VERIFIED) {
+    missing.push("80% fee SOL to Chiliz CHZ funding not verified");
   }
   if (rewardChain === "solana" && !SOLANA_REWARD_AUTOMATION_VERIFIED) {
     missing.push("Solana Fan Token acquisition and epoch automation not verified");

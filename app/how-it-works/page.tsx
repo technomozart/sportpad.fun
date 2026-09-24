@@ -1,5 +1,5 @@
 import { SiteLink as Link } from "@/components/site-link";
-import { ArrowRight, BadgeCheck, Boxes, CheckCircle2, CircleDollarSign, Flame, Layers3, Radio, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, BadgeCheck, Boxes, Circle, CircleDollarSign, Flame, Layers3, Radio, ShieldCheck, WalletCards } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PageIntro, SafetyNotice, SectionHeading } from "@/components/sport-ui";
@@ -7,12 +7,12 @@ import { SiteChrome } from "@/components/site-chrome";
 import { FeeCalculator } from "./fee-calculator";
 
 const stages = [
-  { icon: BadgeCheck, title: "Select an official reward", copy: "SportPad catalogs 78 current Chiliz V2 Fan Token contracts and two Solana options. Chiliz routes are not yet approved for launch." },
-  { icon: CircleDollarSign, title: "Community fees finalize", copy: "The system accepts only qualifying creator fees from community launches after Solana finality. SPORTPAD's own fees are excluded." },
-  { icon: Radio, title: "Reconcile each event", copy: "The indexer deduplicates finalized fee events and matches them against treasury balance changes before economic action." },
-  { icon: Layers3, title: "Apply the community split", copy: "80% of a community coin's fees becomes a Fan Token reward intent; 20% becomes a SPORTPAD buyback and burn intent." },
-  { icon: Boxes, title: "Fund the reward epoch", copy: "An audited route must acquire the current Fan Token contract and prove inventory before any allocation becomes payable." },
-  { icon: WalletCards, title: "Claim on the reward network", copy: "Once claims are enabled, Solana rewards would go to the verified Base58 wallet and Chiliz rewards to a separately verified 0x address." },
+  { icon: BadgeCheck, title: "Choose a current Chiliz Fan Token", copy: "A draft may select one of the official 18-decimal V2 contracts. Selection is not an executable purchase or a launch approval." },
+  { icon: CircleDollarSign, title: "Collect finalized Solana fees", copy: "A separate collector must distribute the community coin's creator fees. The indexer verifies the real 80/20 treasury receipts; SPORTPAD's own fees are excluded." },
+  { icon: Radio, title: "Trace the exact 80%", copy: "Each finalized fee receipt must be linked to a bounded SOL-to-Solana-CHZ swap, not merely priced with an indicative quote." },
+  { icon: Layers3, title: "Bridge CHZ to Chiliz Chain", copy: "A bounded, reconciled CHZ amount must reach the Chiliz treasury through a finalized bridge transfer before it can fund a reward purchase." },
+  { icon: Boxes, title: "Buy and allocate the V2 reward", copy: "A verified Chiliz market purchase must increase the selected Fan Token inventory. Holder allocations are calculated from finalized Solana holding snapshots." },
+  { icon: WalletCards, title: "Link MetaMask and claim", copy: "A holder verifies their Solana wallet and a separate 0x wallet, switches MetaMask to Chiliz Chain, and claims only inventory already funded for their position." },
 ];
 
 export default function HowItWorksPage() {
@@ -28,7 +28,7 @@ export default function HowItWorksPage() {
           {stages.map((stage, index) => <article key={stage.title}><span className="process-number">0{index + 1}</span><div className="process-icon"><stage.icon /></div><div><h2>{stage.title}</h2><p>{stage.copy}</p></div>{index < stages.length - 1 ? <span className="process-line" /> : null}</article>)}
         </section>
 
-        <section className="page-section calculator-layout"><div><p className="section-eyebrow">Economics</p><h2>The split is simple. Settlement is not.</h2><p>Every leg must survive finality, quote expiry, price-impact checks, retries, balance reconciliation, and on-chain proof. “Submitted” never means “complete.”</p><ul className="check-list"><li><CheckCircle2 /> Exact integer accounting</li><li><CheckCircle2 /> Idempotent settlement state</li><li><CheckCircle2 /> Bounded slippage and price impact</li><li><CheckCircle2 /> Supply delta verified after every burn</li></ul></div><FeeCalculator /></section>
+        <section className="page-section calculator-layout"><div><p className="section-eyebrow">Economics</p><h2>The split is simple. Settlement is not.</h2><p>Every leg must survive finality, quote expiry, price-impact checks, retries, balance reconciliation, and on-chain proof. “Submitted” never means “complete.” Required before activation:</p><ul className="check-list pending"><li><Circle /> Exact integer accounting</li><li><Circle /> Idempotent settlement state</li><li><Circle /> Bounded slippage and price impact</li><li><Circle /> Supply delta proof after each burn</li></ul></div><FeeCalculator /></section>
 
         <section className="page-section">
           <SectionHeading eyebrow="Reward accounting" title="One funded pool, divided by time-weighted participation." copy="Epoch rules are fixed before the accounting window starts, and closed allocations are never silently rewritten." />
@@ -37,8 +37,8 @@ export default function HowItWorksPage() {
         </section>
 
         <section className="page-section route-paths">
-          <div><p className="section-eyebrow">Route A</p><h2>Chiliz V2 acquisition and claim</h2><p>Chiliz replaced its former Fan Token contracts with 18-decimal V2 contracts. The old Kayen wrappers do not establish a route to these current assets. SportPad is testing a direct V2 purchase route funded by a separate CHZ treasury, followed by a direct transfer to the holder&apos;s verified 0x address. Neither execution nor automatic SOL-to-CHZ replenishment is enabled.</p><span className="route-label route-inventory">78 V2 contracts, route and payout paused</span></div>
-          <div><p className="section-eyebrow">Route B</p><h2>Solana-native rewards</h2><p>AFC and ARG are the two listed Solana options. Once the worker is enabled and funded, it would use a bounded Jupiter quote to acquire the selected token and pay a verified Solana wallet.</p><span className="route-label route-inventory">2 market options, payout paused</span></div>
+          <div><p className="section-eyebrow">Primary route</p><h2>Chiliz V2 acquisition and MetaMask claim</h2><p>The community coin trades on Solana; its Fan Token reward is a separate asset on Chiliz Chain, not an Ethereum-mainnet token or a liquidity pair. Chiliz replaced its old Fan Token contracts with 18-decimal V2 contracts. The intended automatic path is finalized fee SOL → official Solana CHZ → native Chiliz CHZ → the selected current V2 Fan Token → a verified holder&apos;s 0x wallet. The swap, bridge, purchase, and payout are not yet enabled.</p><span className="route-label route-inventory">78 V2 contracts cataloged; execution paused</span></div>
+          <div><p className="section-eyebrow">Holder wallet</p><h2>Chiliz Chain, not Ethereum mainnet</h2><p>The holder links a 0x wallet such as MetaMask and verifies control of it before requesting a claim. The planned payout worker would pay CHZ gas to transfer the funded V2 Fan Token directly to that address. Wallet linking grants no spending permission, and no claim is available yet.</p><span className="route-label route-inventory">MetaMask claim flow; payout paused</span></div>
           <div className="route-safety"><ShieldCheck /><h3>Safe failure beats a bad execution.</h3><p>Execution must stay paused when quotes disappear, price impact exceeds limits, inventory runs low, or RPC health degrades. Uncertain on-chain submissions require reconciliation before any retry.</p></div>
         </section>
 

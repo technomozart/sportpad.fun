@@ -461,6 +461,8 @@ export const automationJobs = sqliteTable(
     attempt: integer("attempt").notNull().default(0),
     txHash: text("tx_hash"),
     errorCode: text("error_code"),
+    /** Only a new Chiliz claim retry job may point at a failed original job. */
+    retryOfJobId: text("retry_of_job_id"),
     availableAt: integer("available_at").notNull(),
     leasedUntil: integer("leased_until"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -468,6 +470,8 @@ export const automationJobs = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_automation_job_entity_type").on(table.entityId, table.jobType),
+    uniqueIndex("idx_automation_jobs_retry_of_job").on(table.retryOfJobId)
+      .where(sql`${table.retryOfJobId} IS NOT NULL`),
     uniqueIndex("idx_automation_jobs_tx_hash").on(table.txHash).where(sql`${table.txHash} IS NOT NULL`),
     index("idx_automation_jobs_state_available").on(table.state, table.availableAt),
   ],
@@ -547,6 +551,38 @@ export const chilizSignedIntents = sqliteTable(
     check("chk_chiliz_intent_nonce", sql`${table.nonce} >= 0`),
     check("chk_chiliz_intent_kind", sql`${table.kind} IN ('purchase', 'claim')`),
     check("chk_chiliz_intent_state", sql`${table.state} IN ('prepared', 'broadcast_attempted', 'finalized_success', 'finalized_reverted')`),
+  ],
+);
+
+/** One new claim job may follow a canonically finalized reverted Chiliz claim.
+ * Its predecessor proof and the combined 1 CHZ gas ceiling are immutable.
+ * No row is seeded; every authorization starts paused. */
+export const chilizClaimRetryPolicy = sqliteTable(
+  "chiliz_claim_retry_policy",
+  {
+    jobId: text("job_id").primaryKey().references(() => automationJobs.id),
+    predecessorJobId: text("predecessor_job_id").notNull().references(() => automationJobs.id),
+    predecessorIntentId: text("predecessor_intent_id").notNull().references(() => chilizSignedIntents.id),
+    predecessorTxHash: text("predecessor_tx_hash").notNull(),
+    predecessorReceiptBlockHash: text("predecessor_receipt_block_hash").notNull(),
+    predecessorReceiptBlockNumber: integer("predecessor_receipt_block_number").notNull(),
+    predecessorFinalizedBlockNumber: integer("predecessor_finalized_block_number").notNull(),
+    predecessorEvidenceJson: text("predecessor_evidence_json").notNull(),
+    predecessorSpentWei: text("predecessor_spent_wei").notNull(),
+    maxRetrySpendWei: text("max_retry_spend_wei").notNull(),
+    state: text("state").notNull().default("paused"),
+    reservedIntentId: text("reserved_intent_id").references(() => chilizSignedIntents.id),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_claim_retry_predecessor_job").on(table.predecessorJobId),
+    uniqueIndex("idx_chiliz_claim_retry_predecessor_intent").on(table.predecessorIntentId),
+    uniqueIndex("idx_chiliz_claim_retry_reserved_intent").on(table.reservedIntentId)
+      .where(sql`${table.reservedIntentId} IS NOT NULL`),
+    check("chk_chiliz_claim_retry_state", sql`${table.state} IN ('paused', 'armed', 'reserved')`),
+    check("chk_chiliz_claim_retry_reservation", sql`${table.state} <> 'reserved' OR ${table.reservedIntentId} IS NOT NULL`),
+    check("chk_chiliz_claim_retry_cap", sql`${table.predecessorSpentWei} GLOB '[0-9]*' AND ${table.predecessorSpentWei} NOT GLOB '*[^0-9]*' AND (${table.predecessorSpentWei} = '0' OR substr(${table.predecessorSpentWei},1,1) <> '0') AND ${table.maxRetrySpendWei} GLOB '[1-9]*' AND ${table.maxRetrySpendWei} NOT GLOB '*[^0-9]*' AND length(${table.predecessorSpentWei}) <= 19 AND length(${table.maxRetrySpendWei}) <= 19 AND CAST(${table.predecessorSpentWei} AS INTEGER) + CAST(${table.maxRetrySpendWei} AS INTEGER) <= 1000000000000000000`),
   ],
 );
 
@@ -631,6 +667,75 @@ export const chilizBridgeJournal = sqliteTable(
     check("chk_chiliz_bridge_min_destination", sql`${table.minimumDestinationWei} GLOB '[1-9]*' AND ${table.minimumDestinationWei} NOT GLOB '*[^0-9]*'`),
     check("chk_chiliz_bridge_sha256", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*'`),
     check("chk_chiliz_bridge_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+  ],
+);
+
+/** Recurring Pump V2 fee collection is opt-in per published community coin.
+ * The migration seeds no policy. The collector only pays Solana transaction
+ * fees; it is never one of the 80/20 fee recipients or the launch creator. */
+export const pumpFeeCollectionPolicies = sqliteTable(
+  "pump_fee_collection_policies",
+  {
+    launchId: text("launch_id").primaryKey().references(() => launchDrafts.id),
+    mint: text("mint").notNull(),
+    collectorSigner: text("collector_signer").notNull(),
+    rewardTreasury: text("reward_treasury").notNull(),
+    buybackTreasury: text("buyback_treasury").notNull(),
+    state: text("state").notNull().default("paused"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_pump_fee_collection_policy_mint").on(table.mint),
+    check("chk_pump_fee_collection_policy_state", sql`${table.state} IN ('paused', 'armed')`),
+    check("chk_pump_fee_collection_policy_signer", sql`length(${table.collectorSigner}) BETWEEN 32 AND 44 AND ${table.collectorSigner} <> ${table.rewardTreasury} AND ${table.collectorSigner} <> ${table.buybackTreasury}`),
+    check("chk_pump_fee_collection_policy_treasuries", sql`${table.rewardTreasury} <> ${table.buybackTreasury}`),
+  ],
+);
+
+/** A signed collection transaction is recorded before any broadcast. The
+ * signed instruction effects are unverified at insert. A future independent
+ * verifier must attest the exact Pump V2 80/20 instructions before broadcast.
+ * No worker, signer, attestor, or broadcaster uses this table yet. */
+export const pumpFeeCollectionIntents = sqliteTable(
+  "pump_fee_collection_intents",
+  {
+    id: text("id").primaryKey(),
+    launchId: text("launch_id").notNull().references(() => pumpFeeCollectionPolicies.launchId),
+    mint: text("mint").notNull(),
+    collectorSigner: text("collector_signer").notNull(),
+    rewardTreasury: text("reward_treasury").notNull(),
+    buybackTreasury: text("buyback_treasury").notNull(),
+    recentBlockhash: text("recent_blockhash").notNull(),
+    lastValidBlockHeight: integer("last_valid_block_height").notNull(),
+    historyAnchorSignature: text("history_anchor_signature").notNull(),
+    signedTransactionBase64: text("signed_transaction_base64").notNull(),
+    signedTransactionSha256: text("signed_transaction_sha256").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    instructionEffectState: text("instruction_effect_state").notNull().default("unverified"),
+    instructionEvidenceJson: text("instruction_evidence_json"),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    finalizedSlot: integer("finalized_slot"),
+    finalizedEvidenceJson: text("finalized_evidence_json"),
+    expiredObservedBlockHeight: integer("expired_observed_block_height"),
+    expiryEvidenceJson: text("expiry_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_pump_fee_collection_intent_signature").on(table.sourceSignature),
+    uniqueIndex("idx_pump_fee_collection_intent_signed_sha256").on(table.signedTransactionSha256),
+    uniqueIndex("idx_pump_fee_collection_one_unresolved").on(table.launchId)
+      .where(sql`${table.state} IN ('prepared', 'broadcast_attempted', 'held')`),
+    index("idx_pump_fee_collection_intent_launch_state").on(table.launchId, table.state),
+    check("chk_pump_fee_collection_intent_state", sql`${table.state} IN ('prepared', 'broadcast_attempted', 'held', 'finalized', 'expired')`),
+    check("chk_pump_fee_collection_effect_state", sql`${table.instructionEffectState} IN ('unverified', 'verified')`),
+    check("chk_pump_fee_collection_block_height", sql`${table.lastValidBlockHeight} > 0`),
+    check("chk_pump_fee_collection_signer", sql`${table.collectorSigner} <> ${table.rewardTreasury} AND ${table.collectorSigner} <> ${table.buybackTreasury}`),
+    check("chk_pump_fee_collection_treasuries", sql`${table.rewardTreasury} <> ${table.buybackTreasury}`),
+    check("chk_pump_fee_collection_sha256", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_pump_fee_collection_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88 AND ${table.sourceSignature} <> ${table.historyAnchorSignature}`),
   ],
 );
 

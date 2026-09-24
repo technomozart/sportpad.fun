@@ -3,6 +3,8 @@ import "server-only";
 import { env } from "cloudflare:workers";
 import { FINANCIAL_LEDGER_VERIFIED } from "@/lib/protocol/automation-safety";
 import { CHILIZ_ASSET_MIGRATION_VERIFIED } from "@/lib/protocol/chiliz-receipts";
+import { CHILIZ_FEE_FUNDING_VERIFIED } from "@/lib/protocol/chiliz-funding-gate";
+import { AUTOMATED_PUMP_FEE_COLLECTION_VERIFIED } from "@/lib/protocol/fee-collection-gate";
 import { evaluateClaimReadinessByChain } from "@/lib/protocol/claim-readiness";
 
 import {
@@ -156,7 +158,9 @@ export async function getExecutionStatus() {
     const missing = [
       ...lane.missing,
       ...(!FINANCIAL_LEDGER_VERIFIED ? ["financial-ledger verification"] : []),
+      ...(!AUTOMATED_PUMP_FEE_COLLECTION_VERIFIED ? ["unattended Pump fee collection verification"] : []),
       ...(chilizRequired && !CHILIZ_ASSET_MIGRATION_VERIFIED ? ["Chiliz V2 execution verification"] : []),
+      ...(chilizRequired && !CHILIZ_FEE_FUNDING_VERIFIED ? ["80% fee SOL to Chiliz CHZ funding verification"] : []),
     ];
     return { ready: lane.ready && missing.length === 0, missing };
   };
@@ -198,7 +202,8 @@ export async function getExecutionStatus() {
       signerProviderConfigured: execution.signerProviderConfigured,
       workerAuthenticationConfigured: execution.workerTokenConfigured,
       walletExecutionEnabled,
-      unattendedAutomation: FINANCIAL_LEDGER_VERIFIED && (chilizActive || solanaActive),
+      unattendedAutomation: managedExecutionReady && AUTOMATED_PUMP_FEE_COLLECTION_VERIFIED &&
+        (chilizActive || solanaActive),
     },
     automation: { workers: automationWorkers, chilizActive, solanaActive },
     launchReadiness,

@@ -9,6 +9,10 @@ import {
   validatePositiveAtomic,
   validatePublicWallets,
 } from "../lib/protocol/replenishment.ts";
+import {
+  inspectSolanaChzFundingOrder,
+  MAX_CHZ_FUNDING_LAMPORTS,
+} from "../lib/protocol/replenishment-swap-inspection.ts";
 import { prepareJupiterSwap } from "../lib/server/providers/jupiter-swap.ts";
 
 const LAYERZERO_BASE = "https://transfer.layerzero-api.com/v1";
@@ -43,6 +47,9 @@ function options(args) {
   validatePublicWallets(solanaWallet, chilizWallet);
   const amount = values.get("--sol-lamports") ?? values.get("--chz-atomic");
   validatePositiveAtomic(amount, "input amount");
+  if (values.has("--sol-lamports") && BigInt(amount) > MAX_CHZ_FUNDING_LAMPORTS) {
+    throw new Error(`SOL to CHZ dry-run input exceeds the ${MAX_CHZ_FUNDING_LAMPORTS} lamport per-order cap.`);
+  }
   return {
     help: false,
     mode: values.has("--sol-lamports") ? "sol_to_chz_to_chiliz" : "confirmed_chz_to_chiliz",
@@ -125,6 +132,7 @@ async function main() {
         amountAtomic: input.amount,
         taker: input.solanaWallet,
       });
+      const inspection = inspectSolanaChzFundingOrder(plan, input.solanaWallet);
       bridgeAmount = plan.minimumOutputAtomic;
       report.jupiter = {
         inputLamports: plan.inputAmountAtomic,
@@ -134,7 +142,9 @@ async function main() {
         router: plan.router,
         transactionMessageHash: plan.transactionMessageHash,
         requestId: plan.requestId,
+        inspection,
       };
+      report.blockers.push("The SOL to official Solana CHZ order is not execution-ready: fee provenance, lookup/writable accounts, and simulated on-chain balance effects require independent verification.");
     }
   } else {
     report.warning = "Provided CHZ amount is not verified against a settled on-chain balance. This command cannot sign or broadcast.";

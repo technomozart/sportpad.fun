@@ -68,6 +68,7 @@ export function SystemStatus() {
         { name: "Jupiter quotes", ...health.providers.jupiter },
       ]
     : [];
+  const workerHeartbeat = Boolean(protocol?.automation.chilizActive || protocol?.automation.solanaActive);
 
   return (
     <div className="status-grid" aria-live="polite">
@@ -86,9 +87,10 @@ export function SystemStatus() {
       <div><span className={protocol?.readiness.rewards.ready ? "healthy" : "warning"} /><strong>Reward inventory</strong><small>{protocol ? `${protocol.counts.rewardVaults} vault records and ${protocol.counts.rewardEpochs} epochs; execution ${protocol.readiness.rewards.ready ? "ready" : "paused"}` : "Loading inventory state"}</small><code>{protocol?.readiness.rewards.ready ? "READY" : "PAUSED"}</code></div>
       <div><span className={protocol?.readiness.claims.ready ? "healthy" : "warning"} /><strong>Fan Token payouts</strong><small>{protocol ? `${protocol.counts.confirmedClaims} confirmed payouts; claims ${protocol.readiness.claims.ready ? "ready" : "paused"}` : "Loading payout state"}</small><code>{protocol?.readiness.claims.ready ? "READY" : "PAUSED"}</code></div>
       <div><span className={protocol?.capabilities.treasuryObserver ? "healthy" : "neutral"} /><strong>Treasury observer</strong><small>{protocol?.capabilities.treasuryObserver ? "Finalized read-only balance checks available" : "Treasury addresses required"}</small><code>{protocol?.capabilities.treasuryObserver ? "AVAILABLE" : "LOCKED"}</code></div>
-      <div><span className={protocol?.capabilities.finalizedPumpFeeIndexer ? "healthy" : "neutral"} /><strong>Pump fee indexer</strong><small>{protocol?.capabilities.finalizedPumpFeeIndexer ? "Finalized exact 80/20 distributions are indexed" : "Read-only worker is disabled"}</small><code>{protocol?.capabilities.finalizedPumpFeeIndexer ? "ENABLED" : "LOCKED"}</code></div>
+      <div><span className={protocol?.capabilities.finalizedPumpFeeIndexer ? "healthy" : "neutral"} /><strong>Pump fee indexer</strong><small>{protocol?.capabilities.finalizedPumpFeeIndexer ? "Read-only indexing is enabled; observed events are counted above" : "Read-only worker is disabled"}</small><code>{protocol?.capabilities.finalizedPumpFeeIndexer ? "ENABLED" : "LOCKED"}</code></div>
       <div><span className={protocol?.capabilities.walletExecutionEnabled ? "healthy" : "warning"} /><strong>Wallet settlement console</strong><small>{protocol?.capabilities.walletExecutionEnabled ? "Exact Jupiter and burn intents require treasury signatures" : "Operator control plane is paused"}</small><code>{protocol?.capabilities.walletExecutionEnabled ? "ENABLED" : "PAUSED"}</code></div>
-      <div><span className={protocol?.capabilities.unattendedAutomation ? "healthy" : "neutral"} /><strong>Unattended automation</strong><small>{protocol?.capabilities.unattendedAutomation ? "A restricted worker reported recently; execution still needs separate verification" : "No automation worker heartbeat observed"}</small><code>{protocol?.capabilities.unattendedAutomation ? "HEARTBEAT" : "OFF"}</code></div>
+      <div><span className={workerHeartbeat ? "healthy" : "neutral"} /><strong>Automation worker</strong><small>{workerHeartbeat ? "A restricted worker reported recently; this does not prove funded execution" : "No recent automation worker heartbeat observed"}</small><code>{workerHeartbeat ? "HEARTBEAT" : "OFF"}</code></div>
+      <div><span className={protocol?.capabilities.unattendedAutomation ? "healthy" : "warning"} /><strong>Unattended execution</strong><small>{protocol?.capabilities.unattendedAutomation ? "Required execution controls are ready" : "End-to-end fee collection and reward execution are not verified"}</small><code>{protocol?.capabilities.unattendedAutomation ? "READY" : "PAUSED"}</code></div>
       <div><span className="warning" /><strong>Chiliz V2 reward lane</strong><small>Current V2 purchase and payout route awaits verification. A worker heartbeat is not a funded reward.</small><code>PAUSED</code></div>
     </div>
   );

@@ -97,3 +97,16 @@ test("dry-run CLI rejects any execution flag before network access", () => {
   assert.match(result.stderr, /Invalid or duplicate option: --execute/);
   assert.doesNotMatch(result.stdout, /routeDirectory/);
 });
+
+test("dry-run CLI caps the SOL leg before contacting either route provider", () => {
+  const script = new URL("../../scripts/replenish-chiliz.mjs", import.meta.url);
+  const result = spawnSync(process.execPath, [
+    "--experimental-strip-types", fileURLToPath(script),
+    "--sol-lamports", "100000001",
+    "--solana-wallet", solanaWallet,
+    "--chiliz-wallet", chilizWallet,
+  ], { encoding: "utf8", timeout: 10_000 });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /100000000 lamport per-order cap/);
+  assert.doesNotMatch(result.stdout, /routeDirectory/);
+});
