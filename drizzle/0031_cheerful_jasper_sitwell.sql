@@ -200,8 +200,6 @@ BEGIN
     signed_intent_id = NEW.id, updated_at = CURRENT_TIMESTAMP
   WHERE job_id = NEW.job_id AND state = 'available'
     AND signed_intent_id IS NULL;
-  SELECT CASE WHEN changes() = 1 THEN 1
-    ELSE RAISE(ABORT, 'chiliz_v2_purchase_credit_not_reserved') END;
 END;
 --> statement-breakpoint
 CREATE TRIGGER `trg_chiliz_v2_purchase_intent_transition` BEFORE UPDATE OF state
@@ -229,8 +227,6 @@ BEGIN
       WHEN 'broadcast_attempted' THEN NULL ELSE NEW.total_spent_wei END,
     updated_at = CURRENT_TIMESTAMP
   WHERE signed_intent_id = NEW.id AND job_id = NEW.job_id;
-  SELECT CASE WHEN changes() = 1 THEN 1
-    ELSE RAISE(ABORT, 'chiliz_v2_purchase_credit_not_synced') END;
 END;
 --> statement-breakpoint
 CREATE TRIGGER `trg_chiliz_v2_purchase_job_identity` BEFORE UPDATE OF
