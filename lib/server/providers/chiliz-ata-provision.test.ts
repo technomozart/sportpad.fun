@@ -37,7 +37,9 @@ function rpc(overrides: {
   lastValidBlockHeight?: number;
   currentHeight?: number;
   blockhashSlot?: number;
+  feeReads?: Array<{ slot: number; value: number | null }>;
 } = {}): ChzAtaProvisionReadConnection {
+  let feeReadIndex = 0;
   return {
     async getMultipleAccountsInfoAndContext(addresses: PublicKey[]) {
       assert.deepEqual(addresses.map((address) => address.toBase58()),
@@ -56,6 +58,8 @@ function rpc(overrides: {
       } };
     },
     async getFeeForMessage() {
+      const read = overrides.feeReads?.[Math.min(feeReadIndex++, overrides.feeReads.length - 1)];
+      if (read) return { context: { slot: read.slot }, value: read.value };
       return { context: { slot: 102 }, value: overrides.feeLamports ?? 5_000 };
     },
     async getBlockHeight() { return overrides.currentHeight ?? 150; },
@@ -120,4 +124,22 @@ test("rejects an RPC backend that ignores the account snapshot minimum slot", as
     configuredRewardTreasury: treasury.toBase58(),
     connection: rpc({ blockhashSlot: 99 }),
   }), /blockhash_context_invalid/);
+});
+
+test("retries a read-only fee estimate after a lagging RPC backend returns null", async () => {
+  const plan = await prepareUnsignedOfficialChzAtaProvision({
+    configuredRewardTreasury: treasury.toBase58(),
+    connection: rpc({ feeReads: [
+      { slot: 100, value: null },
+      { slot: 101, value: 5_000 },
+    ] }),
+  });
+  assert.equal(plan.estimatedNetworkFeeLamports, "5000");
+});
+
+test("fails closed when the fee RPC stays behind the blockhash slot", async () => {
+  await assert.rejects(prepareUnsignedOfficialChzAtaProvision({
+    configuredRewardTreasury: treasury.toBase58(),
+    connection: rpc({ feeReads: [{ slot: 100, value: null }] }),
+  }), /network_fee_out_of_bounds/);
 });

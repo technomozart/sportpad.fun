@@ -118,7 +118,14 @@ export async function prepareUnsignedOfficialChzAtaProvision(input: {
       unsigned.signatures.length !== 1 || unsigned.signatures[0].some((byte) => byte !== 0)) {
     fail("unsigned_transaction_invalid");
   }
-  const feeResponse = await input.connection.getFeeForMessage(message, "finalized");
+  // A different finalized RPC backend may not know this fresh blockhash yet.
+  // Retry the read-only estimate briefly; never retry a signed send here.
+  let feeResponse = await input.connection.getFeeForMessage(message, "finalized");
+  for (let attempt = 0; attempt < 4 &&
+    (feeResponse.context.slot < recent.context.slot || feeResponse.value === null); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    feeResponse = await input.connection.getFeeForMessage(message, "finalized");
+  }
   if (feeResponse.context.slot < recent.context.slot ||
       !Number.isSafeInteger(feeResponse.value) || feeResponse.value === null ||
       feeResponse.value <= 0 || BigInt(feeResponse.value) > MAX_NETWORK_FEE_LAMPORTS) {
