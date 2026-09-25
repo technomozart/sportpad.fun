@@ -80,7 +80,12 @@ export async function prepareUnsignedOfficialChzAtaProvision(input: {
   if (ataInfo !== null) fail("official_chz_ata_already_exists_or_occupied");
 
   const rent = input.connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE, "finalized");
-  const blockhash = input.connection.getLatestBlockhashAndContext("finalized");
+  // Finalized account reads and blockhash reads can hit different RPC backends.
+  // Require the blockhash backend to have reached the account snapshot slot,
+  // rather than rejecting a valid plan simply because that backend lags.
+  const blockhash = input.connection.getLatestBlockhashAndContext({
+    commitment: "finalized", minContextSlot: accountSnapshot.context.slot,
+  });
   const [rentLamports, recent] = await Promise.all([rent, blockhash]);
   if (!Number.isSafeInteger(rentLamports) || rentLamports <= 0 ||
       BigInt(rentLamports) > MAX_ATA_RENT_LAMPORTS) fail("rent_out_of_bounds");

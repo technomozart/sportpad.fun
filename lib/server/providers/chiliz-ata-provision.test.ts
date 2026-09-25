@@ -36,6 +36,7 @@ function rpc(overrides: {
   treasuryLamports?: number;
   lastValidBlockHeight?: number;
   currentHeight?: number;
+  blockhashSlot?: number;
 } = {}): ChzAtaProvisionReadConnection {
   return {
     async getMultipleAccountsInfoAndContext(addresses: PublicKey[]) {
@@ -48,8 +49,9 @@ function rpc(overrides: {
       ] };
     },
     async getMinimumBalanceForRentExemption() { return overrides.rentLamports ?? 2_039_280; },
-    async getLatestBlockhashAndContext() {
-      return { context: { slot: 101 }, value: {
+    async getLatestBlockhashAndContext(config: { commitment: string; minContextSlot: number }) {
+      assert.deepEqual(config, { commitment: "finalized", minContextSlot: 100 });
+      return { context: { slot: overrides.blockhashSlot ?? 101 }, value: {
         blockhash, lastValidBlockHeight: overrides.lastValidBlockHeight ?? 200,
       } };
     },
@@ -111,4 +113,11 @@ test("rejects an expired blockhash", async () => {
     configuredRewardTreasury: treasury.toBase58(),
     connection: rpc({ currentHeight: 200, lastValidBlockHeight: 200 }),
   }), /blockhash_expired/);
+});
+
+test("rejects an RPC backend that ignores the account snapshot minimum slot", async () => {
+  await assert.rejects(prepareUnsignedOfficialChzAtaProvision({
+    configuredRewardTreasury: treasury.toBase58(),
+    connection: rpc({ blockhashSlot: 99 }),
+  }), /blockhash_context_invalid/);
 });
