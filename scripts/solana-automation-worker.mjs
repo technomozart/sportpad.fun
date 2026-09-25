@@ -678,18 +678,44 @@ async function runOnce() {
 }
 
 await assertPublishedTreasuries();
-for (;;) {
-  const worked = await runOnce().catch((error) => {
-    process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
-    return false;
-  });
-  if (!worked) {
-    if (Date.now() - lastIdleHeartbeatAttemptAt >= IDLE_HEARTBEAT_INTERVAL_MS) {
-      lastIdleHeartbeatAttemptAt = Date.now();
-      await reportIdleHeartbeat().catch((error) => {
-        process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
-      });
+const oneShotCanaryAction = process.env.SPORTPAD_CHZ_SOLANA_CANARY_ACTION?.trim();
+if (oneShotCanaryAction) {
+  try {
+    if (oneShotCanaryAction === "ata_setup" || oneShotCanaryAction === "sol_chz_swap") {
+      if (!rewards) throw new Error("canary_reward_signer_missing");
+      const { runSolChzCanary } = await import("./chiliz-sol-chz-canary-worker.mjs");
+      const result = await runSolChzCanary({ action: oneShotCanaryAction,
+        baseUrl, workerToken, jupiterKey, connection, rewardKeypair: rewards,
+        fetcher: fetch });
+      process.stdout.write(`${new Date().toISOString()} chz_solana_canary_${result.state} ` +
+        `${result.operation} ${result.signature}\n`);
+    } else if (oneShotCanaryAction === "direct_oft_prepare_broadcast") {
+      const { readDirectOftCanaryConfig, runDirectOftCanary } =
+        await import("./chiliz-direct-oft-canary-worker.mjs");
+      await runDirectOftCanary(readDirectOftCanaryConfig());
+    } else throw new Error("canary_action_unsupported");
+  } catch (error) {
+    // Provider exceptions can contain RPC URLs and credentials. Never print them.
+    const message = error instanceof Error ? error.message : "";
+    const safe = /^(chz_solana_canary|chz_solana_signing|chz_ata_provision|sol_chz_plan|jupiter_metis_min_out)_[a-z0-9_]{1,100}$/.test(message)
+      ? message : "chz_solana_canary_failed_no_replay";
+    process.stderr.write(`${new Date().toISOString()} ${safe}\n`);
+    process.exitCode = 1;
+  }
+} else {
+  for (;;) {
+    const worked = await runOnce().catch((error) => {
+      process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
+      return false;
+    });
+    if (!worked) {
+      if (Date.now() - lastIdleHeartbeatAttemptAt >= IDLE_HEARTBEAT_INTERVAL_MS) {
+        lastIdleHeartbeatAttemptAt = Date.now();
+        await reportIdleHeartbeat().catch((error) => {
+          process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
 }

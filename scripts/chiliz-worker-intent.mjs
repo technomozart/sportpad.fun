@@ -91,6 +91,7 @@ function finalizedHeight(block) {
 /** Require the BSC-style -3 validator proof and independent canonical RPC agreement. */
 export async function waitForFinalizedChilizReceipt(intent, publicClient, secondaryClient,
   { timeoutMs = 120_000, pollMs = 5_000, now = Date.now,
+    allowReverted = false, returnProof = false,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   const verified = await verifyPersistedChilizSignedIntent(intent);
   const deadline = now() + timeoutMs;
@@ -142,7 +143,12 @@ export async function waitForFinalizedChilizReceipt(intent, publicClient, second
         finalizedBlockNumber: primaryFinalizedHeight < secondaryFinalizedHeight
           ? primaryFinalizedHeight : secondaryFinalizedHeight,
       });
-      if (result.state === "finalized_success") return receipt;
+      if (result.state === "finalized_success" ||
+          result.state === "finalized_reverted" && allowReverted) {
+        return returnProof ? { receipt,
+          finalizedBlockNumber: primaryFinalizedHeight < secondaryFinalizedHeight
+            ? primaryFinalizedHeight : secondaryFinalizedHeight } : receipt;
+      }
       if (result.state === "finalized_reverted") throw new Error("chiliz_transaction_finalized_reverted");
     }
     if (now() >= deadline) break;

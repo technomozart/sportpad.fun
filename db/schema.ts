@@ -302,6 +302,50 @@ export const chilizSolChzSwapJournal = sqliteTable(
   ],
 );
 
+/** An operator-funded, single-use Solana CHZ canary. Separate from the fee
+ * reservation ledger: it cannot consume or fabricate a launch fee share. */
+export const chilizSolChzCanaryJournal = sqliteTable(
+  "chiliz_sol_chz_canary_journal",
+  {
+    id: text("id").primaryKey(),
+    operation: text("operation").notNull(),
+    sourceWallet: text("source_wallet").notNull(),
+    outputAta: text("output_ata").notNull(),
+    inputLamports: integer("input_lamports").notNull(),
+    maximumSpendLamports: integer("maximum_spend_lamports").notNull(),
+    minimumOutputAtomic: text("minimum_output_atomic").notNull(),
+    providerRequestId: text("provider_request_id"),
+    lastValidBlockHeight: integer("last_valid_block_height").notNull(),
+    unsignedTransactionBase64: text("unsigned_transaction_base64").notNull(),
+    signedTransactionBase64: text("signed_transaction_base64").notNull(),
+    signedPlanJson: text("signed_plan_json").notNull(),
+    signedTransactionSha256: text("signed_transaction_sha256").notNull(),
+    transactionMessageHash: text("transaction_message_hash").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    finalizedSlot: integer("finalized_slot"),
+    actualSpendLamports: integer("actual_spend_lamports"),
+    actualOutputAtomic: text("actual_output_atomic"),
+    receiptEvidenceJson: text("receipt_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_sol_chz_canary_operation").on(table.operation),
+    uniqueIndex("idx_chiliz_sol_chz_canary_signature").on(table.sourceSignature),
+    uniqueIndex("idx_chiliz_sol_chz_canary_signed_sha256").on(table.signedTransactionSha256),
+    index("idx_chiliz_sol_chz_canary_state").on(table.state),
+    check("chk_chiliz_sol_chz_canary_operation", sql`${table.operation} IN ('ata_setup', 'sol_chz_swap')`),
+    check("chk_chiliz_sol_chz_canary_state", sql`${table.state} IN ('prepared', 'broadcast_unknown', 'finalized_success', 'finalized_failure')`),
+    check("chk_chiliz_sol_chz_canary_max_spend", sql`${table.maximumSpendLamports} > 0 AND ${table.maximumSpendLamports} <= 5000000`),
+    check("chk_chiliz_sol_chz_canary_input", sql`(${table.operation} = 'ata_setup' AND ${table.inputLamports} = 0 AND ${table.minimumOutputAtomic} = '0' AND ${table.providerRequestId} IS NULL) OR (${table.operation} = 'sol_chz_swap' AND ${table.inputLamports} = 1000000 AND ${table.maximumSpendLamports} BETWEEN 1000000 AND 1500000 AND ${table.minimumOutputAtomic} GLOB '[1-9]*' AND ${table.minimumOutputAtomic} NOT GLOB '*[^0-9]*' AND length(${table.minimumOutputAtomic}) <= 18 AND ${table.providerRequestId} IS NOT NULL)`),
+    check("chk_chiliz_sol_chz_canary_height", sql`${table.lastValidBlockHeight} > 0`),
+    check("chk_chiliz_sol_chz_canary_hashes", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*' AND length(${table.transactionMessageHash}) = 64 AND ${table.transactionMessageHash} NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_sol_chz_canary_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+  ],
+);
+
 /** An open batch keeps small fee shares together until Jupiter offers an
  * executable order. It is immutable once a worker leases the queued job. */
 export const rewardSwapBatches = sqliteTable(
@@ -754,6 +798,204 @@ export const chilizBridgeJournal = sqliteTable(
     check("chk_chiliz_bridge_min_destination", sql`${table.minimumDestinationWei} GLOB '[1-9]*' AND ${table.minimumDestinationWei} NOT GLOB '*[^0-9]*'`),
     check("chk_chiliz_bridge_sha256", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*'`),
     check("chk_chiliz_bridge_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+  ],
+);
+
+/** Repeatable bridge accounting, separate from the immutable one-shot canary.
+ * A transfer cannot be sealed until its exact CHZ source amount is allocated
+ * from finalized SOL->CHZ swap outputs. No worker consumes this table yet.
+ * Cross-ledger identity guards do not serialize two independent worker lanes:
+ * the legacy canary and this repeatable lane must never be armed together. */
+export const chilizBridgeTransfers = sqliteTable(
+  "chiliz_bridge_transfers",
+  {
+    id: text("id").primaryKey(),
+    sourceWallet: text("source_wallet").notNull(),
+    destinationTreasury: text("destination_treasury").notNull(),
+    sourceMint: text("source_mint").notNull(),
+    destinationChainId: integer("destination_chain_id").notNull(),
+    sourceAmountAtomic: text("source_amount_atomic").notNull(),
+    minimumDestinationWei: text("minimum_destination_wei").notNull(),
+    quoteId: text("quote_id"),
+    quoteExpiresAtMs: integer("quote_expires_at_ms"),
+    signedTransactionBase64: text("signed_transaction_base64"),
+    signedTransactionSha256: text("signed_transaction_sha256"),
+    sourceSignature: text("source_signature"),
+    state: text("state").notNull().default("collecting"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    sourceFinalizedSlot: integer("source_finalized_slot"),
+    sourceEvidenceJson: text("source_evidence_json"),
+    bridgeMessageId: text("bridge_message_id"),
+    destinationTxHash: text("destination_tx_hash"),
+    destinationFinalizedBlock: integer("destination_finalized_block"),
+    destinationReceivedWei: text("destination_received_wei"),
+    destinationEvidenceJson: text("destination_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_bridge_transfers_quote").on(table.quoteId).where(sql`${table.quoteId} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_bridge_transfers_signature").on(table.sourceSignature).where(sql`${table.sourceSignature} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_bridge_transfers_signed_sha256").on(table.signedTransactionSha256).where(sql`${table.signedTransactionSha256} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_bridge_transfers_message").on(table.bridgeMessageId).where(sql`${table.bridgeMessageId} IS NOT NULL`),
+    uniqueIndex("idx_chiliz_bridge_transfers_destination_tx").on(table.destinationTxHash).where(sql`${table.destinationTxHash} IS NOT NULL`),
+    index("idx_chiliz_bridge_transfers_state").on(table.state),
+    check("chk_chiliz_bridge_transfers_mint", sql`${table.sourceMint} = '6eftxVbSAunVEoxUWdGhPdxg5UdsJ8Wkwy5w5YFuxouw'`),
+    check("chk_chiliz_bridge_transfers_destination", sql`${table.destinationChainId} = 88888 AND length(${table.destinationTreasury}) = 42 AND substr(${table.destinationTreasury},1,2) = '0x' AND substr(${table.destinationTreasury},3) NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_bridge_transfers_source_cap", sql`${table.sourceAmountAtomic} GLOB '[1-9]*' AND ${table.sourceAmountAtomic} NOT GLOB '*[^0-9]*' AND (length(${table.sourceAmountAtomic}) < 10 OR (length(${table.sourceAmountAtomic}) = 10 AND ${table.sourceAmountAtomic} <= '1000000000'))`),
+    check("chk_chiliz_bridge_transfers_minimum", sql`${table.minimumDestinationWei} GLOB '[1-9]*' AND ${table.minimumDestinationWei} NOT GLOB '*[^0-9]*' AND length(${table.minimumDestinationWei}) <= 20`),
+    check("chk_chiliz_bridge_transfers_parity", sql`
+      length(${table.minimumDestinationWei}) > 10
+      AND substr(${table.minimumDestinationWei}, -10) = '0000000000'
+      AND (
+        length(${table.minimumDestinationWei}) > length(CAST((CAST(${table.sourceAmountAtomic} AS INTEGER) * 95 + 99) / 100 AS TEXT) || '0000000000')
+        OR (length(${table.minimumDestinationWei}) = length(CAST((CAST(${table.sourceAmountAtomic} AS INTEGER) * 95 + 99) / 100 AS TEXT) || '0000000000')
+          AND ${table.minimumDestinationWei} >= CAST((CAST(${table.sourceAmountAtomic} AS INTEGER) * 95 + 99) / 100 AS TEXT) || '0000000000')
+      )
+      AND (
+        length(${table.minimumDestinationWei}) < length(${table.sourceAmountAtomic} || '0000000000')
+        OR (length(${table.minimumDestinationWei}) = length(${table.sourceAmountAtomic} || '0000000000')
+          AND ${table.minimumDestinationWei} <= ${table.sourceAmountAtomic} || '0000000000')
+      )`),
+    check("chk_chiliz_bridge_transfers_state", sql`${table.state} IN ('collecting','prepared','broadcast_unknown','source_finalized','destination_finalized','held')`),
+  ],
+);
+
+/** Signed but unexposed OFT attempts for the repeatable bridge lane. A bridge
+ * remains collecting while attempts are quoted/requoted. Its first on-chain
+ * broadcast claim must seal and claim one attempt in an atomic D1 batch. */
+export const chilizBridgeAttempts = sqliteTable(
+  "chiliz_bridge_attempts",
+  {
+    bridgeId: text("bridge_id").notNull().references(() => chilizBridgeTransfers.id),
+    attemptSequence: integer("attempt_sequence").notNull(),
+    quoteId: text("quote_id").notNull(),
+    quoteExpiresAtMs: integer("quote_expires_at_ms").notNull(),
+    signedTransactionBase64: text("signed_transaction_base64").notNull(),
+    signedTransactionSha256: text("signed_transaction_sha256").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    planJson: text("plan_json").notNull(),
+    planSha256: text("plan_sha256").notNull(),
+    state: text("state").notNull().default("prepared"),
+    preparedAtMs: integer("prepared_at_ms").notNull(),
+    abandonedAtMs: integer("abandoned_at_ms"),
+    claimedAtMs: integer("claimed_at_ms"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.bridgeId, table.attemptSequence] }),
+    uniqueIndex("idx_chiliz_bridge_attempts_quote").on(table.quoteId),
+    uniqueIndex("idx_chiliz_bridge_attempts_signature").on(table.sourceSignature),
+    uniqueIndex("idx_chiliz_bridge_attempts_sha256").on(table.signedTransactionSha256),
+    uniqueIndex("idx_chiliz_bridge_attempts_one_prepared").on(table.bridgeId)
+      .where(sql`${table.state} = 'prepared'`),
+    check("chk_chiliz_bridge_attempts_sequence", sql`${table.attemptSequence} >= 0`),
+    check("chk_chiliz_bridge_attempts_quote", sql`length(${table.quoteId}) BETWEEN 4 AND 256 AND ${table.quoteExpiresAtMs} > ${table.preparedAtMs} AND ${table.preparedAtMs} > 0`),
+    check("chk_chiliz_bridge_attempts_signed", sql`length(${table.signedTransactionBase64}) BETWEEN 100 AND 4096 AND length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*' AND length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+    check("chk_chiliz_bridge_attempts_plan", sql`json_valid(${table.planJson}) AND json_type(${table.planJson}) = 'object' AND length(${table.planJson}) BETWEEN 100 AND 30000 AND length(${table.planSha256}) = 64 AND ${table.planSha256} NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_bridge_attempts_state", sql`(${table.state} = 'prepared' AND ${table.abandonedAtMs} IS NULL AND ${table.claimedAtMs} IS NULL) OR (${table.state} = 'abandoned_unbroadcast' AND ${table.abandonedAtMs} > ${table.quoteExpiresAtMs} AND ${table.claimedAtMs} IS NULL) OR (${table.state} = 'claimed' AND ${table.claimedAtMs} > 0 AND ${table.claimedAtMs} < ${table.quoteExpiresAtMs} AND ${table.abandonedAtMs} IS NULL)`),
+  ],
+);
+
+export const chilizBridgeAllocations = sqliteTable(
+  "chiliz_bridge_allocations",
+  {
+    id: text("id").primaryKey(),
+    bridgeId: text("bridge_id").notNull().references(() => chilizBridgeTransfers.id),
+    swapIntentId: text("swap_intent_id").notNull().references(() => chilizSolChzSwapJournal.id),
+    reservationId: text("reservation_id").notNull().references(() => chilizFeeReservations.id),
+    feeEventId: text("fee_event_id").notNull().references(() => feeEvents.id),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    swapOutputOffsetAtomic: text("swap_output_offset_atomic").notNull(),
+    amountAtomic: text("amount_atomic").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_bridge_allocations_swap_offset").on(table.swapIntentId, table.swapOutputOffsetAtomic),
+    index("idx_chiliz_bridge_allocations_bridge").on(table.bridgeId),
+    index("idx_chiliz_bridge_allocations_fee_event").on(table.feeEventId),
+    check("chk_chiliz_bridge_allocations_offset", sql`${table.swapOutputOffsetAtomic} GLOB '[0-9]*' AND ${table.swapOutputOffsetAtomic} NOT GLOB '*[^0-9]*' AND (${table.swapOutputOffsetAtomic} = '0' OR substr(${table.swapOutputOffsetAtomic},1,1) <> '0') AND length(${table.swapOutputOffsetAtomic}) <= 18`),
+    check("chk_chiliz_bridge_allocations_amount", sql`${table.amountAtomic} GLOB '[1-9]*' AND ${table.amountAtomic} NOT GLOB '*[^0-9]*' AND length(${table.amountAtomic}) <= 10`),
+  ],
+);
+
+/** Single-fee V2 purchase canary. 0031 triggers require the entire reserved SOL
+ * share to pass through one finalized swap and one finalized OFT transfer.
+ * No credit or spending authorization is seeded by the migration. */
+export const chilizV2PurchaseCredits = sqliteTable(
+  "chiliz_v2_purchase_credits",
+  {
+    id: text("id").primaryKey(),
+    bridgeId: text("bridge_id").notNull().references(() => chilizBridgeTransfers.id),
+    allocationId: text("allocation_id").notNull().references(() => chilizBridgeAllocations.id),
+    reservationId: text("reservation_id").notNull().references(() => chilizFeeReservations.id),
+    feeEventId: text("fee_event_id").notNull().references(() => feeEvents.id),
+    settlementId: text("settlement_id").notNull().references(() => settlements.id),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    jobId: text("job_id").notNull().references(() => automationJobs.id),
+    destinationTreasury: text("destination_treasury").notNull(),
+    destinationTxHash: text("destination_tx_hash").notNull(),
+    destinationReceivedWei: text("destination_received_wei").notNull(),
+    gasReserveWei: text("gas_reserve_wei").notNull(),
+    state: text("state").notNull().default("available"),
+    signedIntentId: text("signed_intent_id").references(() => chilizSignedIntents.id),
+    actualSpentWei: text("actual_spent_wei"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_v2_credit_bridge").on(table.bridgeId),
+    uniqueIndex("idx_chiliz_v2_credit_allocation").on(table.allocationId),
+    uniqueIndex("idx_chiliz_v2_credit_reservation").on(table.reservationId),
+    uniqueIndex("idx_chiliz_v2_credit_event").on(table.feeEventId),
+    uniqueIndex("idx_chiliz_v2_credit_settlement").on(table.settlementId),
+    uniqueIndex("idx_chiliz_v2_credit_job").on(table.jobId),
+    uniqueIndex("idx_chiliz_v2_credit_destination_tx").on(table.destinationTxHash),
+    uniqueIndex("idx_chiliz_v2_credit_intent").on(table.signedIntentId).where(sql`${table.signedIntentId} IS NOT NULL`),
+    check("chk_chiliz_v2_credit_state", sql`${table.state} IN ('available','prepared','broadcast_unknown','finalized_success','finalized_reverted')`),
+    check("chk_chiliz_v2_credit_received", sql`${table.destinationReceivedWei} GLOB '[1-9]*' AND ${table.destinationReceivedWei} NOT GLOB '*[^0-9]*' AND (length(${table.destinationReceivedWei}) < 19 OR (length(${table.destinationReceivedWei}) = 19 AND ${table.destinationReceivedWei} <= '9000000000000000000'))`),
+    check("chk_chiliz_v2_credit_reserve", sql`${table.gasReserveWei} GLOB '[1-9]*' AND ${table.gasReserveWei} NOT GLOB '*[^0-9]*' AND (length(${table.gasReserveWei}) < 18 OR (length(${table.gasReserveWei}) = 18 AND ${table.gasReserveWei} BETWEEN '100000000000000000' AND '1000000000000000000')) AND CAST(${table.gasReserveWei} AS INTEGER) >= 100000000000000000`),
+  ],
+);
+
+/** Isolated one-shot AFC Kayen V2 buy canary: exactly 0.01 CHZ principal,
+ * <=1 CHZ maximum gas, no launch/fee/job/bridge foreign key, no seed row. */
+export const chilizAfcV2BuyCanary = sqliteTable(
+  "chiliz_afc_v2_buy_canary",
+  {
+    id: text("id").primaryKey(),
+    treasuryAddress: text("treasury_address").notNull(),
+    fanTokenContract: text("fan_token_contract").notNull(),
+    amountInWei: text("amount_in_wei").notNull(),
+    minimumOutputAtomic: text("minimum_output_atomic").notNull(),
+    nonce: integer("nonce").notNull(),
+    deadlineEpochSeconds: integer("deadline_epoch_seconds").notNull(),
+    maximumNetworkFeeWei: text("maximum_network_fee_wei").notNull(),
+    txHash: text("tx_hash").notNull(),
+    rawTransaction: text("raw_transaction").notNull(),
+    intentJson: text("intent_json").notNull(),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    receiptStatus: text("receipt_status"),
+    receiptBlockHash: text("receipt_block_hash"),
+    receiptBlockNumber: integer("receipt_block_number"),
+    finalizedBlockNumber: integer("finalized_block_number"),
+    outputAmountAtomic: text("output_amount_atomic"),
+    receiptEvidenceJson: text("receipt_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("chk_afc_v2_buy_canary_id", sql`${table.id} = 'initial'`),
+    check("chk_afc_v2_buy_canary_token", sql`${table.fanTokenContract} = '0x76088f3ed5dc655de9295d93868ec1eec654a615'`),
+    check("chk_afc_v2_buy_canary_amount", sql`${table.amountInWei} = '10000000000000000'`),
+    check("chk_afc_v2_buy_canary_minimum", sql`${table.minimumOutputAtomic} GLOB '[1-9]*' AND ${table.minimumOutputAtomic} NOT GLOB '*[^0-9]*' AND (length(${table.minimumOutputAtomic}) > 13 OR (length(${table.minimumOutputAtomic}) = 13 AND ${table.minimumOutputAtomic} >= '1000000000000'))`),
+    check("chk_afc_v2_buy_canary_nonce", sql`${table.nonce} >= 0`),
+    check("chk_afc_v2_buy_canary_deadline", sql`${table.deadlineEpochSeconds} > 0`),
+    check("chk_afc_v2_buy_canary_gas", sql`${table.maximumNetworkFeeWei} GLOB '[1-9]*' AND ${table.maximumNetworkFeeWei} NOT GLOB '*[^0-9]*' AND (length(${table.maximumNetworkFeeWei}) < 19 OR (length(${table.maximumNetworkFeeWei}) = 19 AND ${table.maximumNetworkFeeWei} <= '1000000000000000000'))`),
+    check("chk_afc_v2_buy_canary_hash", sql`length(${table.txHash}) = 66 AND substr(${table.txHash},1,2) = '0x' AND substr(${table.txHash},3) NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_afc_v2_buy_canary_state", sql`${table.state} IN ('prepared','broadcast_attempted','finalized_success','finalized_reverted')`),
+    check("chk_afc_v2_buy_canary_state_shape", sql`(${table.state} = 'prepared' AND ${table.broadcastAttemptedAtMs} IS NULL AND ${table.receiptStatus} IS NULL AND ${table.receiptBlockHash} IS NULL AND ${table.receiptBlockNumber} IS NULL AND ${table.finalizedBlockNumber} IS NULL AND ${table.outputAmountAtomic} IS NULL AND ${table.receiptEvidenceJson} IS NULL) OR (${table.state} = 'broadcast_attempted' AND ${table.broadcastAttemptedAtMs} > 0 AND ${table.receiptStatus} IS NULL AND ${table.receiptBlockHash} IS NULL AND ${table.receiptBlockNumber} IS NULL AND ${table.finalizedBlockNumber} IS NULL AND ${table.outputAmountAtomic} IS NULL AND ${table.receiptEvidenceJson} IS NULL) OR (${table.state} IN ('finalized_success','finalized_reverted') AND ${table.broadcastAttemptedAtMs} > 0 AND ${table.receiptStatus} IN ('success','reverted') AND ${table.receiptBlockHash} IS NOT NULL AND ${table.receiptBlockNumber} > 0 AND ${table.finalizedBlockNumber} >= ${table.receiptBlockNumber} AND ${table.receiptEvidenceJson} IS NOT NULL AND ((${table.state} = 'finalized_success' AND ${table.receiptStatus} = 'success' AND ${table.outputAmountAtomic} IS NOT NULL) OR (${table.state} = 'finalized_reverted' AND ${table.receiptStatus} = 'reverted' AND ${table.outputAmountAtomic} = '0')))`),
   ],
 );
 

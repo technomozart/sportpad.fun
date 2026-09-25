@@ -643,6 +643,22 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
         : database.prepare(COMPLETE_BROADCAST_JOB_SQL).bind(job.id, txHash, `broadcasting:${workerId}`),
     database.prepare(ASSERT_ONE_ROW_CHANGED_SQL),
   ];
+  // A fee-backed Chiliz purchase may advance its Solana settlement only after
+  // the exact signed buy is finalized. Keep this ahead of settlement/vault
+  // writes in the same atomic D1 batch; a zero-row finalization rolls all of
+  // them back and never authorizes a second broadcast.
+  if (job.job_type === "chiliz_reward_purchase") {
+    if (!chilizFinalization) throw new Error("chiliz_finalized_intent_proof_missing");
+    statements.push(database.prepare(FINALIZE_CHILIZ_INTENT_SQL).bind(
+      job.id, txHash.toLowerCase(), "finalized_success", "success",
+      chilizFinalization.receiptBlockHash, chilizFinalization.receiptBlockNumber,
+      chilizFinalization.receiptBlockHash, chilizFinalization.finalizedBlockNumber,
+      chilizFinalization.gasUsed, chilizFinalization.effectiveGasPriceWei,
+      chilizFinalization.networkFeeWei, chilizFinalization.principalSpentWei,
+      chilizFinalization.totalSpentWei, JSON.stringify(chilizFinalization),
+    ));
+    statements.push(database.prepare(ASSERT_ONE_ROW_CHANGED_SQL));
+  }
   if (job.job_type === "chiliz_claim_unwrap" || job.job_type === "solana_claim_payout") {
     const claim = await database.prepare(`
       SELECT c.amount_atomic, e.launch_id, l.reward_chain, l.reward_mint, l.reward_wrapped_contract
@@ -1022,7 +1038,7 @@ async function completeJob(database: D1Database, job: AutomationRow, workerId: s
   } else {
     throw new Error("automation_job_type_invalid");
   }
-  if (job.chain === "chiliz") {
+  if (job.chain === "chiliz" && job.job_type !== "chiliz_reward_purchase") {
     if (!chilizFinalization) throw new Error("chiliz_finalized_intent_proof_missing");
     statements.push(database.prepare(FINALIZE_CHILIZ_INTENT_SQL).bind(
       job.id, txHash.toLowerCase(), "finalized_success", "success",

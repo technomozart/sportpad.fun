@@ -53,7 +53,7 @@ JUPITER_API_KEY=<server key>
 
 The corresponding public Chiliz address will need native CHZ for Kayen reward purchases and claim gas after a capped canary is approved. Chiliz migrated Fan Tokens to new 18-decimal V2 contracts in 2026. The previously configured Kayen wrapper and unwrap path pays the old token, so it must not be used. Direct V2 purchase and ERC-20 transfer code now exists, but is held by independent worker, migration, and financial gates until spend accounting, destination liquidity, and funded claims are proven.
 
-The current implementation assumes a prefunded CHZ operating treasury. It does not bridge SOL to CHZ. Even with a funded CHZ balance, purchase and claim lanes are statically held. Read-only direct V2 quotes at 1 CHZ and 100 CHZ existed for all 78 catalog assets in September 2026, but 25 showed more than 20% depth impact at 100 CHZ relative to the 1-CHZ quote. This is not proof of safe execution at the actual order size. Refill alerts, an operating buffer, size-specific route limits, verified receipts, and funded canaries are required before public volume.
+The current implementation can quote a direct Solana CHZ-to-native Chiliz CHZ bridge and construct inspected, unsigned transactions, but it does **not** automatically swap, bridge, or fund the Chiliz treasury. Even with a funded CHZ balance, purchase and claim lanes are statically held. A read-only audit on 2026-09-25 found usable-sized Kayen quotes for 41 of the 78 current V2 contracts; 37 exceeded the 20% depth-impact threshold at 100 CHZ relative to the 1-CHZ quote. These counts can change with liquidity and are not proof of safe execution at the actual order size. Refill alerts, an operating buffer, size-specific route limits, verified receipts, and funded canaries are required before public volume.
 
 ## 3. Solana Railway worker
 
@@ -95,6 +95,8 @@ Run `npm run audit:chiliz` for a dated, read-only inspection of all catalogued c
 The `scripts/replenish-chiliz.mjs` CLI now requests a Jupiter SOL-to-official-Solana-CHZ order and a direct quote from the official Solana CHZ OFT to native Chiliz CHZ. The CHZ OFT store, peer, and native adapter have been checked on both chains. On 2026-09-25, the public 80% treasury held 0.05 SOL; read-only quotes succeeded for a small Jupiter order and the direct bridge. **No swap or bridge was signed or broadcast.** These quotes are not inventory or a guarantee that a later transaction will settle.
 
 The direct OFT route uses the [official Chiliz bridge](https://bridge.chilizchain.com/) and [LayerZero Solana OFT SDK](https://docs.layerzero.network/v2/developers/solana/oft/overview). It does **not** require a production LayerZero Value Transfer API key. The legacy API remains an optional, separate route inspector only. The Chiliz worker still needs verified native CHZ inventory before it can purchase V2 Fan Tokens; the new fee reservation, swap, bridge, and receipt components are not yet connected into unattended production execution.
+
+The funded reward treasury currently has no initialized official CHZ associated token account. A separate, bounded one-time account-creation transaction must finalize before a real SOL-to-CHZ swap; its rent cannot be silently charged to an individual fee share. The existing bridge journal is a deliberately one-shot, 10-CHZ canary, not a repeatable fee-funded production ledger. Repeated transfers need per-swap allocations, unique source/destination receipts, and non-reuse accounting before public launches can rely on this route.
 
 ## 4. SPORTPAD mint registration
 

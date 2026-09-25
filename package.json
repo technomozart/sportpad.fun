@@ -26,7 +26,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "worker:automation": "node --experimental-strip-types scripts/automation-worker.mjs",
-    "worker:solana": "node scripts/solana-automation-worker.mjs"
+    "worker:solana": "node --experimental-strip-types scripts/solana-automation-worker.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -269,4 +269,16 @@ async function main() {
   }
 }
 
-await main();
+const isolatedCanaryAction = process.env.SPORTPAD_CHILIZ_CANARY_ACTION?.trim();
+if (isolatedCanaryAction === "afc_v2_buy") {
+  const { afcCanaryConfig, runAfcV2BuyCanary } = await import(
+    "./chiliz-afc-v2-buy-canary-worker.mjs");
+  const outcome = await runAfcV2BuyCanary(afcCanaryConfig(
+    process.env, account, workerToken, baseUrl));
+  process.stdout.write(`${JSON.stringify({ state: outcome.state,
+    txHash: outcome.txHash, outputAmountAtomic: outcome.outputAmountAtomic ?? null })}\n`);
+} else if (isolatedCanaryAction) {
+  throw new Error("chiliz_canary_action_invalid");
+} else {
+  await main();
+}
