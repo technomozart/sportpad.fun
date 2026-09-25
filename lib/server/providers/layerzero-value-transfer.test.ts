@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ComputeBudgetProgram, PublicKey, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import bs58 from "bs58";
 import { REPLENISHMENT_ASSETS } from "../../protocol/replenishment.ts";
 import {
   buildUntrustedChzBridgeSteps,
+  getExactChzBridgeStatus,
   quoteExactChzBridge,
   validateBuiltChzBridgeSteps,
+  validateExactChzBridgeStatus,
 } from "./layerzero-value-transfer.ts";
 
 const solanaWallet = "yCBTQi7aUfQ7ytdmdMRC1BLjntduQYniZVELRc1mvF4";
 const chilizWallet = "0x42c40359Da463b480C3Dc9e7A4D9c1ac2eF45C21";
 const now = Date.UTC(2026, 8, 24, 10);
 const apiKey = "test_key_that_must_never_appear_in_an_error";
+const sourceSignature = bs58.encode(new Uint8Array(64).fill(7));
+const destinationHash = `0x${"a".repeat(64)}`;
 const quotePayload = {
   quotes: [{
     id: "quote_123456",
@@ -152,4 +157,43 @@ test("built steps reject wrong signer, wrong chain, duplicate messages, malforme
   tx.signatures[0][0] = 1;
   signed.transaction.encoded.data = Buffer.from(tx.serialize()).toString("base64");
   await assert.rejects(validateBuiltChzBridgeSteps({ userSteps: [signed] }, quote, now), /unapproved signer/);
+});
+
+test("bridge status binds source and destination hashes but never treats provider success as an on-chain receipt", async () => {
+  const payload = { status: "SUCCEEDED", executionHistory: [
+    { event: "SENT", transaction: { chainKey: "solana", hash: sourceSignature } },
+    { event: "DELIVERED", transaction: { chainKey: "chiliz", hash: destinationHash } },
+  ] };
+  const calls: string[] = [];
+  const observed = await getExactChzBridgeStatus({ apiKey, quoteId: "quote_123456",
+    sourceSignature, fetchImpl: (async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      return json(payload);
+    }) as typeof fetch,
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(new URL(calls[0]).searchParams.get("txHash"), sourceSignature);
+  assert.equal(observed.status, "SUCCEEDED");
+  assert.equal(observed.sourceSignature, sourceSignature);
+  assert.equal(observed.destinationTransactionHash, destinationHash);
+  assert.equal(observed.destinationReceiptVerified, false);
+  assert.equal(observed.executionReady, false);
+});
+
+test("bridge status fails closed on mismatched, missing, or duplicate transfer evidence", () => {
+  const sent = { event: "SENT", transaction: { chainKey: "solana", hash: sourceSignature } };
+  const delivered = { event: "DELIVERED", transaction: { chainKey: "chiliz", hash: destinationHash } };
+  assert.throws(() => validateExactChzBridgeStatus({ status: "SUCCEEDED", executionHistory: [delivered] },
+    sourceSignature), /lacks source/);
+  assert.throws(() => validateExactChzBridgeStatus({ status: "SUCCEEDED", executionHistory: [sent, sent, delivered] },
+    sourceSignature), /changed the Solana source/);
+  assert.throws(() => validateExactChzBridgeStatus({ status: "SUCCEEDED", executionHistory: [
+    { ...sent, transaction: { chainKey: "solana", hash: bs58.encode(new Uint8Array(64).fill(8)) } }, delivered,
+  ] }, sourceSignature), /changed the Solana source/);
+  assert.throws(() => validateExactChzBridgeStatus({ status: "SUCCEEDED", executionHistory: [sent,
+    { ...delivered, transaction: { chainKey: "ethereum", hash: destinationHash } },
+  ] }, sourceSignature), /invalid Chiliz destination/);
+  assert.deepEqual(validateExactChzBridgeStatus({ status: "PROCESSING", executionHistory: [sent] },
+    sourceSignature), { status: "PROCESSING", sourceSignature,
+      destinationTransactionHash: null, destinationReceiptVerified: false, executionReady: false });
 });

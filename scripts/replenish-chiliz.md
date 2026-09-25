@@ -10,6 +10,9 @@ The codebase also has an isolated LayerZero quote/build-step inspector and a
 default-paused, one-shot bridge journal capped at 10 CHZ. The inspector returns
 no transaction bytes to sign; the journal has no seeded authorization or
 worker. These components do not make the SOL-to-CHZ route executable.
+It can now query LayerZero's transfer status for a known quote and source
+signature, binding the reported Solana and Chiliz transactions. This is only
+provider evidence: it does not prove the recipient or amount on either chain.
 
 ## Verified public route and dry run
 
@@ -43,6 +46,16 @@ the first-leg swap quote; `LAYERZERO_VT_API_KEY` is needed for an authenticated
 bridge quote. Missing keys are reported as blockers and are never printed.
 The process intentionally exits nonzero because execution is not implemented.
 
+After a separately executed bridge, its provider-reported progress can be
+inspected without loading a wallet key:
+
+```text
+node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --status-quote-id QUOTE_ID --source-signature SOLANA_SIGNATURE
+```
+
+`SUCCEEDED` is not enough to credit inventory. Source finality and destination
+treasury receipt must still be checked against independent chain RPCs.
+
 The SOL path requests a Jupiter Swap V2 order but **discards the unsigned
 transaction** after validating exact mints, amount, taker, signer set, fee
 payer, router, slippage and price impact. Its minimum CHZ output is used for
@@ -58,8 +71,10 @@ change, then a new bridge quote must be requested.
    must **not** be assumed to work for this CHZ mint. Pump's official pair
    registry identifies Solana CHZ as a Sunrise (Wormhole Labs) asset, while
    LayerZero's unauthenticated directory merely lists a reachable route. The
-   Chiliz Bridge UI documented by Chiliz only covers Ethereum and Chiliz, not
-   a Solana-to-Chiliz automation route.
+   Chiliz's newer omnichain bridge UI supports Solana, but its public docs do
+   not identify the CHZ-specific OFT program/store, native CHZ adapter, or a
+   supported automation API. The generic OFT deployment guide creates a new
+   token pair; it is not a substitute for the official native CHZ route.
 2. Connect the default-paused bridge journal to a durable replenishment ledger
    keyed to reconciled 80% fee events. Store source fee IDs, source wallet,
    source SOL amount, quote hashes, route, expiry, maximum spend, Jupiter
@@ -105,5 +120,6 @@ this read-only route discovery succeeds.
 - [LayerZero direct Solana OFT SDK](https://docs.layerzero.network/v2/developers/solana/oft/sdk)
 - [Stargate legacy API status](https://docs.stargate.finance/developers/api-docs/transfer-quotes)
 - [Chiliz Bridge scope](https://docs.chiliz.com/learn/about-bridging/using-chiliz-bridge)
+- [Chiliz omnichain bridge announcement](https://www.chiliz.com/building-on-an-omnichain-fan-token-ecosystem/)
 - [Pump's Solana CHZ mint and Sunrise provenance](https://pump.fun/docs/custom-pairs)
 - [Wormhole NTT supported networks](https://wormhole.com/docs/products/token-transfers/native-token-transfers/reference/supported-networks/)

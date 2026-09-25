@@ -14,6 +14,7 @@ import {
   MAX_CHZ_FUNDING_LAMPORTS,
 } from "../lib/protocol/replenishment-swap-inspection.ts";
 import { prepareJupiterSwap } from "../lib/server/providers/jupiter-swap.ts";
+import { getExactChzBridgeStatus } from "../lib/server/providers/layerzero-value-transfer.ts";
 
 const LAYERZERO_BASE = "https://transfer.layerzero-api.com/v1";
 
@@ -23,13 +24,14 @@ function usage() {
     "Usage:",
     "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --sol-lamports <amount> --solana-wallet <public-address> --chiliz-wallet <public-address>",
     "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --chz-atomic <confirmed-existing-balance> --solana-wallet <public-address> --chiliz-wallet <public-address>",
+    "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --status-quote-id <quote-id> --source-signature <Solana-signature>",
     "Only JUPITER_API_KEY and LAYERZERO_VT_API_KEY are read from the environment. Private keys are never read.",
   ].join("\n");
 }
 
 function options(args) {
   if (args.includes("--help")) return { help: true };
-  const permitted = new Set(["--sol-lamports", "--chz-atomic", "--solana-wallet", "--chiliz-wallet"]);
+  const permitted = new Set(["--sol-lamports", "--chz-atomic", "--solana-wallet", "--chiliz-wallet", "--status-quote-id", "--source-signature"]);
   const values = new Map();
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
@@ -40,6 +42,14 @@ function options(args) {
     values.set(key, value);
   }
   const sourceModes = [values.has("--sol-lamports"), values.has("--chz-atomic")].filter(Boolean);
+  if (values.has("--status-quote-id") || values.has("--source-signature")) {
+    if (!values.has("--status-quote-id") || !values.has("--source-signature") ||
+        sourceModes.length !== 0 || values.has("--solana-wallet") || values.has("--chiliz-wallet")) {
+      throw new Error("Bridge status requires only --status-quote-id and --source-signature.");
+    }
+    return { help: false, mode: "bridge_status", quoteId: values.get("--status-quote-id"),
+      sourceSignature: values.get("--source-signature") };
+  }
   if (sourceModes.length !== 1) throw new Error("Specify exactly one of --sol-lamports or --chz-atomic.");
   const solanaWallet = values.get("--solana-wallet");
   const chilizWallet = values.get("--chiliz-wallet");
@@ -100,6 +110,16 @@ async function main() {
   const input = options(process.argv.slice(2));
   if (input.help) {
     process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  if (input.mode === "bridge_status") {
+    const layerZeroKey = process.env.LAYERZERO_VT_API_KEY?.trim();
+    if (!layerZeroKey) throw new Error("LAYERZERO_VT_API_KEY is required for bridge status.");
+    const status = await getExactChzBridgeStatus({ apiKey: layerZeroKey,
+      quoteId: input.quoteId, sourceSignature: input.sourceSignature });
+    process.stdout.write(`${JSON.stringify({ mode: "bridge_status", ...status,
+      fundsMoved: false,
+      warning: "Provider status is not an independently verified on-chain receipt, amount, or treasury credit." }, null, 2)}\n`);
     return;
   }
   const report = {

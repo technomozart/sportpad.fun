@@ -1,4 +1,5 @@
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+import bs58 from "bs58";
 import {
   REPLENISHMENT_ASSETS,
   layerZeroQuoteRequest,
@@ -40,6 +41,15 @@ export type UntrustedSolanaBridgeStep = {
   readonly signerAddress: string;
   readonly instructionEffectsVerified: false;
   readonly blockhashFreshnessVerified: false;
+  readonly executionReady: false;
+};
+
+export type ExactChzBridgeStatus = {
+  readonly status: "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "UNKNOWN";
+  readonly sourceSignature: string | null;
+  readonly destinationTransactionHash: string | null;
+  /** A provider status is not an on-chain receipt or a treasury balance proof. */
+  readonly destinationReceiptVerified: false;
   readonly executionReady: false;
 };
 
@@ -265,6 +275,98 @@ export async function buildUntrustedChzBridgeSteps(input: {
   const payload = await jsonRequest(input.fetchImpl ?? fetch, `${API_BASE}/build-user-steps`, input.apiKey,
     { quoteId: input.quote.quoteId });
   return validateBuiltChzBridgeSteps(payload, input.quote, nowMs);
+}
+
+/**
+ * Parse LayerZero's asynchronous status without treating its report as a
+ * finalized source/destination chain receipt. A successful provider report
+ * must be followed by independent RPC checks before accounting for CHZ.
+ */
+export function validateExactChzBridgeStatus(
+  payload: unknown, expectedSourceSignature: string,
+): ExactChzBridgeStatus {
+  try {
+    const signature = bs58.decode(expectedSourceSignature);
+    if (signature.length !== 64 || bs58.encode(signature) !== expectedSourceSignature) {
+      throw new Error("invalid signature");
+    }
+  } catch {
+    throw new Error("A canonical Solana source signature is required.");
+  }
+  const response = object(payload, "LayerZero status response");
+  const status = response.status;
+  if (status !== "PENDING" && status !== "PROCESSING" && status !== "SUCCEEDED" &&
+      status !== "FAILED" && status !== "UNKNOWN") {
+    throw new Error("LayerZero returned an unknown transfer state.");
+  }
+  const history = response.executionHistory ?? [];
+  if (!Array.isArray(history) || history.length > 20) {
+    throw new Error("LayerZero returned malformed execution history.");
+  }
+  let sourceSignature: string | null = null;
+  let destinationTransactionHash: string | null = null;
+  for (const item of history) {
+    const event = object(item, "LayerZero execution event");
+    const transaction = object(event.transaction, "LayerZero execution transaction");
+    if (event.event === "SENT") {
+      if (transaction.chainKey !== REPLENISHMENT_ASSETS.solanaChainKey ||
+          transaction.hash !== expectedSourceSignature || sourceSignature !== null) {
+        throw new Error("LayerZero status changed the Solana source transaction.");
+      }
+      sourceSignature = expectedSourceSignature;
+    } else if (event.event === "DELIVERED") {
+      if (transaction.chainKey !== REPLENISHMENT_ASSETS.chilizChainKey ||
+          typeof transaction.hash !== "string" ||
+          !/^0x[0-9a-fA-F]{64}$/.test(transaction.hash) || destinationTransactionHash !== null) {
+        throw new Error("LayerZero status has an invalid Chiliz destination transaction.");
+      }
+      destinationTransactionHash = transaction.hash.toLowerCase();
+    }
+  }
+  if (status === "SUCCEEDED" && (!sourceSignature || !destinationTransactionHash)) {
+    throw new Error("LayerZero success lacks source and destination transaction evidence.");
+  }
+  return {
+    status, sourceSignature, destinationTransactionHash,
+    destinationReceiptVerified: false, executionReady: false,
+  };
+}
+
+/** Provider status is advisory; never release inventory from this call alone. */
+export async function getExactChzBridgeStatus(input: {
+  apiKey: string;
+  quoteId: string;
+  sourceSignature: string;
+  fetchImpl?: FetchLike;
+}): Promise<ExactChzBridgeStatus> {
+  key(input.apiKey);
+  if (!/^[A-Za-z0-9_-]{4,256}$/.test(input.quoteId)) {
+    throw new Error("LayerZero quote ID is invalid.");
+  }
+  const url = new URL(`${API_BASE}/status/${encodeURIComponent(input.quoteId)}`);
+  url.searchParams.set("txHash", input.sourceSignature);
+  const fetchImpl = input.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await fetchImpl(url.toString(), {
+      headers: { Accept: "application/json", "x-api-key": key(input.apiKey) },
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new Error("LayerZero status request failed.");
+  }
+  if (!response.ok) throw new Error(`LayerZero status returned HTTP ${response.status}.`);
+  const reportedLength = Number(response.headers.get("content-length") ?? "0");
+  if (reportedLength > MAX_RESPONSE_BYTES) throw new Error("LayerZero status exceeds the size limit.");
+  let body: string;
+  try { body = await response.text(); }
+  catch { throw new Error("LayerZero status could not be read."); }
+  if (body.length > MAX_RESPONSE_BYTES) throw new Error("LayerZero status exceeds the size limit.");
+  let payload: unknown;
+  try { payload = JSON.parse(body) as unknown; }
+  catch { throw new Error("LayerZero status is not JSON."); }
+  return validateExactChzBridgeStatus(payload, input.sourceSignature);
 }
 
 export const layerZeroBridgePreparationLimits = Object.freeze({
