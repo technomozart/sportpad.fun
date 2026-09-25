@@ -1,5 +1,5 @@
 import { ed25519 } from "@noble/curves/ed25519";
-import { VersionedTransaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { validateLayerZeroQuote, validatePublicWallets } from
   "../protocol/replenishment.ts";
@@ -26,9 +26,9 @@ export const PAUSE_CHILIZ_BRIDGE_POLICY_SQL = `
 
 /** Bind via chilizBridgeJournalInsertBindings. INSERT, a one-row assertion,
  * RESERVE, and another one-row assertion must share one D1 batch. No network
- * broadcast may happen until that batch commits. This journal does not verify
- * LayerZero instruction semantics; a future worker must verify the exact
- * provider-built message against the quote before using the broadcast marker. */
+ * broadcast may happen until that batch commits. The direct-OFT path checks
+ * the signed message against a locally constructed expected-message digest,
+ * but this journal does not decode or certify OFT instruction parameters. */
 export const INSERT_PREPARED_CHILIZ_BRIDGE_SQL = `
   INSERT INTO chiliz_bridge_journal
     (id, policy_key, source_chain, destination_chain_id, source_mint,
@@ -162,6 +162,81 @@ export type ChilizBridgeJournalInsert = {
   nowMs: number;
 };
 
+const DIRECT_OFT_PROGRAM = "BcRpUE1jvLvgchaYntfi2weReWVG8THCRLFy73CmxjHo";
+const DIRECT_OFT_LOOKUP_TABLE = "AokBxha6VMLLgf97B5VYHEtqztamWmYERBmmFvjuTzJB";
+const DIRECT_OFT_MAX_SOURCE_ATOMIC = 1_000_000_000n;
+const DIRECT_OFT_DESTINATION_SCALE = 10_000_000_000n;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes));
+  return Array.from(new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function validateSignedBridgeTransaction(base64: string,
+  sourceWallet: string): Promise<{
+    transaction: VersionedTransaction;
+    signedTransactionSha256: string;
+    sourceSignature: string;
+  }> {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new Error("bridge_signed_transaction_base64_invalid");
+  }
+  const serialized = Buffer.from(base64, "base64");
+  if (serialized.length < 100 || serialized.length > 1232 ||
+      serialized.toString("base64") !== base64) {
+    throw new Error("bridge_signed_transaction_size_or_encoding_invalid");
+  }
+  let transaction: VersionedTransaction;
+  try { transaction = VersionedTransaction.deserialize(serialized); }
+  catch { throw new Error("bridge_signed_transaction_invalid"); }
+  const signer = transaction.message.staticAccountKeys[0];
+  const signature = transaction.signatures[0];
+  const required = transaction.message.header.numRequiredSignatures;
+  const message = transaction.message.serialize();
+  if (!signer || signer.toBase58() !== sourceWallet ||
+      !signature || transaction.signatures.length !== required || required < 1 ||
+      !transaction.signatures.every((signed, index) =>
+        signed.length === 64 && signed.some((byte) => byte !== 0) &&
+        ed25519.verify(signed, message,
+          transaction.message.staticAccountKeys[index].toBytes()))) {
+    throw new Error("bridge_source_signature_invalid");
+  }
+  return {
+    transaction,
+    signedTransactionSha256: await sha256Hex(serialized),
+    sourceSignature: bs58.encode(signature),
+  };
+}
+
+/** These checks fence an expected OFT send transaction, but cannot prove that
+ * the OFT instruction encodes this quote's amount or destination. The caller
+ * must supply a digest of the exact message independently constructed from
+ * the official SDK quote and intended OFT send instruction. */
+function assertDirectOftMessageShape(transaction: VersionedTransaction): void {
+  const message = transaction.message;
+  if (message.header.numRequiredSignatures !== 1 || transaction.signatures.length !== 1) {
+    throw new Error("bridge_direct_oft_signer_count_invalid");
+  }
+  const lookups = message.addressTableLookups;
+  if (lookups.length > 1 || lookups.some((lookup) =>
+    lookup.accountKey.toBase58() !== DIRECT_OFT_LOOKUP_TABLE)) {
+    throw new Error("bridge_direct_oft_lookup_table_invalid");
+  }
+  let oftInstructionCount = 0;
+  for (const instruction of message.compiledInstructions) {
+    // Program IDs loaded through an ALT are deliberately not accepted: the
+    // static keys must show exactly which programs are invoked.
+    const program = message.staticAccountKeys[instruction.programIdIndex]?.toBase58();
+    if (program === DIRECT_OFT_PROGRAM) oftInstructionCount++;
+    else if (program !== ComputeBudgetProgram.programId.toBase58()) {
+      throw new Error("bridge_direct_oft_program_invalid");
+    }
+  }
+  if (oftInstructionCount !== 1) throw new Error("bridge_direct_oft_instruction_invalid");
+}
+
 function assertBridgeQuoteIdentity(payload: unknown, quoteId: string,
   sourceWallet: string, destinationTreasury: string): void {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -225,32 +300,9 @@ export async function createChilizBridgeJournalInsert(input: {
       quote.routeType !== "OFT" && quote.routeType !== "OFT_V2") {
     throw new Error("bridge_quote_mismatch");
   }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.signedTransactionBase64)) {
-    throw new Error("bridge_signed_transaction_base64_invalid");
-  }
-  const serialized = Buffer.from(input.signedTransactionBase64, "base64");
-  if (serialized.length < 100 || serialized.length > 1232 ||
-      serialized.toString("base64") !== input.signedTransactionBase64) {
-    throw new Error("bridge_signed_transaction_size_or_encoding_invalid");
-  }
-  let transaction: VersionedTransaction;
-  try { transaction = VersionedTransaction.deserialize(serialized); }
-  catch { throw new Error("bridge_signed_transaction_invalid"); }
-  const signer = transaction.message.staticAccountKeys[0];
-  const signature = transaction.signatures[0];
-  const required = transaction.message.header.numRequiredSignatures;
-  const message = transaction.message.serialize();
-  if (!signer || signer.toBase58() !== wallets.solanaWallet ||
-      !signature || transaction.signatures.length !== required || required < 1 ||
-      !transaction.signatures.every((signed, index) =>
-        signed.length === 64 && signed.some((byte) => byte !== 0) &&
-        ed25519.verify(signed, message,
-          transaction.message.staticAccountKeys[index].toBytes()))) {
-    throw new Error("bridge_source_signature_invalid");
-  }
-  const bytes = await crypto.subtle.digest("SHA-256", serialized);
-  const signedTransactionSha256 = Array.from(new Uint8Array(bytes),
-    (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const { signedTransactionSha256, sourceSignature } =
+    await validateSignedBridgeTransaction(input.signedTransactionBase64,
+      wallets.solanaWallet);
   return {
     id: input.id,
     sourceWallet: wallets.solanaWallet,
@@ -262,7 +314,77 @@ export async function createChilizBridgeJournalInsert(input: {
     routeType: quote.routeType as "OFT" | "OFT_V2",
     signedTransactionBase64: input.signedTransactionBase64,
     signedTransactionSha256,
-    sourceSignature: bs58.encode(signature),
+    sourceSignature,
+    nowMs,
+  };
+}
+
+/** Prepare a direct, on-chain-quoted OFT intent without the LayerZero Value
+ * Transfer API. `onchainQuoteDigestSha256` is the caller's digest of its
+ * verified quote snapshot; the journal cannot independently fetch that quote.
+ * `expectedMessageSha256` MUST come from a separately constructed official OFT
+ * transaction using the same quote, source amount, destination, and minimum.
+ * This helper verifies signed-byte identity and a narrow program shape, not
+ * the semantics of the OFT instruction. It does not arm or broadcast. */
+export async function createDirectOftChilizBridgeJournalInsert(input: {
+  id: string;
+  sourceWallet: string;
+  destinationTreasury: string;
+  sourceAmountAtomic: string;
+  minimumDestinationWei: string;
+  onchainQuoteDigestSha256: string;
+  quoteExpiresAtMs: number;
+  expectedMessageSha256: string;
+  signedTransactionBase64: string;
+  nowMs?: number;
+}): Promise<ChilizBridgeJournalInsert> {
+  if (!input.id || input.id.length > 128) throw new Error("bridge_id_invalid");
+  const wallets = validatePublicWallets(input.sourceWallet, input.destinationTreasury);
+  const destinationTreasury = wallets.chilizWallet.toLowerCase();
+  const nowMs = input.nowMs ?? Date.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs <= 0) throw new Error("bridge_time_invalid");
+  if (!/^[1-9][0-9]*$/.test(input.sourceAmountAtomic) ||
+      BigInt(input.sourceAmountAtomic) > DIRECT_OFT_MAX_SOURCE_ATOMIC) {
+    throw new Error("bridge_direct_oft_source_amount_invalid");
+  }
+  if (!/^[1-9][0-9]*$/.test(input.minimumDestinationWei)) {
+    throw new Error("bridge_direct_oft_minimum_destination_invalid");
+  }
+  const parityWei = BigInt(input.sourceAmountAtomic) * DIRECT_OFT_DESTINATION_SCALE;
+  const minimumWei = BigInt(input.minimumDestinationWei);
+  if (minimumWei > parityWei || minimumWei * 100n < parityWei * 95n) {
+    throw new Error("bridge_direct_oft_minimum_destination_out_of_range");
+  }
+  if (!SHA256_HEX.test(input.onchainQuoteDigestSha256)) {
+    throw new Error("bridge_direct_oft_quote_digest_invalid");
+  }
+  if (!Number.isSafeInteger(input.quoteExpiresAtMs) ||
+      input.quoteExpiresAtMs <= nowMs + 30_000 ||
+      input.quoteExpiresAtMs > nowMs + 1_800_000) {
+    throw new Error("bridge_direct_oft_quote_expiry_invalid");
+  }
+  if (!SHA256_HEX.test(input.expectedMessageSha256)) {
+    throw new Error("bridge_direct_oft_message_digest_invalid");
+  }
+  const signed = await validateSignedBridgeTransaction(input.signedTransactionBase64,
+    wallets.solanaWallet);
+  assertDirectOftMessageShape(signed.transaction);
+  const actualMessageSha256 = await sha256Hex(signed.transaction.message.serialize());
+  if (actualMessageSha256 !== input.expectedMessageSha256) {
+    throw new Error("bridge_direct_oft_message_digest_mismatch");
+  }
+  return {
+    id: input.id,
+    sourceWallet: wallets.solanaWallet,
+    destinationTreasury,
+    sourceAmountAtomic: input.sourceAmountAtomic,
+    minimumDestinationWei: input.minimumDestinationWei,
+    quoteId: `oft:${input.onchainQuoteDigestSha256}`,
+    quoteExpiresAtMs: input.quoteExpiresAtMs,
+    routeType: "OFT",
+    signedTransactionBase64: input.signedTransactionBase64,
+    signedTransactionSha256: signed.signedTransactionSha256,
+    sourceSignature: signed.sourceSignature,
     nowMs,
   };
 }

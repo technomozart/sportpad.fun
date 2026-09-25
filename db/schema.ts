@@ -215,6 +215,93 @@ export const settlements = sqliteTable(
   ],
 );
 
+/** One immutable reservation of a finalized Pump fee event's complete 80%
+ * SOL reward share for Chiliz funding. This is accounting only: a reservation
+ * never authorizes a Jupiter order, bridge transaction, or treasury spend. */
+export const chilizFeeReservations = sqliteTable(
+  "chiliz_fee_reservations",
+  {
+    id: text("id").primaryKey(),
+    feeEventId: text("fee_event_id").notNull().references(() => feeEvents.id),
+    settlementId: text("settlement_id").notNull().references(() => settlements.id),
+    launchId: text("launch_id").notNull().references(() => launchDrafts.id),
+    rewardTreasury: text("reward_treasury").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    sourceSlot: integer("source_slot").notNull(),
+    grossAmountLamports: text("gross_amount_lamports").notNull(),
+    rewardAmountLamports: text("reward_amount_lamports").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_fee_reservation_event").on(table.feeEventId),
+    uniqueIndex("idx_chiliz_fee_reservation_settlement").on(table.settlementId),
+    index("idx_chiliz_fee_reservation_launch").on(table.launchId),
+    check("chk_chiliz_fee_reservation_source_slot", sql`${table.sourceSlot} > 0`),
+    check("chk_chiliz_fee_reservation_source_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+    check("chk_chiliz_fee_reservation_gross", sql`${table.grossAmountLamports} GLOB '[1-9]*' AND ${table.grossAmountLamports} NOT GLOB '*[^0-9]*' AND length(${table.grossAmountLamports}) <= 16`),
+    check("chk_chiliz_fee_reservation_reward", sql`${table.rewardAmountLamports} GLOB '[1-9]*' AND ${table.rewardAmountLamports} NOT GLOB '*[^0-9]*' AND length(${table.rewardAmountLamports}) <= 16`),
+  ],
+);
+
+/** Sequential capped signed SOL -> official Solana CHZ orders for a reserved
+ * fee share. This journal records intents and independently checked finality;
+ * it does not authorize signing or network broadcast. */
+export const chilizSolChzSwapJournal = sqliteTable(
+  "chiliz_sol_chz_swap_journal",
+  {
+    id: text("id").primaryKey(),
+    reservationId: text("reservation_id").notNull().references(() => chilizFeeReservations.id),
+    chunkSequence: integer("chunk_sequence").notNull(),
+    attemptSequence: integer("attempt_sequence").notNull(),
+    chunkOffsetLamports: text("chunk_offset_lamports").notNull(),
+    sourceWallet: text("source_wallet").notNull(),
+    inputMint: text("input_mint").notNull(),
+    outputMint: text("output_mint").notNull(),
+    outputTokenProgram: text("output_token_program").notNull(),
+    outputAta: text("output_ata").notNull(),
+    inputAmountLamports: text("input_amount_lamports").notNull(),
+    minimumOutputAtomic: text("minimum_output_atomic").notNull(),
+    providerRequestId: text("provider_request_id").notNull(),
+    lastValidBlockHeight: integer("last_valid_block_height").notNull(),
+    unsignedTransactionBase64: text("unsigned_transaction_base64").notNull(),
+    signedTransactionBase64: text("signed_transaction_base64").notNull(),
+    signedTransactionSha256: text("signed_transaction_sha256").notNull(),
+    transactionMessageHash: text("transaction_message_hash").notNull(),
+    sourceSignature: text("source_signature").notNull(),
+    state: text("state").notNull().default("prepared"),
+    broadcastAttemptedAtMs: integer("broadcast_attempted_at_ms"),
+    expiryFinalizedBlockHeight: integer("expiry_finalized_block_height"),
+    finalizedSlot: integer("finalized_slot"),
+    sourceBalanceBeforeLamports: text("source_balance_before_lamports"),
+    sourceBalanceAfterLamports: text("source_balance_after_lamports"),
+    outputBalanceBeforeAtomic: text("output_balance_before_atomic"),
+    outputBalanceAfterAtomic: text("output_balance_after_atomic"),
+    outputAmountAtomic: text("output_amount_atomic"),
+    receiptErrorCode: text("receipt_error_code"),
+    receiptEvidenceJson: text("receipt_evidence_json"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_chiliz_sol_chz_swap_reservation_attempt").on(table.reservationId, table.chunkSequence, table.attemptSequence),
+    uniqueIndex("idx_chiliz_sol_chz_swap_successful_chunk").on(table.reservationId, table.chunkSequence).where(sql`${table.state} = 'finalized_success'`),
+    uniqueIndex("idx_chiliz_sol_chz_swap_request").on(table.providerRequestId),
+    uniqueIndex("idx_chiliz_sol_chz_swap_signature").on(table.sourceSignature),
+    uniqueIndex("idx_chiliz_sol_chz_swap_signed_sha256").on(table.signedTransactionSha256),
+    index("idx_chiliz_sol_chz_swap_state").on(table.state),
+    check("chk_chiliz_sol_chz_swap_input_mint", sql`${table.inputMint} = 'So11111111111111111111111111111111111111112'`),
+    check("chk_chiliz_sol_chz_swap_output_mint", sql`${table.outputMint} = '6eftxVbSAunVEoxUWdGhPdxg5UdsJ8Wkwy5w5YFuxouw'`),
+    check("chk_chiliz_sol_chz_swap_state", sql`${table.state} IN ('prepared', 'expired_unbroadcast', 'broadcast_unknown', 'finalized_success', 'finalized_failure')`),
+    check("chk_chiliz_sol_chz_swap_input", sql`${table.inputAmountLamports} GLOB '[1-9]*' AND ${table.inputAmountLamports} NOT GLOB '*[^0-9]*' AND (length(${table.inputAmountLamports}) < 9 OR (length(${table.inputAmountLamports}) = 9 AND ${table.inputAmountLamports} <= '100000000'))`),
+    check("chk_chiliz_sol_chz_swap_minimum", sql`${table.minimumOutputAtomic} GLOB '[1-9]*' AND ${table.minimumOutputAtomic} NOT GLOB '*[^0-9]*' AND length(${table.minimumOutputAtomic}) <= 18`),
+    check("chk_chiliz_sol_chz_swap_block_height", sql`${table.lastValidBlockHeight} > 0`),
+    check("chk_chiliz_sol_chz_swap_sha256", sql`length(${table.signedTransactionSha256}) = 64 AND ${table.signedTransactionSha256} NOT GLOB '*[^0-9a-f]*' AND length(${table.transactionMessageHash}) = 64 AND ${table.transactionMessageHash} NOT GLOB '*[^0-9a-f]*'`),
+    check("chk_chiliz_sol_chz_swap_signature", sql`length(${table.sourceSignature}) BETWEEN 64 AND 88`),
+    check("chk_chiliz_sol_chz_swap_sequence", sql`${table.chunkSequence} BETWEEN 0 AND 9999999 AND ${table.attemptSequence} BETWEEN 0 AND 2`),
+    check("chk_chiliz_sol_chz_swap_offset", sql`${table.chunkOffsetLamports} GLOB '[0-9]*' AND ${table.chunkOffsetLamports} NOT GLOB '*[^0-9]*' AND (${table.chunkOffsetLamports} = '0' OR substr(${table.chunkOffsetLamports},1,1) <> '0') AND length(${table.chunkOffsetLamports}) <= 16`),
+  ],
+);
+
 /** An open batch keeps small fee shares together until Jupiter offers an
  * executable order. It is immutable once a worker leases the queued job. */
 export const rewardSwapBatches = sqliteTable(

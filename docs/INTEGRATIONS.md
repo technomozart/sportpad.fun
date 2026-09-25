@@ -234,7 +234,7 @@ mainnet transaction caps, signer policy, monitoring, or incident response.
 
 ### Cross-chain inventory for Chiliz rewards
 
-- LayerZero Value Transfer API access.
+- The verified direct Solana CHZ OFT to native Chiliz CHZ route; no LayerZero Value Transfer API key is required for this route.
 - Production Chiliz RPC provider plus a second read-only endpoint.
 - Policy-controlled Chiliz replenisher signer with CHZ gas and strict limits.
 - A tested route, decimal conversion, destination funding, timeout policy, and

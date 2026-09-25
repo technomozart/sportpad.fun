@@ -52,6 +52,8 @@ if (!rewards && !BUYBACK_EXECUTION_SAFE) throw new Error("Buyback execution is d
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}`, "confirmed");
 const buybackWorkerId = buyback ? `solana:${buyback.publicKey.toBase58()}` : null;
 const rewardWorkerId = rewards ? `solana:${rewards.publicKey.toBase58()}` : null;
+const IDLE_HEARTBEAT_INTERVAL_MS = 60_000;
+let lastIdleHeartbeatAttemptAt = 0;
 
 async function assertPublishedTreasuries() {
   const response = await fetch(`${baseUrl}/api/protocol/status`, {
@@ -86,6 +88,18 @@ async function api(body) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `SportPad worker API returned ${response.status}.`);
   return payload;
+}
+
+async function reportIdleHeartbeat() {
+  // Presence is distinct from execution eligibility. This action does not
+  // request a lease, sign a transaction, or advertise any enabled job types.
+  await assertPublishedTreasuries();
+  const workerIds = [...new Set([rewardWorkerId, buybackWorkerId].filter(Boolean))];
+  const responses = await Promise.all(workerIds.map((workerId) =>
+    api({ action: "heartbeat", workerId })));
+  if (responses.some((response) => response.heartbeat !== true)) {
+    throw new Error("worker_heartbeat_unacknowledged");
+  }
 }
 
 async function finalizedBuybackSwap(payload, signature) {
@@ -669,5 +683,13 @@ for (;;) {
     process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
     return false;
   });
-  if (!worked) await new Promise((resolve) => setTimeout(resolve, 5_000));
+  if (!worked) {
+    if (Date.now() - lastIdleHeartbeatAttemptAt >= IDLE_HEARTBEAT_INTERVAL_MS) {
+      lastIdleHeartbeatAttemptAt = Date.now();
+      await reportIdleHeartbeat().catch((error) => {
+        process.stderr.write(`${new Date().toISOString()} ${errorCode(error)}\n`);
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+  }
 }

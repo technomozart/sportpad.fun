@@ -89,6 +89,10 @@ import { secureTokenEqual, workerUnauthorized } from "@/lib/server/workers/auth"
 
 const requestSchema = z.discriminatedUnion("action", [
   z.object({
+    action: z.literal("heartbeat"),
+    workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  }).strict(),
+  z.object({
     action: z.literal("lease"),
     workerId: z.string().regex(/^[A-Za-z0-9:_-]{3,100}$/),
     jobTypes: z.array(z.enum(["chiliz_reward_purchase", "chiliz_claim_unwrap", "solana_reward_purchase", "solana_claim_payout", "sportpad_buyback_burn"])).min(1).max(5),
@@ -2941,6 +2945,24 @@ export async function POST(request: Request) {
   let input: z.infer<typeof requestSchema>;
   try { input = requestSchema.parse(await request.json()); }
   catch { return Response.json({ error: "Invalid worker request." }, { status: 400 }); }
+  if (input.action === "heartbeat") {
+    // Liveness only: do not seed or lease work, infer an enabled lane, or
+    // touch any financial policy. The empty jobTypes list cannot satisfy a
+    // lane-specific readiness check.
+    const config = readMainnetConfig();
+    const matchesConfiguredTreasury = [config.rewardTreasury, config.buybackTreasury]
+      .some((treasury) => treasury && input.workerId === `solana:${treasury}`);
+    if (!matchesConfiguredTreasury) {
+      return Response.json({ error: "Solana worker identity is unavailable." }, { status: 409 });
+    }
+    await env.DB.prepare(`
+      INSERT INTO service_cursors (key, value, updated_at)
+      VALUES (?1, ?2, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `).bind(`automation:${input.workerId}`,
+      JSON.stringify({ jobTypes: [], observedAt: Date.now() })).run();
+    return Response.json({ heartbeat: true }, { headers: { "Cache-Control": "no-store" } });
+  }
   if (input.action === "reconcile") {
     const config = readMainnetConfig();
     const controls = await readAutomationControls(env.DB);

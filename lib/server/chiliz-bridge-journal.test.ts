@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Keypair, SystemProgram, TransactionMessage,
+import { AddressLookupTableAccount, ComputeBudgetProgram, Keypair, PublicKey,
+  SystemProgram, TransactionInstruction, TransactionMessage,
   VersionedTransaction } from "@solana/web3.js";
 import { ARM_CHILIZ_BRIDGE_POLICY_SQL,
   PAUSE_CHILIZ_BRIDGE_POLICY_SQL, INSERT_PAUSED_CHILIZ_BRIDGE_POLICY_SQL,
@@ -10,13 +12,15 @@ import { ARM_CHILIZ_BRIDGE_POLICY_SQL,
   SELECT_CHILIZ_BRIDGE_SQL, MARK_CHILIZ_BRIDGE_BROADCAST_SQL,
   HOLD_CHILIZ_BRIDGE_SQL, FINALIZE_CHILIZ_BRIDGE_SOURCE_SQL,
   FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL, chilizBridgeJournalInsertBindings,
-  createChilizBridgeJournalInsert } from "./chiliz-bridge-journal.ts";
+  createChilizBridgeJournalInsert,
+  createDirectOftChilizBridgeJournalInsert } from "./chiliz-bridge-journal.ts";
 
 const source = Keypair.generate();
 const destination = "0x42c40359da463b480c3dc9e7a4d9c1ac2ef45c21";
 const sourceAmount = "100000000"; // 1 CHZ, eight source decimals
 const minimumDestination = "990000000000000000";
 const nowMs = 1_800_000_000_000;
+const oftProgram = new PublicKey("BcRpUE1jvLvgchaYntfi2weReWVG8THCRLFy73CmxjHo");
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
@@ -53,6 +57,59 @@ async function intent() {
     quoteResponse: quoteResponse(), signedTransactionBase64: signedTransaction(), nowMs });
 }
 
+function directSignedTransaction(options: {
+  payer?: Keypair;
+  program?: PublicKey;
+  extraSigner?: Keypair;
+  lookupTableKey?: PublicKey;
+} = {}) {
+  const payer = options.payer ?? source;
+  const lookupAccount = Keypair.generate().publicKey;
+  const instruction = new TransactionInstruction({
+    programId: options.program ?? oftProgram,
+    keys: [{ pubkey: lookupAccount, isSigner: false, isWritable: false },
+      ...(options.extraSigner ? [{ pubkey: options.extraSigner.publicKey,
+        isSigner: true, isWritable: false }] : [])],
+    data: Buffer.from([1, 2, 3]),
+  });
+  const lookupTables = options.lookupTableKey ? [new AddressLookupTableAccount({
+    key: options.lookupTableKey,
+    state: { deactivationSlot: 0xffffffffffffffffn, lastExtendedSlot: 0,
+      lastExtendedSlotStartIndex: 0, authority: undefined,
+      addresses: [lookupAccount] },
+  })] : [];
+  const message = new TransactionMessage({ payerKey: payer.publicKey,
+    recentBlockhash: Keypair.generate().publicKey.toBase58(),
+    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
+      instruction],
+  }).compileToV0Message(lookupTables);
+  const tx = new VersionedTransaction(message);
+  tx.sign([payer, ...(options.extraSigner ? [options.extraSigner] : [])]);
+  return { base64: Buffer.from(tx.serialize()).toString("base64"),
+    messageSha256: createHash("sha256").update(message.serialize()).digest("hex") };
+}
+
+async function directIntent(options: {
+  signed?: ReturnType<typeof directSignedTransaction>;
+  expectedMessageSha256?: string;
+  onchainQuoteDigestSha256?: string;
+  sourceWallet?: string;
+  sourceAmountAtomic?: string;
+  minimumDestinationWei?: string;
+  quoteExpiresAtMs?: number;
+} = {}) {
+  const signed = options.signed ?? directSignedTransaction();
+  return createDirectOftChilizBridgeJournalInsert({ id: "direct_oft_1",
+    sourceWallet: options.sourceWallet ?? source.publicKey.toBase58(),
+    destinationTreasury: destination,
+    sourceAmountAtomic: options.sourceAmountAtomic ?? sourceAmount,
+    minimumDestinationWei: options.minimumDestinationWei ?? minimumDestination,
+    onchainQuoteDigestSha256: options.onchainQuoteDigestSha256 ?? "a".repeat(64),
+    quoteExpiresAtMs: options.quoteExpiresAtMs ?? nowMs + 90_000,
+    expectedMessageSha256: options.expectedMessageSha256 ?? signed.messageSha256,
+    signedTransactionBase64: signed.base64, nowMs });
+}
+
 function arm(db: DatabaseSync) {
   assert.equal(db.prepare(INSERT_PAUSED_CHILIZ_BRIDGE_POLICY_SQL)
     .run(source.publicKey.toBase58(), destination, "1000000000").changes, 1);
@@ -84,6 +141,71 @@ test("signed Solana bytes, fee payer and fresh bounded quote are validated", asy
     expectedSourceAmountAtomic: sourceAmount, quoteResponse: redirected,
     signedTransactionBase64: signedTransaction(), nowMs }),
   /bridge_quote_dstWalletAddress_mismatch/);
+});
+
+test("direct OFT intent binds a fresh quote digest and the exact signed message", async () => {
+  const prepared = await directIntent();
+  assert.equal(prepared.routeType, "OFT");
+  assert.equal(prepared.quoteId, `oft:${"a".repeat(64)}`);
+  assert.equal(prepared.sourceAmountAtomic, sourceAmount);
+  assert.equal(prepared.minimumDestinationWei, minimumDestination);
+  assert.equal(prepared.quoteExpiresAtMs, nowMs + 90_000);
+  assert.equal(prepared.signedTransactionSha256.length, 64);
+  assert.ok(prepared.sourceSignature.length >= 64);
+  await assert.rejects(() => directIntent({ expectedMessageSha256: "b".repeat(64) }),
+    /bridge_direct_oft_message_digest_mismatch/);
+  await assert.rejects(() => directIntent({ signed: directSignedTransaction({
+    payer: Keypair.generate(),
+  }) }), /bridge_source_signature_invalid/);
+  const tampered = directSignedTransaction();
+  const tamperedBytes = Buffer.from(tampered.base64, "base64");
+  tamperedBytes[5] ^= 1; // First signature byte; message digest stays unchanged.
+  await assert.rejects(() => directIntent({ signed: { ...tampered,
+    base64: tamperedBytes.toString("base64") } }), /bridge_source_signature_invalid/);
+  await assert.rejects(() => directIntent({ quoteExpiresAtMs: nowMs + 30_000 }),
+    /bridge_direct_oft_quote_expiry_invalid/);
+  await assert.rejects(() => directIntent({ minimumDestinationWei: "940000000000000000" }),
+    /bridge_direct_oft_minimum_destination_out_of_range/);
+  await assert.rejects(() => directIntent({ sourceAmountAtomic: "1000000001" }),
+    /bridge_direct_oft_source_amount_invalid/);
+  await assert.rejects(() => directIntent({ onchainQuoteDigestSha256: "not-a-digest" }),
+    /bridge_direct_oft_quote_digest_invalid/);
+});
+
+test("direct OFT intent rejects non-OFT programs, extra signers and untrusted ALTs", async () => {
+  const unrelated = directSignedTransaction({ program: SystemProgram.programId });
+  await assert.rejects(() => directIntent({ signed: unrelated }),
+    /bridge_direct_oft_program_invalid/);
+  const multisigner = directSignedTransaction({ extraSigner: Keypair.generate() });
+  await assert.rejects(() => directIntent({ signed: multisigner }),
+    /bridge_direct_oft_signer_count_invalid/);
+  const unknownLookup = directSignedTransaction({ lookupTableKey: Keypair.generate().publicKey });
+  await assert.rejects(() => directIntent({ signed: unknownLookup }),
+    /bridge_direct_oft_lookup_table_invalid/);
+  const officialLookup = directSignedTransaction({ lookupTableKey:
+    new PublicKey("AokBxha6VMLLgf97B5VYHEtqztamWmYERBmmFvjuTzJB") });
+  assert.equal((await directIntent({ signed: officialLookup })).routeType, "OFT");
+});
+
+test("direct OFT uses the existing paused, capped, immutable one-shot journal", async () => {
+  const db = fixture();
+  try {
+    const prepared = await directIntent();
+    assert.equal(db.prepare(INSERT_PREPARED_CHILIZ_BRIDGE_SQL)
+      .run(...chilizBridgeJournalInsertBindings(prepared)).changes, 0);
+    arm(db);
+    assert.equal(db.prepare(INSERT_PREPARED_CHILIZ_BRIDGE_SQL)
+      .run(...chilizBridgeJournalInsertBindings(prepared)).changes, 1);
+    assert.equal(db.prepare(RESERVE_CHILIZ_BRIDGE_POLICY_SQL)
+      .run(prepared.id).changes, 1);
+    assert.equal(db.prepare(ARM_CHILIZ_BRIDGE_POLICY_SQL).run().changes, 0);
+    assert.equal(db.prepare(INSERT_PREPARED_CHILIZ_BRIDGE_SQL)
+      .run(...chilizBridgeJournalInsertBindings(prepared)).changes, 0);
+    assert.throws(() => db.exec("UPDATE chiliz_bridge_journal SET quote_id='changed'"),
+      /chiliz_bridge_intent_immutable/);
+    assert.throws(() => db.exec("UPDATE chiliz_bridge_journal SET route_type='OFT_V2'"),
+      /chiliz_bridge_intent_immutable/);
+  } finally { db.close(); }
 });
 
 test("one-shot policy, exact addresses, amount cap, quote and signed bytes are frozen", async () => {

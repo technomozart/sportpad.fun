@@ -3,9 +3,6 @@
 // execute endpoint, build-user-steps call, or transaction broadcast path.
 import {
   REPLENISHMENT_ASSETS,
-  layerZeroQuoteRequest,
-  validateLayerZeroDiscovery,
-  validateLayerZeroQuote,
   validatePositiveAtomic,
   validatePublicWallets,
 } from "../lib/protocol/replenishment.ts";
@@ -14,9 +11,8 @@ import {
   MAX_CHZ_FUNDING_LAMPORTS,
 } from "../lib/protocol/replenishment-swap-inspection.ts";
 import { prepareJupiterSwap } from "../lib/server/providers/jupiter-swap.ts";
+import { quoteDirectChzOft } from "../lib/server/providers/chiliz-direct-oft.ts";
 import { getExactChzBridgeStatus } from "../lib/server/providers/layerzero-value-transfer.ts";
-
-const LAYERZERO_BASE = "https://transfer.layerzero-api.com/v1";
 
 function usage() {
   return [
@@ -25,7 +21,8 @@ function usage() {
     "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --sol-lamports <amount> --solana-wallet <public-address> --chiliz-wallet <public-address>",
     "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --chz-atomic <confirmed-existing-balance> --solana-wallet <public-address> --chiliz-wallet <public-address>",
     "  node --experimental-strip-types --env-file-if-exists=.env.local scripts/replenish-chiliz.mjs --status-quote-id <quote-id> --source-signature <Solana-signature>",
-    "Only JUPITER_API_KEY and LAYERZERO_VT_API_KEY are read from the environment. Private keys are never read.",
+    "Direct OFT quotes use SOLANA_RPC_URL or HELIUS_API_KEY; SOL-to-CHZ quotes also use JUPITER_API_KEY.",
+    "The legacy --status-quote-id mode alone uses LAYERZERO_VT_API_KEY. Private keys are never read.",
   ].join("\n");
 }
 
@@ -69,43 +66,6 @@ function options(args) {
   };
 }
 
-async function getJson(url, init) {
-  const response = await fetch(url, {
-    ...init,
-    headers: { Accept: "application/json", ...(init?.headers ?? {}) },
-    cache: "no-store",
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`Route provider returned HTTP ${response.status}.`);
-  try {
-    return await response.json();
-  } catch {
-    throw new Error("Route provider returned invalid JSON.");
-  }
-}
-
-async function checkDiscovery() {
-  const destinations = new URL(`${LAYERZERO_BASE}/tokens`);
-  destinations.searchParams.set("transferrableFromChainKey", REPLENISHMENT_ASSETS.solanaChainKey);
-  destinations.searchParams.set("transferrableFromTokenAddress", REPLENISHMENT_ASSETS.solanaChzMint);
-  const [chains, tokens, reachable] = await Promise.all([
-    getJson(`${LAYERZERO_BASE}/chains`),
-    getJson(`${LAYERZERO_BASE}/tokens`),
-    getJson(destinations),
-  ]);
-  return validateLayerZeroDiscovery(chains, tokens, reachable);
-}
-
-async function getLayerZeroQuote(apiKey, amount, solanaWallet, chilizWallet) {
-  const body = layerZeroQuoteRequest(amount, solanaWallet, chilizWallet);
-  const payload = await getJson(`${LAYERZERO_BASE}/quotes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-    body: JSON.stringify(body),
-  });
-  return validateLayerZeroQuote(payload, amount);
-}
-
 async function main() {
   const input = options(process.argv.slice(2));
   if (input.help) {
@@ -130,14 +90,12 @@ async function main() {
     sourceSolanaWallet: input.solanaWallet,
     destinationChilizWallet: input.chilizWallet,
     sourceChzMint: REPLENISHMENT_ASSETS.solanaChzMint,
-    routeDirectory: "checking",
+    routeDirectory: "official Chiliz direct Solana OFT to native Chiliz CHZ",
     jupiter: null,
-    layerZero: null,
+    directOft: null,
     blockers: [],
-    warning: "Quotes are indicative. The swap must settle and its actual CHZ balance must be verified before a fresh bridge quote. This command cannot sign or broadcast.",
+      warning: "Quotes are indicative. The swap must settle and its actual CHZ balance must be verified before a fresh bridge quote. This command cannot sign or broadcast.",
   };
-  await checkDiscovery();
-  report.routeDirectory = "exact Solana CHZ to native Chiliz CHZ path listed";
 
   let bridgeAmount = input.mode === "confirmed_chz_to_chiliz" ? input.amount : null;
   if (input.mode === "sol_to_chz_to_chiliz") {
@@ -170,15 +128,33 @@ async function main() {
     report.warning = "Provided CHZ amount is not verified against a settled on-chain balance. This command cannot sign or broadcast.";
   }
 
-  const layerZeroKey = process.env.LAYERZERO_VT_API_KEY?.trim();
-  if (!layerZeroKey) {
-    report.blockers.push("LAYERZERO_VT_API_KEY is absent; no executable bridge quote can be checked.");
-  } else if (!bridgeAmount) {
+  if (!bridgeAmount) {
     report.blockers.push("A valid CHZ amount is required before a bridge quote.");
   } else {
-    report.layerZero = await getLayerZeroQuote(layerZeroKey, bridgeAmount, input.solanaWallet, input.chilizWallet);
+    const heliusKey = process.env.HELIUS_API_KEY?.trim();
+    const rpcUrl = process.env.SOLANA_RPC_URL?.trim() ||
+      (heliusKey ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusKey)}` :
+        "https://api.mainnet-beta.solana.com");
+    try {
+      report.directOft = await quoteDirectChzOft({
+        amountAtomic: bridgeAmount,
+        payerSolanaWallet: input.solanaWallet,
+        destinationChilizWallet: input.chilizWallet,
+        solanaRpcUrl: rpcUrl,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown route failure";
+      // SDK errors can contain the RPC URL, including a query-string API key.
+      // Emit only a fixed public diagnostic, never arbitrary provider text.
+      const safeCode = /AccountNotFound/i.test(reason)
+        ? "payer_account_unfunded_or_missing"
+        : /InsufficientFunds|insufficient lamports/i.test(reason)
+          ? "payer_has_insufficient_sol_for_quote"
+          : "direct_oft_rpc_quote_failed";
+      report.blockers.push(`Direct OFT quote unavailable: ${safeCode}`);
+    }
     if (input.mode === "sol_to_chz_to_chiliz") {
-      report.blockers.push("The SOL to CHZ swap is not settled; the LayerZero quote is indicative only and must be refreshed after on-chain reconciliation.");
+      report.blockers.push("The SOL to CHZ swap is not settled; the direct OFT quote is indicative only and must be refreshed after on-chain reconciliation.");
     }
   }
   report.blockers.push("Live signing, broadcast, durable settlement journal, and post-bridge balance reconciliation are deliberately not implemented.");
@@ -187,6 +163,14 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${JSON.stringify({ mode: "dry_run_only", executionEnabled: false, fundsMoved: false, error: error instanceof Error ? error.message : "Unknown route-check failure." })}\n`);
+  // Provider errors may contain an RPC URL or API key. Never echo their raw
+  // message from a command that can be run with `.env.local` loaded.
+  const message = error instanceof Error ? error.message : "";
+  const safeError = message === "Invalid or duplicate option: --execute."
+    ? message
+    : /^SOL to CHZ dry-run input exceeds the [0-9]+ lamport per-order cap\.$/.test(message)
+      ? message
+      : "route_check_failed";
+  process.stderr.write(`${JSON.stringify({ mode: "dry_run_only", executionEnabled: false, fundsMoved: false, error: safeError })}\n`);
   process.exitCode = 1;
 });

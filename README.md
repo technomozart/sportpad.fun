@@ -118,18 +118,19 @@ counts, reward balances, settlement events, or match results.
 
 ## Remaining external setup
 
-The two restricted Railway workers exist, but their dedicated treasury signing
-keys have not yet been added. Adding them may start worker processes; it will
-**not** unlock launches or financial execution. The Chiliz worker currently
+The two restricted Railway workers exist and their treasury signing variables
+have been configured. Their presence does **not** unlock launches or prove
+financial execution. The Chiliz worker currently
 needs prefunded native CHZ and cannot refill itself from Solana. All 78 saved
 Chiliz reward addresses had legacy 0-decimal contracts after the official 2026
 migration, so current 18-decimal V2 contract identity and direct Kayen routes
 are being revalidated. Read-only 1-CHZ and 100-CHZ quotes exist for all 78,
 but 25 show severe depth impact at 100 CHZ; these quotes do not make rewards
-launch-ready. The quote-only
-replenishment tool still needs production LayerZero Value Transfer API access,
-validated executable routes, signing, a durable transaction journal, and
-post-bridge reconciliation. The buyback lane also needs durable swap/burn
+launch-ready. The quote-only replenishment tool now uses Chiliz's official
+direct Solana CHZ to native Chiliz CHZ OFT route, whose peers have been checked
+on both chains. This route does **not** need a LayerZero Value Transfer API
+key, but it still needs integrated signing, a durable transaction journal,
+and post-bridge reconciliation before it can move real fees. The buyback lane also needs durable swap/burn
 recovery and a funded test of the coded two-leg settlement ordering. Server-side receipt and holder-snapshot
 atomicity code now exists but still needs end-to-end funded canaries, monitoring,
 and independent security review before public funds should be routed through
