@@ -22,6 +22,8 @@ const MAX_TRANSACTION_BYTES = 1_232;
 const MAX_COMPUTE_UNITS = 600_000;
 const MAX_PRIORITY_MICROLAMPORTS = 1_000_000n;
 const MAX_OVERHEAD_LAMPORTS = 5_500_000n; // fee plus transient WSOL ATA rent.
+const MAX_FRESH_ORDER_ATTEMPTS = 3;
+const RETRYABLE_LOOKUP_SHAPE_ERROR = "sol_chz_plan_lookup_table_count_or_duplicate_invalid";
 
 export type SolChzReadConnection = Pick<Connection,
   "getMultipleAccountsInfoAndContext" | "getBlockHeight" | "simulateTransaction">;
@@ -324,15 +326,25 @@ export async function prepareUnsignedSolToChzSwap(input: {
 }): Promise<UnsignedSolToChzPlan> {
   if (!/^[1-9][0-9]*$/.test(input.inputLamports) ||
       BigInt(input.inputLamports) > MAX_CHZ_FUNDING_LAMPORTS) fail("input_cap_exceeded");
-  const plan = await prepareJupiterSwap({
-    apiKey: input.apiKey,
-    inputMint: REPLENISHMENT_ASSETS.solMint,
-    outputMint: REPLENISHMENT_ASSETS.solanaChzMint,
-    amountAtomic: input.inputLamports,
-    taker: input.sourceWallet,
-    fetcher: input.fetcher,
-  });
-  return inspectUnsignedSolToChzSwap({
-    plan, sourceWallet: input.sourceWallet, connection: input.connection,
-  });
+  for (let attempt = 1; attempt <= MAX_FRESH_ORDER_ATTEMPTS; attempt++) {
+    const plan = await prepareJupiterSwap({
+      apiKey: input.apiKey,
+      inputMint: REPLENISHMENT_ASSETS.solMint,
+      outputMint: REPLENISHMENT_ASSETS.solanaChzMint,
+      amountAtomic: input.inputLamports,
+      taker: input.sourceWallet,
+      fetcher: input.fetcher,
+    });
+    try {
+      return await inspectUnsignedSolToChzSwap({
+        plan, sourceWallet: input.sourceWallet, connection: input.connection,
+      });
+    } catch (error) {
+      // A new order may use fewer/different ALTs. Never retry a failed
+      // simulation, stale RPC snapshot, or any other inspection failure.
+      if (!(error instanceof Error) || error.message !== RETRYABLE_LOOKUP_SHAPE_ERROR ||
+          attempt === MAX_FRESH_ORDER_ATTEMPTS) throw error;
+    }
+  }
+  throw new Error("sol_chz_plan_fresh_order_attempts_exhausted");
 }

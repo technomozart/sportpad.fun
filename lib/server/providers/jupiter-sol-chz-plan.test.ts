@@ -11,7 +11,8 @@ import {
 } from "@solana/web3.js";
 import { REPLENISHMENT_ASSETS } from "../../protocol/replenishment.ts";
 import type { JupiterSwapPlan } from "./jupiter-swap.ts";
-import { inspectUnsignedSolToChzSwap, type SolChzReadConnection } from "./jupiter-sol-chz-plan.ts";
+import { inspectUnsignedSolToChzSwap, prepareUnsignedSolToChzSwap,
+  type SolChzReadConnection } from "./jupiter-sol-chz-plan.ts";
 
 const signer = Keypair.fromSeed(new Uint8Array(32).fill(9)); // test-only key.
 const source = signer.publicKey;
@@ -153,6 +154,29 @@ function rpc(overrides: {
   } as unknown as SolChzReadConnection;
 }
 
+async function duplicateLookupPlan(plan: JupiterSwapPlan): Promise<JupiterSwapPlan> {
+  const tx = VersionedTransaction.deserialize(Buffer.from(plan.transactionBase64, "base64"));
+  tx.message.addressTableLookups.push(tx.message.addressTableLookups[0]);
+  return {
+    ...plan,
+    transactionBase64: Buffer.from(tx.serialize()).toString("base64"),
+    transactionMessageHash: Buffer.from(await crypto.subtle.digest("SHA-256",
+      new Uint8Array(tx.message.serialize()))).toString("hex"),
+  };
+}
+
+function orderResponse(plan: JupiterSwapPlan): Response {
+  return Response.json({
+    inputMint: plan.inputMint, outputMint: plan.outputMint,
+    taker: source.toBase58(), inAmount: plan.inputAmountAtomic,
+    outAmount: plan.outputAmountAtomic, otherAmountThreshold: plan.minimumOutputAtomic,
+    priceImpact: plan.priceImpactPercent, swapMode: "ExactIn", slippageBps: 100,
+    router: "metis", gasless: false, signatureFeePayer: source.toBase58(),
+    transaction: plan.transactionBase64, requestId: plan.requestId,
+    lastValidBlockHeight: plan.lastValidBlockHeight,
+  });
+}
+
 test("unsigned SOL to official CHZ plan resolves ALT and verifies simulated deltas", async () => {
   const { plan } = await fixture();
   const result = await inspectUnsignedSolToChzSwap({ plan, sourceWallet: source.toBase58(), connection: rpc() });
@@ -203,4 +227,41 @@ test("swap also rejects a writable treasury Token-2022 account", async () => {
   await assert.rejects(inspectUnsignedSolToChzSwap({
     plan, sourceWallet: source.toBase58(), connection: rpc({ extraAccounts }),
   }));
+});
+
+test("fresh Jupiter order retries an over-limit or duplicate ALT shape and accepts a valid replacement", async () => {
+  const { plan } = await fixture();
+  const invalid = await duplicateLookupPlan(plan);
+  let orders = 0;
+  const result = await prepareUnsignedSolToChzSwap({
+    apiKey: "test-only", inputLamports: inputLamports.toString(),
+    sourceWallet: source.toBase58(), connection: rpc(),
+    fetcher: async () => orderResponse(++orders === 1 ? invalid : plan),
+  });
+  assert.equal(orders, 2);
+  assert.deepEqual(result.lookupTableAddresses, [altAddress.toBase58()]);
+  assert.equal(result.transactionMessageHash, plan.transactionMessageHash);
+});
+
+test("fresh Jupiter order retries the exact ALT-shape error at most three times", async () => {
+  const { plan } = await fixture();
+  const invalid = await duplicateLookupPlan(plan);
+  let orders = 0;
+  await assert.rejects(prepareUnsignedSolToChzSwap({
+    apiKey: "test-only", inputLamports: inputLamports.toString(),
+    sourceWallet: source.toBase58(), connection: rpc(),
+    fetcher: async () => { orders++; return orderResponse(invalid); },
+  }), /sol_chz_plan_lookup_table_count_or_duplicate_invalid/);
+  assert.equal(orders, 3);
+});
+
+test("fresh Jupiter order does not retry any other inspection error", async () => {
+  const { plan } = await fixture();
+  let orders = 0;
+  await assert.rejects(prepareUnsignedSolToChzSwap({
+    apiKey: "test-only", inputLamports: inputLamports.toString(),
+    sourceWallet: source.toBase58(), connection: rpc({ outputMissing: true }),
+    fetcher: async () => { orders++; return orderResponse(plan); },
+  }), /sol_chz_plan_output_account_missing_or_executable/);
+  assert.equal(orders, 1);
 });
