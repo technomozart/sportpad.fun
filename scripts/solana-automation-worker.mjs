@@ -677,8 +677,26 @@ async function runOnce() {
   return false;
 }
 
+async function holdAfterCanaryPreSignRejection() {
+  // Metis minimum-output verification runs before signing, journaling, or
+  // broadcasting. Keep this worker alive without retrying the canary while
+  // its Railway action remains enabled. Presence heartbeats lease no jobs.
+  process.stderr.write(`${new Date().toISOString()} chz_solana_canary_pre_sign_blocked_idle\n`);
+  for (;;) {
+    await reportIdleHeartbeat().catch(() => {
+      // Do not print provider errors: they may include credentials or URLs.
+      process.stderr.write(`${new Date().toISOString()} chz_solana_canary_idle_heartbeat_failed\n`);
+    });
+    await new Promise((resolve) => setTimeout(resolve, IDLE_HEARTBEAT_INTERVAL_MS));
+  }
+}
+
 await assertPublishedTreasuries();
-const oneShotCanaryAction = process.env.SPORTPAD_CHZ_SOLANA_CANARY_ACTION?.trim();
+const configuredCanaryAction = process.env.SPORTPAD_CHZ_SOLANA_CANARY_ACTION?.trim();
+const oneShotCanaryAction = (configuredCanaryAction === "ata_setup" ||
+  configuredCanaryAction === "sol_chz_swap") &&
+  process.env.SPORTPAD_CHZ_SOLANA_CANARY_WORKER_ENABLED !== "true"
+  ? undefined : configuredCanaryAction;
 if (oneShotCanaryAction) {
   try {
     if (oneShotCanaryAction === "ata_setup" || oneShotCanaryAction === "sol_chz_swap") {
@@ -700,7 +718,14 @@ if (oneShotCanaryAction) {
     const safe = /^(chz_solana_canary|chz_solana_signing|chz_ata_provision|sol_chz_plan|jupiter_metis_min_out)_[a-z0-9_]{1,100}$/.test(message)
       ? message : "chz_solana_canary_failed_no_replay";
     process.stderr.write(`${new Date().toISOString()} ${safe}\n`);
-    process.exitCode = 1;
+    if (oneShotCanaryAction === "sol_chz_swap" &&
+        /^jupiter_metis_min_out_[a-z0-9_]{1,100}$/.test(message)) {
+      // Only this verifier prefix is known to originate before a signature
+      // exists. Never classify an ambiguous send/finality error as pre-sign.
+      await holdAfterCanaryPreSignRejection();
+    } else {
+      process.exitCode = 1;
+    }
   }
 } else {
   for (;;) {
