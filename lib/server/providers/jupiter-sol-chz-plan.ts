@@ -13,6 +13,7 @@ import { REPLENISHMENT_ASSETS } from "../../protocol/replenishment.ts";
 import { inspectSolanaChzFundingOrder, MAX_CHZ_FUNDING_LAMPORTS } from
   "../../protocol/replenishment-swap-inspection.ts";
 import { prepareJupiterSwap, type JupiterSwapPlan } from "./jupiter-swap.ts";
+import { prepareJupiterV1CanarySwap } from "./jupiter-v1-canary-swap.ts";
 
 const METIS_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 const CHZ_MINT = new PublicKey(REPLENISHMENT_ASSETS.solanaChzMint);
@@ -332,11 +333,14 @@ export async function prepareUnsignedSolToChzSwap(input: {
   sourceWallet: string;
   connection: SolChzReadConnection;
   fetcher?: typeof fetch;
+  /** Temporary one-shot canary fallback; omitted means the normal V2 order API. */
+  swapProvider?: "one_shot_v1_canary";
 }): Promise<UnsignedSolToChzPlan> {
   if (!/^[1-9][0-9]*$/.test(input.inputLamports) ||
       BigInt(input.inputLamports) > MAX_CHZ_FUNDING_LAMPORTS) fail("input_cap_exceeded");
   for (let attempt = 1; attempt <= MAX_FRESH_ORDER_ATTEMPTS; attempt++) {
-    const plan = await prepareJupiterSwap({
+    const plan = await (input.swapProvider === "one_shot_v1_canary" ?
+      prepareJupiterV1CanarySwap : prepareJupiterSwap)({
       apiKey: input.apiKey,
       inputMint: REPLENISHMENT_ASSETS.solMint,
       outputMint: REPLENISHMENT_ASSETS.solanaChzMint,

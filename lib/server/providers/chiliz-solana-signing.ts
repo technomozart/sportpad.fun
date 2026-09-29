@@ -166,6 +166,8 @@ export async function prepareAndSignSolToChzSwap(input: {
   connection: SolChzReadConnection;
   signer: SolanaMessageSigner;
   fetcher?: typeof fetch;
+  /** Temporary one-shot canary fallback; omitted means the normal V2 order API. */
+  swapProvider?: "one_shot_v1_canary";
 }): Promise<SignedSolanaPlan<UnsignedSolToChzPlan>> {
   if (input.signer.publicKey.toBase58() !== input.configuredRewardTreasury) {
     fail("signer_not_configured_reward_treasury");
@@ -176,6 +178,7 @@ export async function prepareAndSignSolToChzSwap(input: {
     sourceWallet: input.configuredRewardTreasury,
     connection: input.connection,
     fetcher: input.fetcher,
+    swapProvider: input.swapProvider,
   });
   if (plan.sourceWallet !== input.configuredRewardTreasury ||
       plan.inputAmountAtomic !== input.inputLamports || plan.executionReady !== false) {

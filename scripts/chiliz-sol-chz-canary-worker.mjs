@@ -60,7 +60,8 @@ export async function runSolChzCanary(config) {
       connection: config.connection, signer })
     : await prepareAndSignSolToChzSwap({ configuredRewardTreasury: rewardTreasury,
       connection: config.connection, signer, apiKey: config.jupiterKey,
-      inputLamports: ONE_SHOT_SWAP_LAMPORTS });
+      inputLamports: ONE_SHOT_SWAP_LAMPORTS,
+      swapProvider: "one_shot_v1_canary" });
   if (action === "sol_chz_swap" &&
       BigInt(signed.plan.simulatedSolDebitLamports) > 1_500_000n) {
     fail("simulated_sol_debit_exceeds_1p5m");
