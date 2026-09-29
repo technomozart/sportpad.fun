@@ -272,8 +272,17 @@ export async function inspectUnsignedSolToChzSwap(input: {
     accounts: { encoding: "base64", addresses: [sourceWallet, outputAta.toBase58(), wrappedSolAta.toBase58()] },
   });
   if (simulation.context.slot < writableInfo.context.slot || simulation.value.err !== null ||
-      !simulation.value.accounts || simulation.value.accounts.length !== 3 ||
-      simulation.value.accounts[2] !== null) fail("simulation_failed_or_wrapped_sol_left_open");
+      !simulation.value.accounts || simulation.value.accounts.length !== 3) {
+    fail("simulation_failed_or_wrapped_sol_left_open");
+  }
+  // A closed account referenced by the transaction can remain in the RPC
+  // simulation snapshot as a zero-lamport, system-owned placeholder.
+  if (simulation.value.accounts[2] !== null) {
+    const wrappedAfter = simulatedAccountAt(simulation.value.accounts, 2, "simulated_wrapped_sol");
+    if (wrappedAfter.executable !== false || wrappedAfter.lamports !== 0 ||
+        wrappedAfter.data.length !== 0 ||
+        !wrappedAfter.owner.equals(SystemProgram.programId)) fail("wrapped_sol_left_open");
+  }
   const simulatedSource = simulatedAccountAt(simulation.value.accounts, 0, "simulated_source");
   const simulatedOutput = simulatedAccountAt(simulation.value.accounts, 1, "simulated_output");
   if (!simulatedSource.owner.equals(SystemProgram.programId) ||

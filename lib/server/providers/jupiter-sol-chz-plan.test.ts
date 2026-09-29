@@ -8,6 +8,7 @@ import {
   AddressLookupTableAccount, AddressLookupTableProgram, ComputeBudgetProgram,
   Keypair, PublicKey, SystemProgram, TransactionInstruction,
   TransactionMessage, VersionedTransaction, type AccountInfo,
+  type SimulatedTransactionAccountInfo,
 } from "@solana/web3.js";
 import { REPLENISHMENT_ASSETS } from "../../protocol/replenishment.ts";
 import type { JupiterSwapPlan } from "./jupiter-swap.ts";
@@ -114,6 +115,7 @@ function rpc(overrides: {
   simulatedChzCredit?: bigint;
   extraAccounts?: Map<string, AccountInfo<Buffer>>;
   inactiveAlt?: boolean;
+  simulatedWrappedSolAccount?: SimulatedTransactionAccountInfo;
 } = {}): SolChzReadConnection {
   const extras = overrides.extraAccounts ?? new Map();
   const lookup = lookupData([outputAta, wrappedSolAta, ...[...extras.keys()].map((key) => new PublicKey(key))]);
@@ -145,7 +147,7 @@ function rpc(overrides: {
               data: ["", "base64"] },
             { owner: TOKEN_PROGRAM_ID.toBase58(), executable: false, lamports: 1_000_000,
               data: [Buffer.from(output).toString("base64"), "base64"] },
-            null,
+            overrides.simulatedWrappedSolAccount ?? null,
           ],
           unitsConsumed: 300_000,
         },
@@ -189,6 +191,42 @@ test("unsigned SOL to official CHZ plan resolves ALT and verifies simulated delt
   assert.equal(result.simulatedChzCreditAtomic, chzOutput.toString());
   assert.equal(result.transactionMessageHash, plan.transactionMessageHash);
   assert.equal(result.executionReady, false);
+});
+
+test("swap accepts a closed WSOL account placeholder in the simulation snapshot", async () => {
+  const { plan } = await fixture();
+  const result = await inspectUnsignedSolToChzSwap({
+    plan, sourceWallet: source.toBase58(),
+    connection: rpc({ simulatedWrappedSolAccount: {
+      owner: SystemProgram.programId.toBase58(), executable: false,
+      lamports: 0, data: ["", "base64"],
+    } }),
+  });
+  assert.equal(result.simulatedSolDebitLamports, "10100000");
+  assert.equal(result.simulatedChzCreditAtomic, chzOutput.toString());
+});
+
+test("swap rejects a WSOL account that remains open after simulation", async () => {
+  const { plan } = await fixture();
+  await assert.rejects(inspectUnsignedSolToChzSwap({
+    plan, sourceWallet: source.toBase58(),
+    connection: rpc({ simulatedWrappedSolAccount: {
+      owner: TOKEN_PROGRAM_ID.toBase58(), executable: false,
+      lamports: 2_039_280,
+      data: [Buffer.from(tokenData(NATIVE_MINT, source, 0n)).toString("base64"), "base64"],
+    } }),
+  }), /sol_chz_plan_wrapped_sol_left_open/);
+});
+
+test("swap rejects a funded system-owned WSOL placeholder", async () => {
+  const { plan } = await fixture();
+  await assert.rejects(inspectUnsignedSolToChzSwap({
+    plan, sourceWallet: source.toBase58(),
+    connection: rpc({ simulatedWrappedSolAccount: {
+      owner: SystemProgram.programId.toBase58(), executable: false,
+      lamports: 1, data: ["", "base64"],
+    } }),
+  }), /sol_chz_plan_wrapped_sol_left_open/);
 });
 
 test("fee-backed swap rejects a missing output CHZ ATA", async () => {
