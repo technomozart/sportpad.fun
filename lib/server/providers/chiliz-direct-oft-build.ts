@@ -142,14 +142,35 @@ export function assertExactDirectOftSendInstruction(input: {
   if (signers.length !== 1 || signers[0].pubkey.toBase58() !== input.payer) {
     throw new Error("Direct OFT send requires an unexpected signer.");
   }
-  for (const [address, writable] of [
-    [input.sourceAta, true], [input.escrow, true],
-    [DIRECT_CHZ_OFT.solanaMint, false], [DIRECT_CHZ_OFT.solanaStore, false],
+  // The SDK includes a second, read-only OFT store in its remaining CPI
+  // accounts. Check canonical positions first: accepting any matching account
+  // anywhere would permit a substituted source/escrow padded by an alias.
+  for (const [index, address, signer, writable] of [
+    [0, input.payer, true, false],
+    [2, DIRECT_CHZ_OFT.solanaStore, false, true],
+    [3, input.sourceAta, false, true],
+    [4, input.escrow, false, true],
+    [5, DIRECT_CHZ_OFT.solanaMint, false, true],
+    [6, TOKEN_PROGRAM_ID.toBase58(), false, false],
+    [8, DIRECT_CHZ_OFT.solanaProgram, false, false],
   ] as const) {
-    const matches = ix.keys.filter((key) => key.pubkey.toBase58() === address);
-    if (matches.length !== 1 || (writable && !matches[0].isWritable)) {
-      throw new Error("Direct OFT send changed a pinned token or store account.");
+    const key = ix.keys[index];
+    if (!key || key.pubkey.toBase58() !== address ||
+        key.isSigner !== signer || key.isWritable !== writable) {
+      throw new Error("Direct OFT send changed a canonical account.");
     }
+  }
+  for (const address of [input.sourceAta, input.escrow, DIRECT_CHZ_OFT.solanaMint]) {
+    if (ix.keys.filter((key) => key.pubkey.toBase58() === address).length !== 1) {
+      throw new Error("Direct OFT send repeated a pinned token account.");
+    }
+  }
+  const storeAliases = ix.keys.map((key, index) => ({ key, index }))
+    .filter(({ key }) => key.pubkey.toBase58() === DIRECT_CHZ_OFT.solanaStore);
+  if (storeAliases.length !== 2 || storeAliases[0].index !== 2 ||
+      storeAliases[1].index < 9 || storeAliases[1].key.isSigner ||
+      storeAliases[1].key.isWritable) {
+    throw new Error("Direct OFT send changed the store account alias.");
   }
 }
 

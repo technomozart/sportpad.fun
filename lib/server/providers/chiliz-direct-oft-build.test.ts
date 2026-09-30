@@ -28,6 +28,7 @@ const to = Buffer.from(padHex(destination, { size: 32 }).slice(2), "hex");
 function sendInstruction(overrides: {
   dstEid?: number; to?: Uint8Array; amountLd?: bigint; minAmountLd?: bigint;
   nativeFee?: bigint; programId?: string; signer?: string;
+  canonicalStore?: string; trailingStore?: string;
 } = {}): TransactionInstruction {
   const data = oft.instructions.getSendInstructionDataSerializer().serialize({
     dstEid: overrides.dstEid ?? DIRECT_CHZ_OFT.chilizEid,
@@ -43,10 +44,16 @@ function sendInstruction(overrides: {
     programId: new PublicKey(overrides.programId ?? DIRECT_CHZ_OFT.solanaProgram),
     keys: [
       { pubkey: new PublicKey(overrides.signer ?? payer), isSigner: true, isWritable: false },
+      { pubkey: new PublicKey("7njW8bPCxEapcpLMePnUZb4AsPcrHkAudV24pMSeVBxK"), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(overrides.canonicalStore ?? DIRECT_CHZ_OFT.solanaStore), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(sourceAta), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(escrow), isSigner: false, isWritable: true },
       { pubkey: new PublicKey(DIRECT_CHZ_OFT.solanaMint), isSigner: false, isWritable: true },
-      { pubkey: new PublicKey(DIRECT_CHZ_OFT.solanaStore), isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey("5kmNdm5b5DAMNdjz9TwmMsZ6YBRem9hMk6PdQoSf6F7F"), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(DIRECT_CHZ_OFT.solanaProgram), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey("76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6"), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(overrides.trailingStore ?? DIRECT_CHZ_OFT.solanaStore), isSigner: false, isWritable: false },
     ],
     data: Buffer.from(data),
   });
@@ -165,4 +172,14 @@ test("receive minimum is bounded and exact send instruction is decoded", () => {
     instruction: sendInstruction(), payer, sourceAta, escrow, destination,
     amountAtomic, minimumAtomic, options, messagingFeeLamports: nativeFee.toString(),
   }));
+  assert.throws(() => assertExactDirectOftSendInstruction({
+    instruction: sendInstruction({ canonicalStore: TOKEN_PROGRAM_ID.toBase58() }),
+    payer, sourceAta, escrow, destination, amountAtomic, minimumAtomic, options,
+    messagingFeeLamports: nativeFee.toString(),
+  }), /canonical account/);
+  assert.throws(() => assertExactDirectOftSendInstruction({
+    instruction: sendInstruction({ trailingStore: TOKEN_PROGRAM_ID.toBase58() }),
+    payer, sourceAta, escrow, destination, amountAtomic, minimumAtomic, options,
+    messagingFeeLamports: nativeFee.toString(),
+  }), /store account alias/);
 });
