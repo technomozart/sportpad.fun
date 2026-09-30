@@ -267,7 +267,8 @@ test("broadcast is a one-way marker; ambiguity remains held without a new send",
       /chiliz_bridge_state_(transition|shape)/);
     assert.equal(db.prepare(PAUSE_CHILIZ_BRIDGE_POLICY_SQL).run().changes, 1);
     assert.equal(db.prepare(ARM_CHILIZ_BRIDGE_POLICY_SQL).run().changes, 0);
-    assert.equal(db.prepare(SELECT_CHILIZ_BRIDGE_SQL).get(prepared.id), undefined);
+    assert.equal(db.prepare(SELECT_CHILIZ_BRIDGE_SQL)
+      .get(prepared.id)?.state, "held");
   } finally { db.close(); }
 });
 
@@ -300,20 +301,20 @@ test("only matching source and destination proofs progress a held transaction", 
     const destinationProof = JSON.stringify({ finalized: true, chainId: 88888,
       bridgeMessageId: messageId, destinationTreasury: destination,
       destinationAsset: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      transactionHash: txHash, finalizedBlock: 9000,
+      transactionHash: txHash, finalizedBlock: "9000",
       receivedWei: minimumDestination });
     assert.equal(db.prepare(FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL)
-      .run(prepared.id, messageId, txHash, 9000,
+      .run(prepared.id, messageId, txHash, "9000",
         "980000000000000000", destinationProof).changes, 0);
     assert.equal(db.prepare(FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL)
-      .run(prepared.id, messageId, txHash, 9000,
+      .run(prepared.id, messageId, txHash, "9000",
         minimumDestination,
         `${destinationProof.slice(0, -1)},"destinationTreasury":"0x1111111111111111111111111111111111111111"}`).changes, 0);
     assert.equal(db.prepare(FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL)
-      .run(prepared.id, messageId, txHash, 9000,
+      .run(prepared.id, messageId, txHash, "9000",
         minimumDestination, destinationProof).changes, 1);
     assert.equal(db.prepare(FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL)
-      .run(prepared.id, messageId, txHash, 9000,
+      .run(prepared.id, messageId, txHash, "9000",
         minimumDestination, destinationProof).changes, 0);
     assert.equal(db.prepare(SELECT_CHILIZ_BRIDGE_SQL)
       .get(prepared.id)?.state, "destination_finalized");

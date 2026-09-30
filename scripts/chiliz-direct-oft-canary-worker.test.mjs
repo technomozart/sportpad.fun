@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keypair } from "@solana/web3.js";
+import { createHash } from "node:crypto";
 import { DIRECT_CHZ_OFT } from "../lib/server/providers/chiliz-direct-oft.ts";
 import {
   createDirectOftCanaryJournalClient, readDirectOftCanaryConfig,
@@ -22,7 +23,7 @@ const plan = {
   sourceLookupTable: DIRECT_CHZ_OFT.solanaAddressLookupTable,
   destinationEid: DIRECT_CHZ_OFT.chilizEid,
   destinationAdapter: DIRECT_CHZ_OFT.chilizNativeAdapter,
-  sourceAmountAtomic: "1000000000", minimumDestinationWei: "9900000000000000000",
+  sourceAmountAtomic: "700000000", minimumDestinationWei: "6650000000000000000",
   messagingFeeLamports: "345783",
   onchainQuoteDigestSha256: quoteHash, expectedMessageSha256: "c".repeat(64),
   quoteExpiresAtMs: Date.now() + 120_000,
@@ -56,6 +57,8 @@ function row(state = "prepared") {
     signedTransactionBase64: Buffer.alloc(120, 1).toString("base64"),
     sourceSignature, state,
     broadcastAttemptedAtMs: state === "prepared" ? null : Date.now(),
+    plan, planSha256: createHash("sha256")
+      .update(JSON.stringify(plan)).digest("hex"),
   };
 }
 
@@ -119,11 +122,17 @@ test("private API client never follows redirect or exposes token in URL", async 
     calls.push({ url, init });
     const input = JSON.parse(init.body);
     return Response.json(input.action === "load" ? { journal: row() } :
-      { changedRows: 1, journal: row("broadcast_attempted") });
+      input.action === "reconcile" ? {
+        state: "destination_finalized", sourceSignature,
+        bridgeMessageId: `0x${"d".repeat(64)}`,
+        destinationTxHash: `0x${"e".repeat(64)}`,
+        receivedWei: plan.minimumDestinationWei,
+      } : { changedRows: 1, journal: row("broadcast_attempted") });
   });
   await client.load();
   await client.claim(sourceSignature, signedHash);
-  assert.equal(calls.length, 2);
+  await client.reconcile();
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].url, "https://sportpad.fun/api/internal/workers/chiliz-bridge");
   assert.equal(calls[0].init.redirect, "error");
   assert.equal(calls[0].init.headers.Authorization, "Bearer test-worker-token");
@@ -131,6 +140,10 @@ test("private API client never follows redirect or exposes token in URL", async 
     action: "claim_broadcast", id: "oft-canary-1",
     workerId: `solana:${sourceWallet}`, sourceSignature,
     signedTransactionSha256: signedHash,
+  });
+  assert.deepEqual(JSON.parse(calls[2].init.body), {
+    action: "reconcile", id: "oft-canary-1",
+    workerId: `solana:${sourceWallet}`,
   });
 });
 
@@ -179,44 +192,89 @@ test("an attempted or mismatched journal cannot re-enter broadcast", async () =>
 
 test("reconcile mode performs no claim or broadcast", async () => {
   const config = readDirectOftCanaryConfig({ ...source,
-    SPORTPAD_DIRECT_OFT_CANARY_MODE: "reconcile" });
+    SPORTPAD_DIRECT_OFT_CANARY_MODE: "reconcile",
+    SPORTPAD_DIRECT_OFT_CANARY_PLAN_JSON: undefined,
+    SPORTPAD_DIRECT_OFT_CANARY_SIGNED_TX_SHA256: undefined });
   const result = await runDirectOftCanary(config, {
     api: { load: async () => row("broadcast_attempted"),
-      claim: async () => { throw Error("claim should not be called"); } },
-    reconcileImpl: async () => ({ verified: true }),
+      claim: async () => { throw Error("claim should not be called"); },
+      reconcile: async () => ({ sourceSignature,
+        destinationTxHash: `0x${"e".repeat(64)}` }) },
     broadcastImpl: async () => { throw Error("send should not be called"); },
   });
   assert.equal(result.state, "delivered");
+  assert.equal(result.sourceSignature, sourceSignature);
+});
+
+test("restart after attempted broadcast only reconciles from durable plan", async () => {
+  const config = readDirectOftCanaryConfig({ ...source,
+    SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
+    SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: undefined,
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: undefined,
+    SOLANA_REWARD_VAULT_PRIVATE_KEY: JSON.stringify([...sourceSigner.secretKey]),
+    SPORTPAD_DIRECT_OFT_CANARY_PLAN_JSON: undefined,
+    SPORTPAD_DIRECT_OFT_CANARY_SIGNED_TX_SHA256: undefined,
+  });
+  let sent = false;
+  const result = await runDirectOftCanary(config, {
+    api: { probe: async () => row("broadcast_attempted"),
+      load: async () => row("broadcast_attempted"),
+      claim: async () => { sent = true; },
+      reconcile: async () => ({ sourceSignature,
+        destinationTxHash: `0x${"e".repeat(64)}` }) },
+    buildPlanImpl: async () => { sent = true; },
+    signImpl: async () => { sent = true; },
+    broadcastImpl: async () => { sent = true; },
+  });
+  assert.equal(result.state, "delivered");
+  assert.equal(sent, false);
+});
+
+test("delivery proof commits destination finalization through the private API", async () => {
+  const config = readDirectOftCanaryConfig(source);
+  let reconciliations = 0;
+  const result = await runDirectOftCanary(config, {
+    api: { load: async () => row(),
+      reconcile: async () => { reconciliations++;
+        return { sourceSignature, destinationTxHash: `0x${"e".repeat(64)}` }; } },
+    rpc: { getBalance: async () => 50_000_000 },
+    broadcastImpl: async () => ({ state: "delivered" }),
+  });
+  assert.equal(result.state, "delivered");
+  assert.equal(reconciliations, 1);
 });
 
 test("fresh sign mode persists exact signed bytes before any claim or send", async () => {
   const freshConfig = readDirectOftCanaryConfig({ ...source,
     SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
     SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: plan.sourceAmountAtomic,
-    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "990000000",
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "665000000",
     SOLANA_REWARD_VAULT_PRIVATE_KEY:
       JSON.stringify([...sourceSigner.secretKey]),
     SPORTPAD_DIRECT_OFT_CANARY_PLAN_JSON: undefined,
     SPORTPAD_DIRECT_OFT_CANARY_SIGNED_TX_SHA256: undefined,
   });
   const events = [];
+  const freshPlan = { ...plan, minimumReceiveAtomic: "665000000" };
+  const freshRow = (state = "prepared") => ({ ...row(state), plan: freshPlan,
+    planSha256: createHash("sha256").update(JSON.stringify(freshPlan)).digest("hex") });
   const result = await runDirectOftCanary(freshConfig, {
     api: {
       probe: async () => { events.push("probe"); return null; },
       inspectFinalizedSwap: async () => { events.push("inspect");
         return { operation: "sol_chz_swap", state: "finalized_success",
-          sourceWallet, signature: "swap-signature", actualOutputAtomic: "1000000000" }; },
+          sourceWallet, signature: "swap-signature", actualOutputAtomic: "700000000" }; },
       prepare: async (built, signedBase64) => {
         events.push("prepare");
         assert.equal(built.sourceWallet, sourceWallet);
         assert.equal(signedBase64, row().signedTransactionBase64);
-        return row();
+        return freshRow();
       },
-      load: async () => { events.push("load"); return row(); },
+      load: async () => { events.push("load"); return freshRow(); },
       claim: async () => { events.push("claim");
-        return { changedRows: 1, journal: row("broadcast_attempted") }; },
+        return { changedRows: 1, journal: freshRow("broadcast_attempted") }; },
     },
-    buildPlanImpl: async () => ({ ...plan, minimumReceiveAtomic: "990000000" }),
+    buildPlanImpl: async () => freshPlan,
     signImpl: async ({ signer, intent }) => {
       events.push("sign");
       assert.equal(signer.publicKey, sourceWallet);
@@ -240,7 +298,7 @@ test("wrong reward secret never prepares or sends", async () => {
   const freshConfig = readDirectOftCanaryConfig({ ...source,
     SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
     SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: plan.sourceAmountAtomic,
-    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "990000000",
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "665000000",
     SOLANA_REWARD_VAULT_PRIVATE_KEY:
       JSON.stringify([...Keypair.generate().secretKey]),
   });
@@ -256,13 +314,13 @@ test("restart with a reserved intent never re-signs or broadcasts", async () => 
   const freshConfig = readDirectOftCanaryConfig({ ...source,
     SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
     SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: plan.sourceAmountAtomic,
-    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "990000000",
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "665000000",
     SOLANA_REWARD_VAULT_PRIVATE_KEY:
       JSON.stringify([...sourceSigner.secretKey]),
   });
   let touched = false;
   await assert.rejects(runDirectOftCanary(freshConfig, {
-    api: { probe: async () => row("broadcast_attempted") },
+    api: { probe: async () => row("prepared") },
     buildPlanImpl: async () => { touched = true; },
     signImpl: async () => { touched = true; },
     broadcastImpl: async () => { touched = true; },
@@ -274,7 +332,7 @@ test("fresh preparation requires finalized swap output and bounded fee before si
   const freshConfig = readDirectOftCanaryConfig({ ...source,
     SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
     SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: plan.sourceAmountAtomic,
-    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "990000000",
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: "665000000",
     SOLANA_REWARD_VAULT_PRIVATE_KEY: JSON.stringify([...sourceSigner.secretKey]),
   });
   let touched = false;
@@ -282,7 +340,7 @@ test("fresh preparation requires finalized swap output and bounded fee before si
     api: { probe: async () => null,
       inspectFinalizedSwap: async () => ({ operation: "sol_chz_swap",
         state: "broadcast_unknown", sourceWallet,
-        signature: "swap", actualOutputAtomic: "1000000000" }) },
+        signature: "swap", actualOutputAtomic: "700000000" }) },
     buildPlanImpl: async () => { touched = true; },
   }), /swap_output_insufficient/);
   assert.equal(touched, false);
@@ -290,7 +348,7 @@ test("fresh preparation requires finalized swap output and bounded fee before si
     api: { probe: async () => null,
       inspectFinalizedSwap: async () => ({ operation: "sol_chz_swap",
         state: "finalized_success", sourceWallet,
-        signature: "swap", actualOutputAtomic: "999999999" }) },
+        signature: "swap", actualOutputAtomic: "699999999" }) },
     buildPlanImpl: async () => { touched = true; },
   }), /swap_output_insufficient/);
   assert.equal(touched, false);
@@ -298,12 +356,40 @@ test("fresh preparation requires finalized swap output and bounded fee before si
     api: { probe: async () => null,
       inspectFinalizedSwap: async () => ({ operation: "sol_chz_swap",
         state: "finalized_success", sourceWallet,
-        signature: "swap", actualOutputAtomic: "1000000000" }) },
-    buildPlanImpl: async () => ({ ...plan, minimumReceiveAtomic: "990000000",
+        signature: "swap", actualOutputAtomic: "700000000" }) },
+    buildPlanImpl: async () => ({ ...plan, minimumReceiveAtomic: "665000000",
       messagingFeeLamports: "500001" }),
     signImpl: async () => { touched = true; },
   }), /fresh_plan_invalid/);
   assert.equal(touched, false);
+});
+
+test("default bridge amount rounds finalized swap output down to 4–7 whole CHZ", async () => {
+  const config = readDirectOftCanaryConfig({ ...source,
+    SPORTPAD_DIRECT_OFT_CANARY_MODE: "prepare_broadcast",
+    SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC: undefined,
+    SPORTPAD_DIRECT_OFT_CANARY_MINIMUM_RECEIVE_ATOMIC: undefined,
+    SOLANA_REWARD_VAULT_PRIVATE_KEY: JSON.stringify([...sourceSigner.secretKey]),
+  });
+  let request;
+  await assert.rejects(runDirectOftCanary(config, {
+    api: { probe: async () => null,
+      inspectFinalizedSwap: async () => ({ operation: "sol_chz_swap",
+        state: "finalized_success", sourceWallet, signature: "swap",
+        actualOutputAtomic: "620000000" }) },
+    buildPlanImpl: async (value) => { request = value; throw Error("test_stop"); },
+  }), /test_stop/);
+  assert.equal(request.amountAtomic, "600000000");
+  assert.equal(request.minimumReceiveAtomic, "570000000");
+  request = null;
+  await assert.rejects(runDirectOftCanary(config, {
+    api: { probe: async () => null,
+      inspectFinalizedSwap: async () => ({ operation: "sol_chz_swap",
+        state: "finalized_success", sourceWallet, signature: "swap",
+        actualOutputAtomic: "399999999" }) },
+    buildPlanImpl: async (value) => { request = value; },
+  }), /swap_output_insufficient/);
+  assert.equal(request, null);
 });
 
 test("broadcast refuses insufficient SOL reserve before any claim", async () => {

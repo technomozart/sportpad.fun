@@ -5,9 +5,9 @@ import bs58 from "bs58";
 import { getAddress } from "viem";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import {
   broadcastDirectOftChilizOnce,
-  reconcileClaimedDirectOftBroadcast,
 } from "../lib/server/providers/chiliz-direct-oft-broadcast.ts";
 import { DIRECT_CHZ_OFT } from "../lib/server/providers/chiliz-direct-oft.ts";
 import { buildUnsignedDirectOftChzTransfer } from
@@ -86,6 +86,8 @@ export function readDirectOftCanaryConfig(source = process.env) {
   let plan = null;
   let amountAtomic = null;
   let minimumReceiveAtomic = null;
+  const amountIsDefault = mode === "prepare_broadcast" &&
+    !source.SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC?.trim();
   if (mode === "prepare_broadcast") {
     amountAtomic = source.SPORTPAD_DIRECT_OFT_CANARY_AMOUNT_ATOMIC?.trim() ||
       CANARY_AMOUNT_ATOMIC;
@@ -99,11 +101,15 @@ export function readDirectOftCanaryConfig(source = process.env) {
       fail("direct_oft_canary_amount_invalid");
     }
   } else {
-    signedTransactionSha256 = required(source,
-      "SPORTPAD_DIRECT_OFT_CANARY_SIGNED_TX_SHA256");
-    if (!SHA256.test(signedTransactionSha256)) fail("direct_oft_canary_signed_hash_invalid");
-    try { plan = JSON.parse(required(source, "SPORTPAD_DIRECT_OFT_CANARY_PLAN_JSON")); }
-    catch { fail("direct_oft_canary_plan_invalid"); }
+    signedTransactionSha256 = source.SPORTPAD_DIRECT_OFT_CANARY_SIGNED_TX_SHA256?.trim() || null;
+    if (signedTransactionSha256 !== null && !SHA256.test(signedTransactionSha256)) {
+      fail("direct_oft_canary_signed_hash_invalid");
+    }
+    const manualPlan = source.SPORTPAD_DIRECT_OFT_CANARY_PLAN_JSON?.trim();
+    if (manualPlan) {
+      try { plan = JSON.parse(manualPlan); }
+      catch { fail("direct_oft_canary_plan_invalid"); }
+    }
   }
   if (plan !== null && (!plan || typeof plan !== "object" || Array.isArray(plan) ||
       plan.sourceWallet !== sourceWallet ||
@@ -152,6 +158,7 @@ export function readDirectOftCanaryConfig(source = process.env) {
     workerToken: required(source, "SPORTPAD_WORKER_TOKEN"), id,
     sourceWallet, destinationTreasury, signedTransactionSha256, plan,
     amountAtomic, minimumReceiveAtomic, rewardSecret,
+    amountIsDefault,
     solanaRpcUrl, primaryChilizRpcUrl, secondaryChilizRpcUrl });
 }
 
@@ -165,7 +172,7 @@ export function createDirectOftCanaryJournalClient(config, fetchImpl = fetch) {
           Authorization: `Bearer ${config.workerToken}` },
         body: JSON.stringify({ ...body, id: config.id,
           workerId: `solana:${config.sourceWallet}` }),
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(body.action === "reconcile" ? 90_000 : 20_000),
       });
     } catch { fail("direct_oft_canary_api_unavailable"); }
     let result;
@@ -221,6 +228,17 @@ export function createDirectOftCanaryJournalClient(config, fetchImpl = fetch) {
       }
       return result.journal;
     },
+    async reconcile() {
+      const result = await call({ action: "reconcile" });
+      if (result.state !== "destination_finalized" ||
+          typeof result.sourceSignature !== "string" ||
+          typeof result.bridgeMessageId !== "string" ||
+          typeof result.destinationTxHash !== "string" ||
+          !POSITIVE.test(result.receivedWei ?? "")) {
+        fail("direct_oft_canary_reconciliation_invalid");
+      }
+      return result;
+    },
     async claim(sourceSignature, signedTransactionSha256) {
       const result = await call({ action: "claim_broadcast", sourceSignature,
         signedTransactionSha256 });
@@ -256,6 +274,17 @@ function rewardSigner(config) {
 }
 
 function assertJournalMatchesConfig(row, config) {
+  const plan = config.plan ?? row?.plan;
+  const planJson = JSON.stringify(row?.plan);
+  if (!plan || typeof planJson !== "string" || planJson.length > 30_000 ||
+      !SHA256.test(row?.planSha256 ?? "") ||
+      createHash("sha256").update(planJson).digest("hex") !== row.planSha256 ||
+      (config.plan && createHash("sha256")
+        .update(JSON.stringify(config.plan)).digest("hex") !== row.planSha256) ||
+      !POSITIVE.test(plan.messagingFeeLamports ?? "") ||
+      BigInt(plan.messagingFeeLamports) > MAX_CANARY_MESSAGING_FEE_LAMPORTS) {
+    fail("direct_oft_canary_persisted_plan_invalid");
+  }
   if (!row || typeof row !== "object" || row.id !== config.id ||
       row.policyKey !== "initial" || row.routeType !== "OFT" ||
       row.sourceChain !== "solana" || row.destinationChainId !== 88_888 ||
@@ -263,15 +292,17 @@ function assertJournalMatchesConfig(row, config) {
       row.destinationAsset !== "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ||
       row.sourceWallet !== config.sourceWallet ||
       row.destinationTreasury !== config.destinationTreasury ||
-      row.sourceAmountAtomic !== config.plan.sourceAmountAtomic ||
-      row.minimumDestinationWei !== config.plan.minimumDestinationWei ||
-      row.quoteId !== `oft:${config.plan.onchainQuoteDigestSha256}` ||
-      row.quoteExpiresAtMs !== config.plan.quoteExpiresAtMs ||
-      row.signedTransactionSha256 !== config.signedTransactionSha256 ||
+      row.sourceAmountAtomic !== plan.sourceAmountAtomic ||
+      row.minimumDestinationWei !== plan.minimumDestinationWei ||
+      row.quoteId !== `oft:${plan.onchainQuoteDigestSha256}` ||
+      row.quoteExpiresAtMs !== plan.quoteExpiresAtMs ||
+      (config.signedTransactionSha256 &&
+        row.signedTransactionSha256 !== config.signedTransactionSha256) ||
       typeof row.signedTransactionBase64 !== "string" ||
       typeof row.sourceSignature !== "string") {
     fail("direct_oft_canary_journal_identity_invalid");
   }
+  return plan;
 }
 
 function assertFinalizedSwapOutput(journal, config) {
@@ -279,10 +310,20 @@ function assertFinalizedSwapOutput(journal, config) {
       journal.state !== "finalized_success" ||
       journal.sourceWallet !== config.sourceWallet ||
       typeof journal.signature !== "string" || !journal.signature ||
-      !POSITIVE.test(journal.actualOutputAtomic ?? "") ||
-      BigInt(journal.actualOutputAtomic) < BigInt(config.amountAtomic)) {
+      typeof journal.actualOutputAtomic !== "string" ||
+      !POSITIVE.test(journal.actualOutputAtomic)) {
     fail("direct_oft_canary_swap_output_insufficient");
   }
+  const output = BigInt(journal.actualOutputAtomic);
+  const amount = config.amountIsDefault && output < BigInt(config.amountAtomic) ?
+    (output / 100_000_000n) * 100_000_000n : BigInt(config.amountAtomic);
+  if (amount < 400_000_000n || amount > 700_000_000n || output < amount) {
+    fail("direct_oft_canary_swap_output_insufficient");
+  }
+  const minimum = config.amountIsDefault ? amount * 95n / 100n :
+    BigInt(config.minimumReceiveAtomic);
+  return { amountAtomic: amount.toString(),
+    minimumReceiveAtomic: minimum.toString() };
 }
 
 async function assertSolanaReserve(rpc, sourceWallet, messagingFeeLamports) {
@@ -301,28 +342,34 @@ async function assertSolanaReserve(rpc, sourceWallet, messagingFeeLamports) {
 }
 
 /**
- * Run once only. A signed row must already be reserved in D1. The local plan
- * and independent signed-tx hash must be retained by the operator from that
- * same preparation; never derive them from the API response. The provider
- * independently rechecks the signed message before the atomic claim.
+ * Run the one-shot preparation or recover its persisted journal. The provider
+ * rechecks the signed message before the atomic claim, and recovery asks the
+ * private API to independently verify delivery before finalizing D1.
  */
 export async function runDirectOftCanary(config, deps = {}) {
   const api = deps.api ?? createDirectOftCanaryJournalClient(config, deps.fetchImpl);
   if (config.mode === "prepare_broadcast") {
     // A restart with a previously reserved ID must not even re-sign a fresh
     // blockhash. Only read-only reconciliation may follow an unknown outcome.
-    if (await api.probe() !== null) fail("direct_oft_canary_already_reserved");
+    const prior = await api.probe();
+    if (prior !== null) {
+      if (["broadcast_attempted", "source_finalized",
+        "destination_finalized", "held"].includes(prior.state)) {
+        return runDirectOftCanary({ ...config, mode: "reconcile" }, { ...deps, api });
+      }
+      fail("direct_oft_canary_already_reserved");
+    }
     const signer = rewardSigner(config);
-    assertFinalizedSwapOutput(await api.inspectFinalizedSwap(), config);
+    const sourceAmount = assertFinalizedSwapOutput(await api.inspectFinalizedSwap(), config);
     const plan = await (deps.buildPlanImpl ?? buildUnsignedDirectOftChzTransfer)({
-      amountAtomic: config.amountAtomic,
-      minimumReceiveAtomic: config.minimumReceiveAtomic,
+      amountAtomic: sourceAmount.amountAtomic,
+      minimumReceiveAtomic: sourceAmount.minimumReceiveAtomic,
       payerSolanaWallet: config.sourceWallet,
       destinationChilizWallet: config.destinationTreasury,
       solanaRpcUrl: config.solanaRpcUrl,
     });
-    if (plan.sourceAmountAtomic !== config.amountAtomic ||
-        plan.minimumReceiveAtomic !== config.minimumReceiveAtomic ||
+    if (plan.sourceAmountAtomic !== sourceAmount.amountAtomic ||
+        plan.minimumReceiveAtomic !== sourceAmount.minimumReceiveAtomic ||
         !POSITIVE.test(plan.messagingFeeLamports ?? "") ||
         BigInt(plan.messagingFeeLamports) > MAX_CANARY_MESSAGING_FEE_LAMPORTS) {
       fail("direct_oft_canary_fresh_plan_invalid");
@@ -333,14 +380,14 @@ export async function runDirectOftCanary(config, deps = {}) {
       id: config.id, plan,
       intent: { sourceWallet: config.sourceWallet,
         destinationTreasury: config.destinationTreasury,
-        sourceAmountAtomic: config.amountAtomic,
+        sourceAmountAtomic: sourceAmount.amountAtomic,
         minimumDestinationWei: plan.minimumDestinationWei,
         quoteId: `oft:${plan.onchainQuoteDigestSha256}` },
       signer, solanaRpcUrl: config.solanaRpcUrl,
       fetchImpl: deps.fetchImpl,
     });
     const prepared = await api.prepare(plan, signed.signedTransactionBase64);
-    const preparedConfig = { ...config, mode: "broadcast", plan,
+    const preparedConfig = { ...config, ...sourceAmount, mode: "broadcast", plan,
       signedTransactionSha256: signed.signedTransactionSha256 };
     assertJournalMatchesConfig(prepared, preparedConfig);
     if (prepared.state !== "prepared" ||
@@ -351,22 +398,22 @@ export async function runDirectOftCanary(config, deps = {}) {
     return runDirectOftCanary(preparedConfig, { ...deps, api });
   }
   const row = await api.load();
-  assertJournalMatchesConfig(row, config);
+  const plan = assertJournalMatchesConfig(row, config);
   if (config.mode === "reconcile") {
-    if (!["broadcast_attempted", "source_finalized", "held"]
+    if (!["broadcast_attempted", "source_finalized",
+      "destination_finalized", "held"]
       .includes(row.state)) fail("direct_oft_canary_reconcile_state_invalid");
-    const evidence = await (deps.reconcileImpl ?? reconcileClaimedDirectOftBroadcast)({
-      journal: row, plan: config.plan, solanaRpcUrl: config.solanaRpcUrl,
-      primaryChilizRpcUrl: config.primaryChilizRpcUrl,
-      secondaryChilizRpcUrl: config.secondaryChilizRpcUrl,
-      fetchImpl: deps.fetchImpl,
-    });
-    return { state: "delivered", evidence };
+    const reconciled = await api.reconcile();
+    if (reconciled.sourceSignature !== row.sourceSignature) {
+      fail("direct_oft_canary_reconciliation_invalid");
+    }
+    return { state: "delivered", sourceSignature: reconciled.sourceSignature,
+      destinationTxHash: reconciled.destinationTxHash };
   }
   if (config.mode !== "broadcast" || row.state !== "prepared" ||
       row.broadcastAttemptedAtMs !== null) fail("direct_oft_canary_broadcast_state_invalid");
   const rpc = deps.rpc ?? new Connection(config.solanaRpcUrl, "confirmed");
-  await assertSolanaReserve(rpc, config.sourceWallet, config.plan.messagingFeeLamports);
+  await assertSolanaReserve(rpc, config.sourceWallet, plan.messagingFeeLamports);
   const expectedJournal = {
     id: row.id, sourceWallet: row.sourceWallet,
     destinationTreasury: row.destinationTreasury,
@@ -379,8 +426,8 @@ export async function runDirectOftCanary(config, deps = {}) {
     sourceSignature: row.sourceSignature,
     nowMs: Date.now(),
   };
-  return (deps.broadcastImpl ?? broadcastDirectOftChilizOnce)({
-    expectedJournal, plan: config.plan,
+  const outcome = await (deps.broadcastImpl ?? broadcastDirectOftChilizOnce)({
+    expectedJournal, plan,
     loadPersisted: async (id) => {
       if (id !== config.id) fail("direct_oft_canary_journal_id_invalid");
       const loaded = await api.load();
@@ -400,6 +447,13 @@ export async function runDirectOftCanary(config, deps = {}) {
     secondaryChilizRpcUrl: config.secondaryChilizRpcUrl,
     fetchImpl: deps.fetchImpl,
   });
+  if (outcome.state !== "delivered") return outcome;
+  const reconciled = await api.reconcile();
+  if (reconciled.sourceSignature !== row.sourceSignature) {
+    fail("direct_oft_canary_reconciliation_invalid");
+  }
+  return { state: "delivered", sourceSignature: reconciled.sourceSignature,
+    destinationTxHash: reconciled.destinationTxHash };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

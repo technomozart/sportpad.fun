@@ -801,6 +801,23 @@ export const chilizBridgeJournal = sqliteTable(
   ],
 );
 
+/** Exact unsigned OFT plan for the one-shot journal. It is inserted in the
+ * same transaction as the signed bytes and never updated or deleted; after a
+ * worker crash, the private API can revalidate the plan before reconciliation. */
+export const chilizBridgeCanaryPlans = sqliteTable(
+  "chiliz_bridge_canary_plans",
+  {
+    bridgeId: text("bridge_id").primaryKey().references(() => chilizBridgeJournal.id),
+    planJson: text("plan_json").notNull(),
+    planSha256: text("plan_sha256").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("chk_chiliz_bridge_canary_plan_json", sql`json_valid(${table.planJson}) AND json_type(${table.planJson}) = 'object' AND length(${table.planJson}) BETWEEN 100 AND 30000`),
+    check("chk_chiliz_bridge_canary_plan_sha", sql`length(${table.planSha256}) = 64 AND ${table.planSha256} NOT GLOB '*[^0-9a-f]*'`),
+  ],
+);
+
 /** Repeatable bridge accounting, separate from the immutable one-shot canary.
  * A transfer cannot be sealed until its exact CHZ source amount is allocated
  * from finalized SOL->CHZ swap outputs. No worker consumes this table yet.

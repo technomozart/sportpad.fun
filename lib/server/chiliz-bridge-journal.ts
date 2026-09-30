@@ -64,12 +64,17 @@ export const RESERVE_CHILIZ_BRIDGE_POLICY_SQL = `
 `;
 
 /** The raw signed transaction is bearer-spend data. Serve it only to the
- * authenticated funding worker, never from a public route. */
+ * authenticated funding worker, never from a public route. A paused policy
+ * still permits proof recovery of a transaction claimed before the pause;
+ * MARK_CHILIZ_BRIDGE_BROADCAST_SQL continues to reject new broadcasts. */
 export const SELECT_CHILIZ_BRIDGE_SQL = `
   SELECT b.* FROM chiliz_bridge_journal b
   JOIN chiliz_bridge_policy p ON p.key = b.policy_key
     AND p.reserved_bridge_id = b.id
-  WHERE b.id = ?1 AND p.state = 'reserved' LIMIT 1
+  WHERE b.id = ?1 AND (p.state = 'reserved' OR
+    (p.state = 'paused' AND b.state IN
+      ('broadcast_attempted', 'source_finalized', 'destination_finalized', 'held')))
+  LIMIT 1
 `;
 
 /** Persist this one-way marker before the first sendRawTransaction call. A

@@ -8,10 +8,13 @@ import { getAddress, padHex } from "viem";
 import { z } from "zod";
 import {
   ARM_CHILIZ_BRIDGE_POLICY_SQL, INSERT_PREPARED_CHILIZ_BRIDGE_SQL,
+  FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL, FINALIZE_CHILIZ_BRIDGE_SOURCE_SQL,
   MARK_CHILIZ_BRIDGE_BROADCAST_SQL, RESERVE_CHILIZ_BRIDGE_POLICY_SQL,
   SELECT_CHILIZ_BRIDGE_SQL, chilizBridgeJournalInsertBindings,
   type ChilizBridgeJournalInsert,
 } from "../../../../../lib/server/chiliz-bridge-journal.ts";
+import { reconcileClaimedDirectOftBroadcast } from
+  "../../../../../lib/server/providers/chiliz-direct-oft-broadcast.ts";
 import { prepareDirectOftChilizBridgeJournalInsert } from
   "../../../../../lib/server/providers/chiliz-direct-oft-journal.ts";
 import type { UnsignedDirectOftChzTransfer } from
@@ -24,11 +27,25 @@ const NATIVE_CHZ = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 // This one-shot live canary may spend at most 0.0005 SOL on OFT messaging.
 // The reusable quote builder has a separate, broader quote-only ceiling.
 const MAX_CANARY_MESSAGING_FEE_LAMPORTS = 500_000n;
+export const INSERT_CHILIZ_BRIDGE_CANARY_PLAN_SQL = `
+  INSERT INTO chiliz_bridge_canary_plans (bridge_id, plan_json, plan_sha256)
+  VALUES (?1, ?2, ?3)
+`;
+export const SELECT_CHILIZ_BRIDGE_CANARY_PLAN_SQL = `
+  SELECT plan_json, plan_sha256 FROM chiliz_bridge_canary_plans
+  WHERE bridge_id = ?1 LIMIT 1
+`;
 const SHA256 = /^[0-9a-f]{64}$/;
+const EVM_HASH = /^0x[0-9a-f]{64}$/;
 const POSITIVE = /^[1-9][0-9]*$/;
 const requestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("load"),
+    id: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/),
+    workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  }).strict(),
+  z.object({
+    action: z.literal("reconcile"),
     id: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_-]+$/),
     workerId: z.string().regex(/^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   }).strict(),
@@ -67,11 +84,15 @@ export type WorkerBridgeRow = Readonly<{
   signedTransactionBase64: string;
   signedTransactionSha256: string;
   sourceSignature: string;
-  state: "prepared" | "broadcast_attempted" | "source_finalized" | "held";
+  state: "prepared" | "broadcast_attempted" | "source_finalized" |
+    "destination_finalized" | "held";
   broadcastAttemptedAtMs: number | null;
   sourceFinalizedSlot: number | null;
   bridgeMessageId: string | null;
   destinationTxHash: string | null;
+  destinationReceivedWei: string | null;
+  plan: UnsignedDirectOftChzTransfer;
+  planSha256: string;
 }>;
 
 export type BridgeWorkerApiDependencies = Readonly<{
@@ -81,6 +102,10 @@ export type BridgeWorkerApiDependencies = Readonly<{
   prepareEnabled?: boolean;
   rewardTreasury: string | null;
   chilizTreasury: string | null;
+  solanaRpcUrl?: string | null;
+  primaryChilizRpcUrl?: string | null;
+  secondaryChilizRpcUrl?: string | null;
+  reconcileImpl?: typeof reconcileClaimedDirectOftBroadcast;
   nowMs?: () => number;
 }>;
 
@@ -130,6 +155,7 @@ const ASSERT_RESERVED_INTENT_SQL = `
   WHERE NOT EXISTS (
     SELECT 1 FROM chiliz_bridge_policy p
     JOIN chiliz_bridge_journal b ON b.id = p.reserved_bridge_id
+    JOIN chiliz_bridge_canary_plans cp ON cp.bridge_id = b.id
     WHERE p.key = 'initial' AND p.state = 'reserved'
       AND p.reserved_bridge_id = ?1
       AND p.source_wallet = ?2 AND p.destination_treasury = ?3
@@ -140,31 +166,50 @@ const ASSERT_RESERVED_INTENT_SQL = `
       AND b.signed_transaction_base64 = ?8
       AND b.signed_transaction_sha256 = ?9
       AND b.source_signature = ?10
+      AND cp.plan_json = ?11 AND cp.plan_sha256 = ?12
   )
 `;
 
+async function planPayload(plan: UnsignedDirectOftChzTransfer): Promise<{
+  json: string; sha256: string;
+}> {
+  const json = JSON.stringify(plan);
+  if (typeof json !== "string" || json.length < 100 || json.length > 30_000) {
+    throw new Error("bridge_worker_plan_invalid");
+  }
+  const sha256 = Buffer.from(await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(json))).toString("hex");
+  return { json, sha256 };
+}
+
 /** Single transactional prepare+arm+reserve; never available without flags. */
 export async function reservePreparedDirectOftCanary(database: D1Database,
-  intent: ChilizBridgeJournalInsert): Promise<boolean> {
+  intent: ChilizBridgeJournalInsert,
+  plan: UnsignedDirectOftChzTransfer): Promise<boolean> {
+  const persistedPlan = await planPayload(plan);
   const statements = [
     database.prepare(SEED_PAUSED_POLICY_SQL).bind(
       intent.sourceWallet, intent.destinationTreasury),
     database.prepare(ARM_CHILIZ_BRIDGE_POLICY_SQL),
     database.prepare(INSERT_PREPARED_CHILIZ_BRIDGE_SQL)
       .bind(...chilizBridgeJournalInsertBindings(intent)),
+    database.prepare(INSERT_CHILIZ_BRIDGE_CANARY_PLAN_SQL).bind(
+      intent.id, persistedPlan.json, persistedPlan.sha256),
     database.prepare(RESERVE_CHILIZ_BRIDGE_POLICY_SQL).bind(intent.id),
     database.prepare(ASSERT_RESERVED_INTENT_SQL).bind(intent.id,
       intent.sourceWallet, intent.destinationTreasury,
       intent.sourceAmountAtomic, intent.minimumDestinationWei,
       intent.quoteId, intent.quoteExpiresAtMs, intent.signedTransactionBase64,
-      intent.signedTransactionSha256, intent.sourceSignature),
+      intent.signedTransactionSha256, intent.sourceSignature,
+      persistedPlan.json, persistedPlan.sha256),
   ];
   // D1 batch is transactional: an assertion CHECK failure rolls back seed,
   // arm, intent and reservation together.
   const result = await database.batch(statements);
-  return result.length === 5 && result.every((entry) => entry.success) &&
+  return result.length === 6 && result.every((entry) => entry.success) &&
     result[1].meta.changes === 1 && result[2].meta.changes === 1 &&
-    result[3].meta.changes === 1 && result[4].meta.changes === 0;
+    result[3].meta.changes === 1 && result[4].meta.changes === 1 &&
+    result[5].meta.changes === 0;
 }
 
 function rawString(row: RawRow, name: string): string {
@@ -192,7 +237,8 @@ function optionalInteger(row: RawRow, name: string): number | null {
 }
 
 async function parseRow(raw: unknown, expectedId: string,
-  treasuries: { source: string; destination: string }): Promise<WorkerBridgeRow> {
+  treasuries: { source: string; destination: string },
+  database: D1Database): Promise<WorkerBridgeRow> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("bridge_worker_row_invalid");
   }
@@ -208,6 +254,10 @@ async function parseRow(raw: unknown, expectedId: string,
   const quoteExpiresAtMs = rawInteger(row, "quote_expires_at_ms");
   const state = rawString(row, "state");
   const broadcastAttemptedAtMs = optionalInteger(row, "broadcast_attempted_at_ms");
+  const sourceFinalizedSlot = optionalInteger(row, "source_finalized_slot");
+  const bridgeMessageId = optionalString(row, "bridge_message_id");
+  const destinationTxHash = optionalString(row, "destination_tx_hash");
+  const destinationReceivedWei = optionalString(row, "destination_received_wei");
   if (rawString(row, "id") !== expectedId ||
       rawString(row, "policy_key") !== "initial" ||
       rawString(row, "source_chain") !== "solana" ||
@@ -225,10 +275,24 @@ async function parseRow(raw: unknown, expectedId: string,
       !/^oft:[0-9a-f]{64}$/.test(quoteId) ||
       !SHA256.test(signedTransactionSha256) ||
       quoteExpiresAtMs <= 0 ||
-      !["prepared", "broadcast_attempted", "source_finalized", "held"].includes(state) ||
+      !["prepared", "broadcast_attempted", "source_finalized",
+        "destination_finalized", "held"].includes(state) ||
       state === "prepared" && broadcastAttemptedAtMs !== null ||
       state !== "prepared" && (broadcastAttemptedAtMs === null ||
-        broadcastAttemptedAtMs <= 0)) {
+        broadcastAttemptedAtMs <= 0) ||
+      (sourceFinalizedSlot === null) !== (bridgeMessageId === null) ||
+      sourceFinalizedSlot !== null && sourceFinalizedSlot <= 0 ||
+      bridgeMessageId !== null && !EVM_HASH.test(bridgeMessageId) ||
+      ["prepared", "broadcast_attempted"].includes(state) &&
+        sourceFinalizedSlot !== null ||
+      ["source_finalized", "destination_finalized"].includes(state) &&
+        sourceFinalizedSlot === null ||
+      state === "destination_finalized" &&
+        (destinationTxHash === null || !EVM_HASH.test(destinationTxHash) ||
+          destinationReceivedWei === null || !POSITIVE.test(destinationReceivedWei) ||
+          BigInt(destinationReceivedWei) < BigInt(minimumDestinationWei)) ||
+      state !== "destination_finalized" &&
+        (destinationTxHash !== null || destinationReceivedWei !== null)) {
     throw new Error("bridge_worker_row_invalid");
   }
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signedTransactionBase64)) {
@@ -287,6 +351,38 @@ async function parseRow(raw: unknown, expectedId: string,
       decoded.nativeFee > MAX_CANARY_MESSAGING_FEE_LAMPORTS) {
     throw new Error("bridge_worker_row_invalid");
   }
+  const planRow = await database.prepare(SELECT_CHILIZ_BRIDGE_CANARY_PLAN_SQL)
+    .bind(expectedId).first<{ plan_json: string; plan_sha256: string }>();
+  if (!planRow || typeof planRow.plan_json !== "string" ||
+      typeof planRow.plan_sha256 !== "string" || !SHA256.test(planRow.plan_sha256) ||
+      planRow.plan_json.length < 100 || planRow.plan_json.length > 30_000) {
+    throw new Error("bridge_worker_plan_missing");
+  }
+  const actualPlanHash = Buffer.from(await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(planRow.plan_json))).toString("hex");
+  if (actualPlanHash !== planRow.plan_sha256) {
+    throw new Error("bridge_worker_plan_digest_mismatch");
+  }
+  let plan: UnsignedDirectOftChzTransfer;
+  try { plan = JSON.parse(planRow.plan_json) as UnsignedDirectOftChzTransfer; }
+  catch { throw new Error("bridge_worker_plan_invalid"); }
+  // Revalidate exact plan+signed bytes using a historical quote time solely
+  // for read-only identity proof. Actual quote freshness is checked at claim.
+  const verified = await prepareDirectOftChilizBridgeJournalInsert({
+    id: expectedId, plan, expectedSourceWallet: sourceWallet,
+    expectedDestinationTreasury: destinationTreasury,
+    signedTransactionBase64,
+    nowMs: quoteExpiresAtMs - 60_000,
+  });
+  if (verified.sourceAmountAtomic !== sourceAmountAtomic ||
+      verified.minimumDestinationWei !== minimumDestinationWei ||
+      verified.quoteId !== quoteId ||
+      verified.quoteExpiresAtMs !== quoteExpiresAtMs ||
+      verified.sourceSignature !== sourceSignature ||
+      verified.signedTransactionSha256 !== signedTransactionSha256 ||
+      BigInt(plan.messagingFeeLamports) > MAX_CANARY_MESSAGING_FEE_LAMPORTS) {
+    throw new Error("bridge_worker_plan_journal_mismatch");
+  }
   return {
     id: expectedId, policyKey: "initial", sourceChain: "solana",
     destinationChainId: 88_888, sourceMint: MINT, destinationAsset: NATIVE_CHZ,
@@ -294,10 +390,20 @@ async function parseRow(raw: unknown, expectedId: string,
     quoteId, quoteExpiresAtMs, routeType: "OFT", signedTransactionBase64,
     signedTransactionSha256, sourceSignature,
     state: state as WorkerBridgeRow["state"], broadcastAttemptedAtMs,
-    sourceFinalizedSlot: optionalInteger(row, "source_finalized_slot"),
-    bridgeMessageId: optionalString(row, "bridge_message_id"),
-    destinationTxHash: optionalString(row, "destination_tx_hash"),
+    sourceFinalizedSlot, bridgeMessageId, destinationTxHash,
+    destinationReceivedWei,
+    plan, planSha256: planRow.plan_sha256,
   };
+}
+
+function reconciledResponse(row: Pick<WorkerBridgeRow,
+  "sourceSignature" | "bridgeMessageId" | "destinationTxHash" |
+  "destinationReceivedWei">): Response {
+  return response({ state: "destination_finalized",
+    sourceSignature: row.sourceSignature,
+    bridgeMessageId: row.bridgeMessageId,
+    destinationTxHash: row.destinationTxHash,
+    receivedWei: row.destinationReceivedWei }, 200);
 }
 
 /** No prepare, arm, broadcast, or public read operation exists here. */
@@ -343,12 +449,13 @@ export async function handleChilizBridgeWorkerRequest(request: Request,
       });
     } catch { return response({ error: "Signed bridge intent invalid." }, 400); }
     try {
-      if (!await reservePreparedDirectOftCanary(deps.database, intent)) {
+      if (!await reservePreparedDirectOftCanary(deps.database, intent,
+        input.plan as UnsignedDirectOftChzTransfer)) {
         return response({ error: "Bridge reservation rejected." }, 409);
       }
       const raw = await deps.database.prepare(SELECT_CHILIZ_BRIDGE_SQL)
         .bind(intent.id).first<RawRow>();
-      const row = await parseRow(raw, intent.id, treasuries);
+      const row = await parseRow(raw, intent.id, treasuries, deps.database);
       if (row.state !== "prepared" || row.signedTransactionSha256 !==
           intent.signedTransactionSha256 || row.sourceSignature !== intent.sourceSignature) {
         throw new Error("bridge_worker_prepare_readback_invalid");
@@ -361,9 +468,74 @@ export async function handleChilizBridgeWorkerRequest(request: Request,
     const raw = await deps.database.prepare(SELECT_CHILIZ_BRIDGE_SQL)
       .bind(input.id).first<RawRow>();
     if (!raw) return response({ error: "Reserved bridge intent not found." }, 404);
-    row = await parseRow(raw, input.id, treasuries);
+    row = await parseRow(raw, input.id, treasuries, deps.database);
   } catch { return response({ error: "Reserved bridge intent unavailable." }, 503); }
   if (input.action === "load") return response({ journal: row }, 200);
+  if (input.action === "reconcile") {
+    if (row.state === "destination_finalized") return reconciledResponse(row);
+    if (row.state === "prepared") {
+      return response({ error: "Bridge broadcast has not been claimed." }, 409);
+    }
+    if (!deps.solanaRpcUrl || !deps.primaryChilizRpcUrl ||
+        !deps.secondaryChilizRpcUrl) {
+      return response({ error: "Bridge reconciliation RPC unavailable." }, 503);
+    }
+    let proof: Awaited<ReturnType<typeof reconcileClaimedDirectOftBroadcast>>;
+    try {
+      proof = await (deps.reconcileImpl ?? reconcileClaimedDirectOftBroadcast)({
+        journal: row, plan: row.plan,
+        solanaRpcUrl: deps.solanaRpcUrl,
+        primaryChilizRpcUrl: deps.primaryChilizRpcUrl,
+        secondaryChilizRpcUrl: deps.secondaryChilizRpcUrl,
+      });
+    } catch {
+      return response({ error: "Bridge delivery not yet verified." }, 409);
+    }
+    const source = proof.source;
+    const destination = proof.destination;
+    const finalizedBlock = Number(destination.finalizedBlock);
+    if (proof.journalId !== row.id || proof.guid !== source.bridgeMessageId ||
+        proof.guid !== destination.bridgeMessageId ||
+        source.sourceSignature !== row.sourceSignature ||
+        source.sourceWallet !== row.sourceWallet ||
+        source.quoteId !== row.quoteId ||
+        source.sourceAmountAtomic !== row.sourceAmountAtomic ||
+        source.signedTransactionSha256 !== row.signedTransactionSha256 ||
+        destination.destinationTreasury !== row.destinationTreasury ||
+        destination.destinationAsset !== row.destinationAsset ||
+        destination.chainId !== row.destinationChainId ||
+        !Number.isSafeInteger(finalizedBlock) || finalizedBlock <= 0 ||
+        !POSITIVE.test(destination.receivedWei) ||
+        BigInt(destination.receivedWei) < BigInt(row.minimumDestinationWei)) {
+      return response({ error: "Bridge delivery proof invalid." }, 409);
+    }
+    try {
+      if (row.sourceFinalizedSlot === null) {
+        const saved = await deps.database.prepare(FINALIZE_CHILIZ_BRIDGE_SOURCE_SQL)
+          .bind(row.id, row.sourceSignature, source.finalizedSlot,
+            JSON.stringify(source), proof.guid).run();
+        if (!saved.success || saved.meta.changes !== 1) {
+          return response({ error: "Bridge source finalization rejected." }, 409);
+        }
+      } else if (row.sourceFinalizedSlot !== source.finalizedSlot ||
+          row.bridgeMessageId !== proof.guid) {
+        return response({ error: "Bridge source proof conflicts." }, 409);
+      }
+      const saved = await deps.database.prepare(FINALIZE_CHILIZ_BRIDGE_DESTINATION_SQL)
+        .bind(row.id, proof.guid, destination.transactionHash,
+          destination.finalizedBlock,
+          destination.receivedWei, JSON.stringify(destination)).run();
+      if (!saved.success || saved.meta.changes !== 1) {
+        return response({ error: "Bridge destination finalization rejected." }, 409);
+      }
+    } catch {
+      return response({ error: "Bridge finalization unavailable." }, 503);
+    }
+    return reconciledResponse({ sourceSignature: row.sourceSignature,
+      bridgeMessageId: proof.guid,
+      destinationTxHash: destination.transactionHash,
+      destinationReceivedWei: destination.receivedWei });
+  }
   if (row.state !== "prepared" ||
       input.sourceSignature !== row.sourceSignature ||
       input.signedTransactionSha256 !== row.signedTransactionSha256) {
